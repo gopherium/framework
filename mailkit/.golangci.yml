@@ -28,6 +28,7 @@ linters:
         mailer-purity:
           list-mode: strict
           files:
+            - "**/*.go"
           allow:
             - $gostd
             - github.com/wneessen/go-mail
