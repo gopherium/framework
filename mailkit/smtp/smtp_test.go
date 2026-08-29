@@ -235,27 +235,32 @@ func hasRecipient(seen map[string]bool, address string) bool {
 func TestSendOffersTheConfiguredCredentials(t *testing.T) {
 	t.Parallel()
 
-	server := relay(t)
+	relay := newAuthRelay(t)
 	sender, err := smtp.New(smtp.Config{
 		Host:     "127.0.0.1",
-		Port:     server.PortNumber(),
+		Port:     relay.port,
 		From:     "crm@example.com",
 		TLS:      smtp.TLSOpportunistic,
 		HELO:     "example.com",
 		Username: "crm",
 		Password: "a long enough secret",
+		Timeout:  5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("smtp.New() error = %v, want nil", err)
 	}
 
-	sendErr := sender.Send(t.Context(), mailkit.Message{To: "maria@example.com", Subject: "S", Body: "B"})
-
-	if sendErr == nil {
-		t.Fatal("Send() error = nil, want the relay refusing the offered authentication")
+	if err := sender.Send(t.Context(), mailkit.Message{To: "maria@example.com", Subject: "S", Body: "B"}); err == nil {
+		t.Fatal("Send() error = nil, want the relay refusing the credentials")
 	}
-	if !strings.Contains(sendErr.Error(), "AUTH") {
-		t.Errorf("Send() error = %v, want authentication to have been attempted", sendErr)
+
+	select {
+	case answered := <-relay.answered:
+		if want := cramAnswer("crm", "a long enough secret"); answered != want {
+			t.Errorf("credential answered = %q, want %q", answered, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the relay was offered no credentials, want the configured pair")
 	}
 }
 
