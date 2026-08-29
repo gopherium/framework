@@ -54,7 +54,7 @@ func (t *Templates) Render(name string, data any) (Message, error) {
 
 // read answers the named file from the override directory, else the defaults.
 func (t *Templates) read(name string) ([]byte, error) {
-	if !fs.ValidPath(name) || name == "." || strings.Contains(name, "/") {
+	if !fs.ValidPath(name) || name == "." || strings.ContainsAny(name, `/\`) {
 		return nil, fmt.Errorf("mailkit: template name %q: %w", name, fs.ErrInvalid)
 	}
 	if t.overrideDir != "" {

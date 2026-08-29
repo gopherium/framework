@@ -268,9 +268,10 @@ func TestRenderRefusesAPathTraversingName(t *testing.T) {
 
 	tpls := templates(t, defaultsWith("Subject\nBody"), t.TempDir())
 
-	for _, name := range []string{"../invite.tmpl", "nested/invite.tmpl", ""} {
-		if _, err := tpls.Render(name, nil); err == nil {
-			t.Errorf("Render(%q) error = nil, want the name refused", name)
+	for _, name := range []string{"../invite.tmpl", "nested/invite.tmpl", "", `..\invite.tmpl`, `nested\invite.tmpl`} {
+		_, err := tpls.Render(name, nil)
+		if !errors.Is(err, fs.ErrInvalid) {
+			t.Errorf("Render(%q) error = %v, want the name refused as invalid", name, err)
 		}
 	}
 }
