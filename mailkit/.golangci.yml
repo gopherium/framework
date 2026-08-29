@@ -1,0 +1,51 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - cyclop
+    - depguard
+    - gocognit
+    - lll
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    cyclop:
+      max-complexity: 10
+    gocognit:
+      min-complexity: 15
+    lll:
+      line-length: 120
+    revive:
+      rules:
+        - name: blank-imports
+          disabled: true
+        - name: exported
+    depguard:
+      rules:
+        mailer-purity:
+          list-mode: strict
+          files:
+            - "**/*.go"
+          allow:
+            - $gostd
+            - github.com/wneessen/go-mail
+            - github.com/mocktools/go-smtp-mock/v2
+            - github.com/gopherium/framework/mailkit
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - cyclop
+          - gocognit
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/gopherium/framework

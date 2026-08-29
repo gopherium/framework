@@ -9,6 +9,11 @@ need and ignore the rest.
 > while they mature. Pin a version and read the module's CHANGELOG
 > before upgrading. Production use is at your own risk until v1.
 
+## Modules
+
+- [`mailkit`](mailkit/) renders mail from template files and sends it
+  over SMTP.
+
 ## Design
 
 One repository, one Go module per brick, no shared code between them.
@@ -17,8 +22,6 @@ lint configuration, and is released independently under a path
 prefixed tag such as `mailkit/v0.1.0`. Modules depend on published
 versions only, never on sibling source, so what you pin is what you
 get.
-
-Guides live at [docs.gopherium.org](https://docs.gopherium.org).
 
 ## Reporting security issues
 
