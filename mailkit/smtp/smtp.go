@@ -5,6 +5,7 @@ package smtp
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -39,6 +40,8 @@ type Config struct {
 	TLS      TLS
 	HELO     string
 	Timeout  time.Duration
+	// TLSConfig names the roots a relay is verified against. Nil verifies against the system roots.
+	TLSConfig *tls.Config
 }
 
 // Sender delivers mailkit messages through one relay, safe to share
@@ -131,6 +134,9 @@ func options(cfg Config) ([]gomail.Option, error) {
 	if cfg.HELO != "" {
 		opts = append(opts, gomail.WithHELO(cfg.HELO))
 	}
+	if cfg.TLSConfig != nil {
+		opts = append(opts, gomail.WithTLSConfig(cfg.TLSConfig))
+	}
 	return append(opts, auth...), nil
 }
 
@@ -142,8 +148,8 @@ func credentials(cfg Config) ([]gomail.Option, error) {
 	if cfg.Username == "" || cfg.Password == "" {
 		return nil, errors.New("mailkit/smtp: username and password go together")
 	}
-	if cfg.TLS == TLSNone {
-		return nil, errors.New("mailkit/smtp: credentials need transport security")
+	if cfg.TLS != TLSMandatory && cfg.TLS != "" {
+		return nil, errors.New("mailkit/smtp: credentials need mandatory transport security")
 	}
 	return []gomail.Option{
 		gomail.WithSMTPAuth(gomail.SMTPAuthAutoDiscover),

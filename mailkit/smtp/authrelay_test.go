@@ -4,36 +4,49 @@ package smtp_test
 
 import (
 	"bufio"
-	"crypto/hmac"
-	"crypto/md5"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"fmt"
+	"math/big"
 	"net"
 	"strings"
 	"testing"
 	"time"
 )
 
-// authRelay is a relay that offers challenge response authentication and keeps what it is answered.
+// authRelay is a relay that upgrades to TLS, offers authentication and keeps what it is answered.
 type authRelay struct {
 	port     int
+	roots    *x509.CertPool
+	cert     tls.Certificate
 	answered chan string
 }
 
-// newAuthRelay starts a relay offering CRAM-MD5 and answering every credential with a refusal.
+// newAuthRelay starts a relay that offers STARTTLS then authentication, refusing every credential.
 func newAuthRelay(t *testing.T) *authRelay {
 	t.Helper()
+	cert, roots := selfSigned(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listening: %v", err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
-	relay := &authRelay{port: listener.Addr().(*net.TCPAddr).Port, answered: make(chan string, 1)}
+	relay := &authRelay{
+		port:     listener.Addr().(*net.TCPAddr).Port,
+		roots:    roots,
+		cert:     cert,
+		answered: make(chan string, 1),
+	}
 	go relay.accept(listener)
 	return relay
 }
 
-// accept serves one session at a time until the listener closes.
+// accept serves sessions until the listener closes.
 func (a *authRelay) accept(listener net.Listener) {
 	for {
 		conn, err := listener.Accept()
@@ -44,12 +57,13 @@ func (a *authRelay) accept(listener net.Listener) {
 	}
 }
 
-// serve walks one session as far as the credential and then refuses it.
+// serve walks one session through the upgrade to the credential and refuses it.
 func (a *authRelay) serve(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	reader := bufio.NewReader(conn)
 	_, _ = fmt.Fprint(conn, "220 relay\r\n")
+	secured := false
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -57,18 +71,20 @@ func (a *authRelay) serve(conn net.Conn) {
 		}
 		switch {
 		case strings.HasPrefix(line, "EHLO"), strings.HasPrefix(line, "HELO"):
-			_, _ = fmt.Fprint(conn, "250-relay\r\n250 AUTH CRAM-MD5\r\n")
-		case strings.HasPrefix(line, "AUTH CRAM-MD5"):
-			_, _ = fmt.Fprintf(conn, "334 %s\r\n", base64.StdEncoding.EncodeToString([]byte(cramChallenge)))
-			answer, err := reader.ReadString('\n')
-			if err != nil {
+			if secured {
+				_, _ = fmt.Fprint(conn, "250-relay\r\n250 AUTH PLAIN\r\n")
+				continue
+			}
+			_, _ = fmt.Fprint(conn, "250-relay\r\n250 STARTTLS\r\n")
+		case strings.HasPrefix(line, "STARTTLS"):
+			_, _ = fmt.Fprint(conn, "220 go ahead\r\n")
+			secure := tls.Server(conn, &tls.Config{Certificates: []tls.Certificate{a.cert}})
+			if err := secure.Handshake(); err != nil {
 				return
 			}
-			raw, _ := base64.StdEncoding.DecodeString(strings.TrimSpace(answer))
-			select {
-			case a.answered <- string(raw):
-			default:
-			}
+			conn, reader, secured = secure, bufio.NewReader(secure), true
+		case strings.HasPrefix(line, "AUTH PLAIN"):
+			a.keep(strings.TrimSpace(strings.TrimPrefix(line, "AUTH PLAIN")))
 			_, _ = fmt.Fprint(conn, "535 refused\r\n")
 		default:
 			_, _ = fmt.Fprint(conn, "250 ok\r\n")
@@ -76,12 +92,44 @@ func (a *authRelay) serve(conn net.Conn) {
 	}
 }
 
-// cramChallenge is the fixed challenge the relay offers.
-const cramChallenge = "<mailkit@example.com>"
+// keep decodes one offered credential and records it.
+func (a *authRelay) keep(encoded string) {
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return
+	}
+	select {
+	case a.answered <- strings.ReplaceAll(string(raw), "\x00", " "):
+	default:
+	}
+}
 
-// cramAnswer answers what a client holding the credentials must reply to cramChallenge.
-func cramAnswer(username, password string) string {
-	mac := hmac.New(md5.New, []byte(password))
-	mac.Write([]byte(cramChallenge))
-	return fmt.Sprintf("%s %x", username, mac.Sum(nil))
+// selfSigned returns a certificate for the loopback address and the roots trusting it.
+func selfSigned(t *testing.T) (tls.Certificate, *x509.CertPool) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating the key: %v", err)
+	}
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "relay.example.com"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IsCA:         true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("creating the certificate: %v", err)
+	}
+	parsed, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parsing the certificate: %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(parsed)
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: parsed}, roots
 }

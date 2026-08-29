@@ -23,11 +23,16 @@ Releases of this module are tagged `mailkit/vX.Y.Z`.
   filename, read at render time.
 - `smtp.Sender` and `smtp.New`, delivering over SMTP through go-mail.
 - `smtp.Config`, naming the relay host, port, credentials, sender
-  address, transport security, HELO name and timeout.
+  address, transport security, HELO name, timeout and trust roots.
+- Credentials require mandatory transport security, so a relay that
+  drops the upgrade never receives them.
 - `smtp.TLS` with `TLSMandatory`, `TLSOpportunistic` and `TLSNone`, over
   STARTTLS alone, so a relay speaking implicit TLS on port 465 is not
   reachable and fails as a dial timeout. An empty value applies
   mandatory.
+- `smtp.Config.TLSConfig`, naming the roots a relay is verified against,
+  so a relay holding a private certificate is reachable. Nil verifies
+  against the system roots.
 - `smtp.DefaultPort`, the submission port 587 a sender dials when the
   config names none.
 - `testkit.Sender` with `Messages` and `Err`, keeping messages rather

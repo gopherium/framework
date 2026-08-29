@@ -4,6 +4,7 @@ package smtp_test
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"strings"
 	"testing"
@@ -232,19 +233,20 @@ func hasRecipient(seen map[string]bool, address string) bool {
 	return false
 }
 
-func TestSendOffersTheConfiguredCredentials(t *testing.T) {
+func TestSendOffersTheConfiguredCredentialsOverTLS(t *testing.T) {
 	t.Parallel()
 
 	relay := newAuthRelay(t)
 	sender, err := smtp.New(smtp.Config{
-		Host:     "127.0.0.1",
-		Port:     relay.port,
-		From:     "crm@example.com",
-		TLS:      smtp.TLSOpportunistic,
-		HELO:     "example.com",
-		Username: "crm",
-		Password: "a long enough secret",
-		Timeout:  5 * time.Second,
+		Host:      "127.0.0.1",
+		Port:      relay.port,
+		From:      "crm@example.com",
+		TLS:       smtp.TLSMandatory,
+		HELO:      "example.com",
+		Username:  "crm",
+		Password:  "a long enough secret",
+		Timeout:   10 * time.Second,
+		TLSConfig: &tls.Config{RootCAs: relay.roots, ServerName: "127.0.0.1", MinVersion: tls.VersionTLS12},
 	})
 	if err != nil {
 		t.Fatalf("smtp.New() error = %v, want nil", err)
@@ -256,10 +258,10 @@ func TestSendOffersTheConfiguredCredentials(t *testing.T) {
 
 	select {
 	case answered := <-relay.answered:
-		if want := cramAnswer("crm", "a long enough secret"); answered != want {
+		if want := " crm a long enough secret"; answered != want {
 			t.Errorf("credential answered = %q, want %q", answered, want)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Error("the relay was offered no credentials, want the configured pair")
 	}
 }
@@ -320,6 +322,10 @@ func TestNewRefusesAnUnusableConfig(t *testing.T) {
 		},
 		"credentials without transport security": {
 			Host: "127.0.0.1", From: "crm@example.com", TLS: smtp.TLSNone,
+			Username: "crm", Password: "a long enough secret",
+		},
+		"credentials over downgradable transport security": {
+			Host: "127.0.0.1", From: "crm@example.com", TLS: smtp.TLSOpportunistic,
 			Username: "crm", Password: "a long enough secret",
 		},
 	}
