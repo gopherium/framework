@@ -97,10 +97,10 @@ func TestRenderFallsBackToTheDefaults(t *testing.T) {
 	m, err := tpls.Render("invite.tmpl", nil)
 
 	if err != nil {
-		t.Fatalf("Render() error = %v, want the embedded default used", err)
+		t.Fatalf("Render() error = %v, want the default used", err)
 	}
 	if m.Subject != "Default subject" {
-		t.Errorf("subject = %q, want the embedded default", m.Subject)
+		t.Errorf("subject = %q, want the default", m.Subject)
 	}
 }
 

@@ -16,9 +16,7 @@ import (
 	"github.com/gopherium/framework/mailkit"
 )
 
-// TLS names the transport security a relay is held to. Mandatory and
-// opportunistic both mean STARTTLS, so a relay speaking implicit TLS on
-// port 465 is not reachable and fails as a dial timeout.
+// TLS names the transport security a relay is held to, over STARTTLS alone.
 type TLS string
 
 // The transport security policies a sender accepts.
@@ -43,10 +41,9 @@ type Config struct {
 	Timeout  time.Duration
 }
 
-// Sender delivers mailkit messages through one relay. It is safe to
-// share across goroutines, and it dials once per message. Cancelling
-// the context governs the dial alone, so a transmission already under
-// way is not aborted and its mail may still arrive.
+// Sender delivers mailkit messages through one relay, safe to share
+// across goroutines, dialing once per message under a context that
+// governs the dial alone.
 type Sender struct {
 	client *gomail.Client
 	from   *mail.Address

@@ -18,7 +18,7 @@ type Templates struct {
 	overrideDir string
 }
 
-// NewTemplates returns Templates over the embedded defaults and an optional override directory.
+// NewTemplates returns Templates over the caller's default files and an optional override directory.
 func NewTemplates(defaults fs.FS, overrideDir string) (*Templates, error) {
 	if defaults == nil {
 		return nil, errors.New("mailkit: nil defaults filesystem")
