@@ -8,7 +8,7 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `mailkit/vX.Y.Z`.
 
-## [Unreleased]
+## [0.1.0] - 2026-08-30
 
 ### Added
 
@@ -38,3 +38,5 @@ Releases of this module are tagged `mailkit/vX.Y.Z`.
 - `testkit.Sender` with `Messages` and `Err`, keeping messages rather
   than delivering them and answering the same refusals a delivering
   sender answers.
+
+[0.1.0]: https://github.com/gopherium/framework/releases/tag/mailkit%2Fv0.1.0
