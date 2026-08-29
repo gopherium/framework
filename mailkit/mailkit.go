@@ -16,7 +16,9 @@ type Message struct {
 
 // Sender delivers one message.
 type Sender interface {
-	// Send delivers m, refusing an empty To with ErrNoRecipient.
+	// Send delivers m, answering ErrNoRecipient for an empty To,
+	// ErrInvalidRecipient for an address the transport refuses, and a
+	// wrapped delivery error the caller treats as one thing otherwise.
 	Send(ctx context.Context, m Message) error
 }
 
