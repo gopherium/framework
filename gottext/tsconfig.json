@@ -1,0 +1,21 @@
+{
+	"compilerOptions": {
+		"target": "es2023",
+		"lib": ["ES2023"],
+		"module": "esnext",
+		"types": ["node"],
+		"skipLibCheck": true,
+		"strict": true,
+
+		"moduleResolution": "bundler",
+		"verbatimModuleSyntax": true,
+		"moduleDetection": "force",
+		"noEmit": true,
+
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"erasableSyntaxOnly": true,
+		"noFallthroughCasesInSwitch": true
+	},
+	"include": ["src", "test", "vitest.config.ts"]
+}
