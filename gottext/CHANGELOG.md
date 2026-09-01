@@ -2,7 +2,8 @@
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/). While at 0.x,
-minor releases may break. Releases are tagged `vX.Y.Z` and publish from CI.
+minor releases may break. Releases are tagged `gottext/vX.Y.Z` and publish
+from CI.
 
 ## [0.3.0] - 2026-08-25
 
