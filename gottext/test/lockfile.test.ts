@@ -21,6 +21,36 @@ snapshots:
   '@wordpress/i18n@9.9.9': {}
 `
 
+const PEER_LOCKFILE = `
+packages:
+
+  'plain@1.2.3':
+    resolution: {integrity: sha512-c}
+
+  '@scoped/tool@4.10.1(eslint@9.18.0)(typescript@5.7.3)':
+    resolution: {integrity: sha512-d}
+
+  peer-tool@2.0.0(eslint@9.18.0):
+    resolution: {integrity: sha512-e}
+
+snapshots:
+
+  'plain@9.9.9': {}
+`
+
+const SPLIT_LOCKFILE = `
+packages:
+
+  '@scoped/tool@4.10.1(eslint@9.18.0)(typescript@5.7.3)':
+    resolution: {integrity: sha512-f}
+
+  '@scoped/tool@4.10.1(eslint@8.57.0)':
+    resolution: {integrity: sha512-g}
+
+  '@scoped/tool@4.11.0(eslint@9.18.0)':
+    resolution: {integrity: sha512-h}
+`
+
 test('names every version a lockfile resolves for a package', () => {
 	expect(resolvedVersions(LOCKFILE, '@wordpress/i18n')).toEqual(['6.26.0'])
 })
@@ -37,6 +67,22 @@ test('reads a lockfile whose packages run to the end', () => {
 	const held = "\npackages:\n  left-pad@1.3.0:\n    resolution: {integrity: sha512-x}\n"
 
 	expect(resolvedVersions(held, 'left-pad')).toEqual(['1.3.0'])
+})
+
+test('a peer qualified scoped key answers its bare version', () => {
+	expect(resolvedVersions(PEER_LOCKFILE, '@scoped/tool')).toEqual(['4.10.1'])
+})
+
+test('a peer qualified unscoped key answers its bare version', () => {
+	expect(resolvedVersions(PEER_LOCKFILE, 'peer-tool')).toEqual(['2.0.0'])
+})
+
+test('a plain key beside peer qualified keys keeps its version', () => {
+	expect(resolvedVersions(PEER_LOCKFILE, 'plain')).toEqual(['1.2.3'])
+})
+
+test('a package resolved under different peer sets answers each bare version once', () => {
+	expect(resolvedVersions(SPLIT_LOCKFILE, '@scoped/tool')).toEqual(['4.10.1', '4.11.0'])
 })
 
 test('names the version each package pins', () => {
