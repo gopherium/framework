@@ -198,7 +198,12 @@ function restoring(
 	entry: GetTextTranslation,
 ): void {
 	const entries: Record<string, GetTextTranslation> = ownEntry(held.translations, context) ?? {}
-	held.translations[context] = entries
+	Object.defineProperty(held.translations, context, {
+		value: entries,
+		writable: true,
+		enumerable: true,
+		configurable: true,
+	})
 	const arrived = ownEntry(entries, msgid)
 	if (arrived === undefined) {
 		entries[msgid] = entry
@@ -263,9 +268,9 @@ export function keepingAnswers(current: string, incoming: string, template: stri
  * @returns Whether the export answers at least as many forms as the committed entry, all filled.
  */
 function settledBy(entry: GetTextTranslation, arrived: GetTextTranslation): boolean {
-	return arrived.msgstr.length >= entry.msgstr.length
-		&& arrived.msgstr.length > 0
+	return arrived.msgstr.length > 0
 		&& arrived.msgstr.every((form) => form !== '')
+		&& entry.msgstr.every((form, at) => form === '' || arrived.msgstr[at] !== undefined)
 }
 
 /**

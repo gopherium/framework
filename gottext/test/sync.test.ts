@@ -331,6 +331,17 @@ test('an answer under a constructor context survives the merge and pollutes noth
 	expect(Object.hasOwn(globalThis.Object, 'Older posts')).toBe(false)
 })
 
+test('an answer under a proto context survives the merge', () => {
+	const naming = 'msgctxt "__proto__"\nmsgid "Older posts"\nmsgstr ""\n'
+	const ours = 'msgid ""\nmsgstr ""\n\nmsgctxt "__proto__"\nmsgid "Older posts"\nmsgstr "Entradas anteriores"\n'
+	const theirs = 'msgid ""\nmsgstr ""\n'
+
+	const held = keepingAnswers(ours, theirs, naming)
+
+	expect(held).toContain('msgctxt "__proto__"')
+	expect(held).toContain('Entradas anteriores')
+})
+
 test('drops a constructor context the template does not name', () => {
 	const theirs = 'msgid ""\nmsgstr ""\n\nmsgctxt "constructor"\nmsgid "name"\nmsgstr "nombre"\n'
 
@@ -852,6 +863,18 @@ test('an export answering every form filled still settles the entry', async () =
 		es: appleCatalogue('una manzana', 'muchas manzanas'),
 	})
 	const { held } = storeOf({ 'es-ES': appleCatalogue('una manzana', 'muchas manzanas') })
+
+	const done = await pushTranslations(platform, ['es-ES'], held, APPLE_TEMPLATE)
+
+	expect(uploads).toHaveLength(0)
+	expect(done.skipped).toEqual(['es, which the platform has settled every answer of'])
+})
+
+test('settles a plural whose committed catalogue leaves a form empty', async () => {
+	const { platform, uploads } = exportingPlatform(['es'], {
+		es: appleCatalogue('una manzana', 'muchas manzanas'),
+	})
+	const { held } = storeOf({ 'es-ES': appleCatalogue('una manzana', 'muchas manzanas', '') })
 
 	const done = await pushTranslations(platform, ['es-ES'], held, APPLE_TEMPLATE)
 
