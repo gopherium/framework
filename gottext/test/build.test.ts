@@ -300,6 +300,48 @@ test('passes a translation reordering the positional placeholders its message na
 	expect(mismatched(answered, naming)).toEqual([])
 })
 
+test('names a translation dropping a zero padded placeholder', () => {
+	const naming = 'msgid "Post %02d"\nmsgstr ""\n'
+	const dropped = 'msgid "Post %02d"\nmsgstr "Entrada"\n'
+
+	expect(mismatched(dropped, naming)).toEqual(['Post %02d'])
+})
+
+test('names a translation dropping a precision placeholder', () => {
+	const naming = 'msgid "Held %.2f"\nmsgstr ""\n'
+	const dropped = 'msgid "Held %.2f"\nmsgstr "Retenido"\n'
+
+	expect(mismatched(dropped, naming)).toEqual(['Held %.2f'])
+})
+
+test('names a translation dropping a named placeholder carrying width and precision', () => {
+	const naming = 'msgid "You hold %(held)05.2f."\nmsgstr ""\n'
+	const dropped = 'msgid "You hold %(held)05.2f."\nmsgstr "Nada retenido."\n'
+
+	expect(mismatched(dropped, naming)).toEqual(['You hold %(held)05.2f.'])
+})
+
+test('names a translation widening a padded placeholder', () => {
+	const naming = 'msgid "Post %02d"\nmsgstr ""\n'
+	const widened = 'msgid "Post %02d"\nmsgstr "Entrada %03d"\n'
+
+	expect(mismatched(widened, naming)).toEqual(['Post %02d'])
+})
+
+test('names a translation changing the precision a named placeholder asks for', () => {
+	const naming = 'msgid "You hold %(held)05.2f."\nmsgstr ""\n'
+	const changed = 'msgid "You hold %(held)05.2f."\nmsgstr "Retienes %(held)05.3f."\n'
+
+	expect(mismatched(changed, naming)).toEqual(['You hold %(held)05.2f.'])
+})
+
+test('passes a translation keeping every modified placeholder whole', () => {
+	const naming = 'msgid "You hold %(held)05.2f of %.1f."\nmsgstr ""\n'
+	const answered = 'msgid "You hold %(held)05.2f of %.1f."\nmsgstr "Retienes %(held)05.2f de %.1f."\n'
+
+	expect(mismatched(answered, naming)).toEqual([])
+})
+
 test('names a message that shares its name with a prototype member', () => {
 	const naming = 'msgid "Older posts"\nmsgstr ""\n'
 	const stale = 'msgid ""\nmsgstr ""\n\nmsgid "constructor"\nmsgstr "constructor"\n'
@@ -400,4 +442,39 @@ test('sees a fuzzy answer through the mismatched gate', () => {
 	const fuzzyBroken = '#, fuzzy\nmsgid "%(count)d post"\nmsgstr "%(total)d entrada"\n'
 
 	expect(mismatched(fuzzyBroken, naming)).toEqual(['%(count)d post'])
+})
+
+test('leaves a message carrying a literal percent alone', () => {
+	const naming = 'msgid "100% done"\nmsgstr ""\n'
+	const answered = 'msgid "100% done"\nmsgstr "100% hecho"\n'
+
+	expect(mismatched(answered, naming)).toEqual([])
+})
+
+test('leaves a message carrying a literal percent before a letter alone', () => {
+	const naming = 'msgid "50% off today"\nmsgstr ""\n'
+	const answered = 'msgid "50% off today"\nmsgstr "50% de descuento hoy"\n'
+
+	expect(mismatched(answered, naming)).toEqual([])
+})
+
+test('names a translation reading an escaped percent as a placeholder', () => {
+	const naming = 'msgid "Post %%02d"\nmsgstr ""\n'
+	const broken = 'msgid "Post %%02d"\nmsgstr "Entrada %02d"\n'
+
+	expect(mismatched(broken, naming)).toEqual(['Post %%02d'])
+})
+
+test('leaves a translation keeping an escaped percent alone', () => {
+	const naming = 'msgid "Save %%s now"\nmsgstr ""\n'
+	const answered = 'msgid "Save %%s now"\nmsgstr "Guarda %%s ahora"\n'
+
+	expect(mismatched(answered, naming)).toEqual([])
+})
+
+test('reads a message under a context sharing a prototype member name', () => {
+	const naming = 'msgctxt "constructor"\nmsgid "name"\nmsgstr ""\n'
+	const unanswered = 'msgid ""\nmsgstr ""\n'
+
+	expect(mismatched(unanswered, naming)).toEqual([])
 })

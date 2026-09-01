@@ -93,6 +93,7 @@ export function poeditorAt(options: PlatformOptions): Poeditor & Retiring {
 	const paused = options.paused
 		?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
 	let uploaded = false
+	let queued: Promise<unknown> = Promise.resolve()
 	/**
 	 * Returns the values every call carries.
 	 * @returns The credential and the project.
@@ -136,7 +137,7 @@ export function poeditorAt(options: PlatformOptions): Poeditor & Retiring {
 	 * @param form - The upload to send.
 	 * @returns The result the platform answered with.
 	 */
-	async function uploadForm(form: FormData): Promise<NonNullable<Answer['result']>> {
+	async function pacedSend(form: FormData): Promise<NonNullable<Answer['result']>> {
 		if (uploaded) {
 			await paused(paced)
 		}
@@ -152,6 +153,16 @@ export function poeditorAt(options: PlatformOptions): Poeditor & Retiring {
 		}
 		await paused(paced)
 		return resultOf(await send())
+	}
+	/**
+	 * Sends one upload form behind every upload before it, so none share a pacing window.
+	 * @param form - The upload to send.
+	 * @returns The result the platform answered with.
+	 */
+	function uploadForm(form: FormData): Promise<NonNullable<Answer['result']>> {
+		const held = queued.then(() => pacedSend(form))
+		queued = held.catch(() => undefined)
+		return held
 	}
 	/**
 	 * Sends the template to the platform, saying whether absent terms retire.

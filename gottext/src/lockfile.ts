@@ -15,7 +15,7 @@ export function resolvedVersions(lockfile: string, name: string): string[] {
 	const packages = lockfile.slice(start, end === -1 ? undefined : end)
 	const found = new Set<string>()
 	for (const line of packages.split('\n')) {
-		const match = /^ {2}'?(.+)@([^@']+)'?:$/.exec(line)
+		const match = /^ {2}'?(.+)@([^@'()]+)(?:\([^)]+\))*'?:$/.exec(line)
 		if (match && match[1] === name) {
 			found.add(match[2])
 		}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { __, getLocaleData } from '@wordpress/i18n'
+import { __, getLocaleData, resetLocaleData, setLocaleData } from '@wordpress/i18n'
 import { expect, test } from 'vitest'
 
 import { displayLocale, rememberLocale, startLocale } from '../src/index.js'
@@ -47,14 +47,6 @@ test('sets a loaded catalogue under its domain before returning', async () => {
 	expect(__('Older posts', 'gottext-probe')).toBe('Entradas anteriores')
 })
 
-test('leaves a domain untouched when its loader answers nothing', async () => {
-	await startLocale(async () => 'es-ES', [
-		{ domain: 'gottext-empty', load: async () => undefined },
-	])
-
-	expect(__('Older posts', 'gottext-empty')).toBe('Older posts')
-})
-
 test('loads nothing for the locale the sources are written in', async () => {
 	const asked: string[] = []
 
@@ -97,4 +89,111 @@ test('sets every catalogue it is handed', async () => {
 
 	expect(__('Older posts', 'gottext-one')).toBe('Entradas anteriores')
 	expect(__('Older posts', 'gottext-two')).toBe('Entradas anteriores')
+})
+
+test('keeps the display locale while a catalogue is still loading', async () => {
+	rememberLocale('en-US')
+	let release: (catalog: Catalog) => void = () => {}
+	const pending = startLocale(async () => 'es-ES', [
+		{ domain: 'gottext-slow', load: () => new Promise((resolve) => { release = resolve }) },
+	])
+	await Promise.resolve()
+	await Promise.resolve()
+
+	expect(displayLocale()).toBe('en-US')
+
+	release(CATALOG)
+	await pending
+	expect(displayLocale()).toBe('es-ES')
+})
+
+test('keeps the display locale when a loader refuses', async () => {
+	rememberLocale('en-US')
+	const refusal = new Error('the catalogue endpoint refused')
+	const pending = startLocale(async () => 'de-DE', [
+		{ domain: 'gottext-broken', load: () => Promise.reject(refusal) },
+	])
+
+	await expect(pending).rejects.toBe(refusal)
+	expect(displayLocale()).toBe('en-US')
+})
+
+test('a superseded start drops its catalogues and locale commit', async () => {
+	let releaseOlder: (catalog: Catalog) => void = () => {}
+	const olderCatalog: Catalog = {
+		'': { lang: 'de-DE', 'plural-forms': 'nplurals=2; plural=(n != 1);' },
+		'Older posts': ['answered by the older start'],
+	}
+	const older = startLocale(async () => 'de-DE', [
+		{ domain: 'gottext-race', load: () => new Promise((resolve) => { releaseOlder = resolve }) },
+	])
+	const newerCatalog: Catalog = {
+		'': { lang: 'fr-FR', 'plural-forms': 'nplurals=2; plural=(n != 1);' },
+		'Older posts': ['answered by the newer start'],
+	}
+	const newer = startLocale(async () => 'fr-FR', [
+		{ domain: 'gottext-race', load: async () => newerCatalog },
+	])
+
+	await newer
+	releaseOlder(olderCatalog)
+	await older
+
+	expect(__('Older posts', 'gottext-race')).toBe('answered by the newer start')
+	expect(displayLocale()).toBe('fr-FR')
+})
+
+test('a reset naming one domain clears every loaded domain', () => {
+	setLocaleData(CATALOG, 'gottext-reset-named')
+	setLocaleData(CATALOG, 'gottext-reset-other')
+	resetLocaleData({}, 'gottext-reset-named')
+
+	expect(__('Older posts', 'gottext-reset-named')).toBe('Older posts')
+	expect(__('Older posts', 'gottext-reset-other')).toBe('Older posts')
+})
+
+test('a switch clears a domain whose loader answers nothing', async () => {
+	await startLocale(async () => 'es-ES', [
+		{ domain: 'gottext-stale', load: async () => CATALOG },
+	])
+	await startLocale(async () => 'de-DE', [
+		{ domain: 'gottext-stale', load: async () => undefined },
+	])
+
+	expect(__('Older posts', 'gottext-stale')).toBe('Older posts')
+})
+
+test('a switch to the default locale clears every configured domain', async () => {
+	await startLocale(async () => 'es-ES', [
+		{ domain: 'gottext-home-one', load: async () => CATALOG },
+		{ domain: 'gottext-home-two', load: async () => CATALOG },
+	])
+	await startLocale(
+		async () => 'en-US',
+		[
+			{ domain: 'gottext-home-one', load: async () => CATALOG },
+			{ domain: 'gottext-home-two', load: async () => CATALOG },
+		],
+		{ defaultLocale: 'en-US' },
+	)
+
+	expect(__('Older posts', 'gottext-home-one')).toBe('Older posts')
+	expect(__('Older posts', 'gottext-home-two')).toBe('Older posts')
+})
+
+test('a switch replaces a catalogue rather than merging into it', async () => {
+	const fuller: Catalog = {
+		'': { lang: 'es-ES', 'plural-forms': 'nplurals=2; plural=(n != 1);' },
+		'Older posts': ['Entradas anteriores'],
+		'Newer posts': ['Entradas siguientes'],
+	}
+	const narrower: Catalog = {
+		'': { lang: 'es-ES', 'plural-forms': 'nplurals=2; plural=(n != 1);' },
+		'Older posts': ['Entradas anteriores'],
+	}
+	await startLocale(async () => 'es-ES', [{ domain: 'gottext-swap', load: async () => fuller }])
+	await startLocale(async () => 'es-ES', [{ domain: 'gottext-swap', load: async () => narrower }])
+
+	expect(__('Newer posts', 'gottext-swap')).toBe('Newer posts')
+	expect(__('Older posts', 'gottext-swap')).toBe('Entradas anteriores')
 })

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { expect, test, vi } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 
 import {
 	answeredForms,
@@ -16,6 +16,10 @@ import {
 	withPluralRuleOf,
 } from '../src/sync.js'
 import type { Catalogues, Poeditor } from '../src/sync.js'
+
+afterEach(() => {
+	vi.unstubAllGlobals()
+})
 
 const HEADER = `msgid ""
 msgstr ""
@@ -315,6 +319,52 @@ test('keeps an answer whose message shares its name with a prototype member', ()
 	expect(keepingAnswers(ours, theirs, naming)).toContain('msgid "constructor"')
 })
 
+test('an answer under a constructor context survives the merge and pollutes nothing', () => {
+	const naming = 'msgctxt "constructor"\nmsgid "Older posts"\nmsgstr ""\n'
+	const ours = 'msgid ""\nmsgstr ""\n\nmsgctxt "constructor"\nmsgid "Older posts"\nmsgstr "Entradas anteriores"\n'
+	const theirs = 'msgid ""\nmsgstr ""\n'
+
+	const held = keepingAnswers(ours, theirs, naming)
+
+	expect(held).toContain('msgctxt "constructor"')
+	expect(held).toContain('Entradas anteriores')
+	expect(Object.hasOwn(globalThis.Object, 'Older posts')).toBe(false)
+})
+
+test('an answer under a proto context survives the merge', () => {
+	const naming = 'msgctxt "__proto__"\nmsgid "Older posts"\nmsgstr ""\n'
+	const ours = 'msgid ""\nmsgstr ""\n\nmsgctxt "__proto__"\nmsgid "Older posts"\nmsgstr "Entradas anteriores"\n'
+	const theirs = 'msgid ""\nmsgstr ""\n'
+
+	const held = keepingAnswers(ours, theirs, naming)
+
+	expect(held).toContain('msgctxt "__proto__"')
+	expect(held).toContain('Entradas anteriores')
+})
+
+test('drops a constructor context the template does not name', () => {
+	const theirs = 'msgid ""\nmsgstr ""\n\nmsgctxt "constructor"\nmsgid "name"\nmsgstr "nombre"\n'
+
+	const held = namedByTemplate(theirs, TEMPLATE)
+
+	expect(held).not.toContain('msgctxt "constructor"')
+	expect(held).not.toContain('nombre')
+})
+
+test('pushes an answer under a constructor context the platform lacks', async () => {
+	const naming = 'msgctxt "constructor"\nmsgid "name"\nmsgstr ""\n'
+	const ours = `${HEADER}\nmsgctxt "constructor"\nmsgid "name"\nmsgstr "nombre"\n`
+	const { platform, uploads } = exportingPlatform(['es'], { es: 'msgid ""\nmsgstr ""\n' })
+	const { held } = storeOf({ 'es-ES': ours })
+
+	const done = await pushTranslations(platform, ['es-ES'], held, naming)
+
+	expect(uploads).toHaveLength(1)
+	expect(uploads[0][1]).toContain('msgctxt "constructor"')
+	expect(uploads[0][1]).toContain('nombre')
+	expect(done.pushed).toEqual(['es-ES'])
+})
+
 test('restores an answer under a context the export does not know', () => {
 	const naming = 'msgctxt "posts"\nmsgid "Older"\nmsgstr ""\n'
 	const ours = 'msgid ""\nmsgstr ""\n\nmsgctxt "posts"\nmsgid "Older"\nmsgstr "Antiguas"\n'
@@ -486,7 +536,6 @@ test('sends through the runtime fetch unless it is handed one', async () => {
 	const held = await poeditorAt({ token: 't', project: 'p', domain: 'probe' }).languages()
 
 	expect(held).toEqual([])
-	vi.unstubAllGlobals()
 })
 
 test('refuses a platform answer that did not arrive', async () => {
@@ -784,6 +833,65 @@ test('never pushes over a plural the platform answered in every form', async () 
 	expect(done.skipped).toEqual(['es, which the platform has settled every answer of'])
 })
 
+/** APPLE_TEMPLATE names the plural message the settling tests share. */
+const APPLE_TEMPLATE = 'msgid "one apple"\nmsgid_plural "many apples"\nmsgstr[0] ""\nmsgstr[1] ""\n'
+
+/**
+ * Returns a catalogue answering the apple message with the given forms.
+ * @param forms - The forms the catalogue answers.
+ * @returns The catalogue as PO text.
+ */
+function appleCatalogue(...forms: string[]): string {
+	const answered = forms.map((form, at) => `msgstr[${at}] "${form}"`).join('\n')
+	return `${HEADER}\nmsgid "one apple"\nmsgid_plural "many apples"\n${answered}\n`
+}
+
+test('a flattened export keeps every local plural form', async () => {
+	const { platform, uploads } = exportingPlatform(['es'], { es: appleCatalogue('una manzana') })
+	const { held } = storeOf({ 'es-ES': appleCatalogue('una manzana', 'muchas manzanas') })
+
+	const done = await pushTranslations(platform, ['es-ES'], held, APPLE_TEMPLATE)
+
+	expect(uploads).toHaveLength(1)
+	expect(uploads[0][1]).toContain('msgstr[0] "una manzana"')
+	expect(uploads[0][1]).toContain('msgstr[1] "muchas manzanas"')
+	expect(done.pushed).toEqual(['es-ES'])
+})
+
+test('an export answering every form filled still settles the entry', async () => {
+	const { platform, uploads } = exportingPlatform(['es'], {
+		es: appleCatalogue('una manzana', 'muchas manzanas'),
+	})
+	const { held } = storeOf({ 'es-ES': appleCatalogue('una manzana', 'muchas manzanas') })
+
+	const done = await pushTranslations(platform, ['es-ES'], held, APPLE_TEMPLATE)
+
+	expect(uploads).toHaveLength(0)
+	expect(done.skipped).toEqual(['es, which the platform has settled every answer of'])
+})
+
+test('settles a plural whose committed catalogue leaves a form empty', async () => {
+	const { platform, uploads } = exportingPlatform(['es'], {
+		es: appleCatalogue('una manzana', 'muchas manzanas'),
+	})
+	const { held } = storeOf({ 'es-ES': appleCatalogue('una manzana', 'muchas manzanas', '') })
+
+	const done = await pushTranslations(platform, ['es-ES'], held, APPLE_TEMPLATE)
+
+	expect(uploads).toHaveLength(0)
+	expect(done.skipped).toEqual(['es, which the platform has settled every answer of'])
+})
+
+test('a fully answered singular still settles', async () => {
+	const { platform, uploads } = exportingPlatform(['es'], { es: catalogue('Entradas revisadas') })
+	const { held } = storeOf({ 'es-ES': catalogue('Entradas anteriores') })
+
+	const done = await pushTranslations(platform, ['es-ES'], held, TEMPLATE)
+
+	expect(uploads).toHaveLength(0)
+	expect(done.skipped).toEqual(['es, which the platform has settled every answer of'])
+})
+
 test('says which supported language it holds no catalogue to add', async () => {
 	const { platform, languagesAdded } = receivingPlatform([])
 	const { held } = storeOf({})
@@ -939,4 +1047,36 @@ test('waits between uploads through the runtime clock unless handed a pause', as
 	await platform.uploadTranslations('fr', catalogue('Anciens'))
 
 	expect(fetched).toHaveBeenCalledTimes(2)
+})
+
+afterEach(() => {
+	vi.useRealTimers()
+})
+
+test('a concurrent upload waits a full pacing window behind the send before it', async () => {
+	vi.useFakeTimers()
+	let asked = 0
+	const fetched = vi.fn(async () => {
+		asked += 1
+		return asked === 1
+			? new Response(JSON.stringify({ response: { status: 'fail', code: '4048', message: 'slow down' } }))
+			: new Response(JSON.stringify({ response: { status: 'success' }, result: {} }))
+	}) as unknown as typeof fetch
+	const platform = poeditorAt({ token: 't', project: 'p', domain: 'probe', fetched, paced: 1000 })
+
+	const first = platform.uploadTerms(TEMPLATE)
+	const second = platform.uploadTranslations('es', catalogue('Entradas'))
+	await vi.advanceTimersByTimeAsync(0)
+
+	expect(fetched).toHaveBeenCalledTimes(1)
+
+	await vi.advanceTimersByTimeAsync(1000)
+
+	expect(fetched).toHaveBeenCalledTimes(2)
+
+	await vi.advanceTimersByTimeAsync(1000)
+
+	expect(fetched).toHaveBeenCalledTimes(3)
+	await first
+	await second
 })
