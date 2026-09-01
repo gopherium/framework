@@ -4,7 +4,7 @@
 	"description": "The translation brick for Gopherium projects: gettext runtime, extraction and gates, and POEditor sync.",
 	"license": "Apache-2.0",
 	"type": "module",
-	"packageManager": "pnpm@11.10.0",
+	"packageManager": "pnpm@12.2.1",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/gopherium/framework.git",
