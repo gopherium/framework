@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { expect, test, vi } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 
 import {
 	answeredForms,
@@ -16,6 +16,10 @@ import {
 	withPluralRuleOf,
 } from '../src/sync.js'
 import type { Catalogues, Poeditor } from '../src/sync.js'
+
+afterEach(() => {
+	vi.unstubAllGlobals()
+})
 
 const HEADER = `msgid ""
 msgstr ""
@@ -521,7 +525,6 @@ test('sends through the runtime fetch unless it is handed one', async () => {
 	const held = await poeditorAt({ token: 't', project: 'p', domain: 'probe' }).languages()
 
 	expect(held).toEqual([])
-	vi.unstubAllGlobals()
 })
 
 test('refuses a platform answer that did not arrive', async () => {
@@ -1021,4 +1024,36 @@ test('waits between uploads through the runtime clock unless handed a pause', as
 	await platform.uploadTranslations('fr', catalogue('Anciens'))
 
 	expect(fetched).toHaveBeenCalledTimes(2)
+})
+
+afterEach(() => {
+	vi.useRealTimers()
+})
+
+test('a concurrent upload waits a full pacing window behind the send before it', async () => {
+	vi.useFakeTimers()
+	let asked = 0
+	const fetched = vi.fn(async () => {
+		asked += 1
+		return asked === 1
+			? new Response(JSON.stringify({ response: { status: 'fail', code: '4048', message: 'slow down' } }))
+			: new Response(JSON.stringify({ response: { status: 'success' }, result: {} }))
+	}) as unknown as typeof fetch
+	const platform = poeditorAt({ token: 't', project: 'p', domain: 'probe', fetched, paced: 1000 })
+
+	const first = platform.uploadTerms(TEMPLATE)
+	const second = platform.uploadTranslations('es', catalogue('Entradas'))
+	await vi.advanceTimersByTimeAsync(0)
+
+	expect(fetched).toHaveBeenCalledTimes(1)
+
+	await vi.advanceTimersByTimeAsync(1000)
+
+	expect(fetched).toHaveBeenCalledTimes(2)
+
+	await vi.advanceTimersByTimeAsync(1000)
+
+	expect(fetched).toHaveBeenCalledTimes(3)
+	await first
+	await second
 })
