@@ -257,6 +257,18 @@ export function keepingAnswers(current: string, incoming: string, template: stri
 }
 
 /**
+ * Reports whether an exported answer settles a committed one.
+ * @param entry - The committed answer.
+ * @param arrived - The answer the platform exported.
+ * @returns Whether the export answers at least as many forms as the committed entry, all filled.
+ */
+function settledBy(entry: GetTextTranslation, arrived: GetTextTranslation): boolean {
+	return arrived.msgstr.length >= entry.msgstr.length
+		&& arrived.msgstr.length > 0
+		&& arrived.msgstr.every((form) => form !== '')
+}
+
+/**
  * Returns a catalogue without the messages an export already answers and nobody may overwrite.
  * @param source - The catalogue as committed.
  * @param exported - The catalogue the platform exported.
@@ -271,7 +283,7 @@ export function withoutSettled(source: string, exported: string): string {
 			if (msgid === METADATA || arrived === undefined || fuzzyOf(arrived)) {
 				continue
 			}
-			if (arrived.msgstr.length > 0 && arrived.msgstr.every((form) => form !== '')) {
+			if (settledBy(entry, arrived)) {
 				delete held.translations[context][msgid]
 				continue
 			}

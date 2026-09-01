@@ -819,6 +819,53 @@ test('never pushes over a plural the platform answered in every form', async () 
 	expect(done.skipped).toEqual(['es, which the platform has settled every answer of'])
 })
 
+/** APPLE_TEMPLATE names the plural message the settling tests share. */
+const APPLE_TEMPLATE = 'msgid "one apple"\nmsgid_plural "many apples"\nmsgstr[0] ""\nmsgstr[1] ""\n'
+
+/**
+ * Returns a catalogue answering the apple message with the given forms.
+ * @param forms - The forms the catalogue answers.
+ * @returns The catalogue as PO text.
+ */
+function appleCatalogue(...forms: string[]): string {
+	const answered = forms.map((form, at) => `msgstr[${at}] "${form}"`).join('\n')
+	return `${HEADER}\nmsgid "one apple"\nmsgid_plural "many apples"\n${answered}\n`
+}
+
+test('a flattened export keeps every local plural form', async () => {
+	const { platform, uploads } = exportingPlatform(['es'], { es: appleCatalogue('una manzana') })
+	const { held } = storeOf({ 'es-ES': appleCatalogue('una manzana', 'muchas manzanas') })
+
+	const done = await pushTranslations(platform, ['es-ES'], held, APPLE_TEMPLATE)
+
+	expect(uploads).toHaveLength(1)
+	expect(uploads[0][1]).toContain('msgstr[0] "una manzana"')
+	expect(uploads[0][1]).toContain('msgstr[1] "muchas manzanas"')
+	expect(done.pushed).toEqual(['es-ES'])
+})
+
+test('an export answering every form filled still settles the entry', async () => {
+	const { platform, uploads } = exportingPlatform(['es'], {
+		es: appleCatalogue('una manzana', 'muchas manzanas'),
+	})
+	const { held } = storeOf({ 'es-ES': appleCatalogue('una manzana', 'muchas manzanas') })
+
+	const done = await pushTranslations(platform, ['es-ES'], held, APPLE_TEMPLATE)
+
+	expect(uploads).toHaveLength(0)
+	expect(done.skipped).toEqual(['es, which the platform has settled every answer of'])
+})
+
+test('a fully answered singular still settles', async () => {
+	const { platform, uploads } = exportingPlatform(['es'], { es: catalogue('Entradas revisadas') })
+	const { held } = storeOf({ 'es-ES': catalogue('Entradas anteriores') })
+
+	const done = await pushTranslations(platform, ['es-ES'], held, TEMPLATE)
+
+	expect(uploads).toHaveLength(0)
+	expect(done.skipped).toEqual(['es, which the platform has settled every answer of'])
+})
+
 test('says which supported language it holds no catalogue to add', async () => {
 	const { platform, languagesAdded } = receivingPlatform([])
 	const { held } = storeOf({})
