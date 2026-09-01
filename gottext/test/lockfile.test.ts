@@ -102,3 +102,50 @@ test('passes over a package that declares no such dependency', () => {
 
 	expect(pinnedVersions(root, ['app'], 'probe')).toEqual([])
 })
+
+const MULTI_DOCUMENT_LOCKFILE = `---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.2.1
+        version: 12.2.1
+
+packages:
+
+  '@pnpm/exe.linux-x64@12.2.1':
+    resolution: {integrity: sha512-c}
+
+snapshots:
+
+  '@pnpm/exe.linux-x64@12.2.1': {}
+---
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+
+packages:
+
+  '@wordpress/i18n@6.26.0':
+    resolution: {integrity: sha512-a}
+
+  left-pad@1.3.0:
+    resolution: {integrity: sha512-b}
+
+snapshots:
+
+  '@wordpress/i18n@6.26.0': {}
+`
+
+test('reads the project packages of a lockfile the package manager writes in two documents', () => {
+	expect(resolvedVersions(MULTI_DOCUMENT_LOCKFILE, '@wordpress/i18n')).toEqual(['6.26.0'])
+	expect(resolvedVersions(MULTI_DOCUMENT_LOCKFILE, 'left-pad')).toEqual(['1.3.0'])
+})
+
+test('leaves the package manager out of the packages it reports', () => {
+	expect(resolvedVersions(MULTI_DOCUMENT_LOCKFILE, '@pnpm/exe.linux-x64')).toEqual([])
+})

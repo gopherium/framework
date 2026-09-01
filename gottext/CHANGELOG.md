@@ -5,6 +5,15 @@ versioning follows [Semantic Versioning](https://semver.org/). While at 0.x,
 minor releases may break. Releases are tagged `gottext/vX.Y.Z` and publish
 from CI.
 
+## [Unreleased]
+
+### Fixed
+
+- The lockfile gate reads the project's own packages when the package
+  manager writes its lockfile as more than one document, so a duplicate
+  resolution is still caught and the package manager's own binaries are
+  never reported as dependencies.
+
 ## [0.4.0] - 2026-09-01
 
 ### Fixed
