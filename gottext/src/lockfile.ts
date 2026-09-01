@@ -4,14 +4,14 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * Returns every version of a package the lockfile resolves.
+ * Returns every version of a package the project lockfile resolves.
  * @param lockfile - The pnpm lockfile as text.
  * @param name - The package to look for.
  * @returns The resolved versions, sorted.
  */
 export function resolvedVersions(lockfile: string, name: string): string[] {
-	const start = lockfile.indexOf('\npackages:\n')
-	const end = lockfile.indexOf('\nsnapshots:\n')
+	const start = lockfile.lastIndexOf('\npackages:\n')
+	const end = lockfile.indexOf('\nsnapshots:\n', start)
 	const packages = lockfile.slice(start, end === -1 ? undefined : end)
 	const found = new Set<string>()
 	for (const line of packages.split('\n')) {
