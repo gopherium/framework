@@ -1,6 +1,6 @@
 {
 	"name": "@gopherium/gottext",
-	"version": "0.4.0",
+	"version": "0.5.0",
 	"description": "The translation brick for Gopherium projects: gettext runtime, extraction and gates, and POEditor sync.",
 	"license": "Apache-2.0",
 	"type": "module",
