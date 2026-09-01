@@ -18,10 +18,10 @@ need and ignore the rest.
 
 ## Design
 
-One repository, one self contained brick per directory, no shared code
+One repository, one self-contained brick per directory, no shared code
 between them. A Go brick carries its own go.mod and a TypeScript brick
 its own package.json, each with its own CHANGELOG and lint
-configuration, released independently under a path prefixed tag such
+configuration, released independently under a path-prefixed tag such
 as `mailkit/v0.1.0` or `gottext/v0.4.0`. Bricks depend on published
 versions only, never on sibling source, so what you pin is what you
 get.
