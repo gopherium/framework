@@ -5,6 +5,28 @@ versioning follows [Semantic Versioning](https://semver.org/). While at 0.x,
 minor releases may break. Releases are tagged `gottext/vX.Y.Z` and publish
 from CI.
 
+## [Unreleased]
+
+### Fixed
+
+- A catalogue entry under the context named constructor survives every
+  merge instead of vanishing onto the global Object, and pushing one
+  no longer crashes when the platform lacks the context.
+- A flattened export keeps every local plural form in the push, an
+  entry only settles when the export answers at least the forms the
+  committed catalogue holds.
+- The placeholder gate reads printf modifiers, so a translation
+  dropping or changing forms such as %02d, %.2f or a named placeholder
+  carrying width and precision is caught as mismatched.
+- The locale start is transactional, the display locale commits only
+  after every catalogue loads, a superseded start drops its results,
+  and every switch replaces each domain's catalogue instead of
+  merging stale entries.
+- Peer qualified lockfile keys answer their bare versions, so the
+  duplicate resolution gate sees packages resolved with peer suffixes.
+- Concurrent platform uploads queue behind each other, delay and
+  retry included, so they cannot share one pacing window.
+
 ## [0.3.0] - 2026-08-25
 
 ### Added
