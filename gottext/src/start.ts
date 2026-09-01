@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { setLocaleData } from '@wordpress/i18n'
+import { resetLocaleData, setLocaleData } from '@wordpress/i18n'
 
 import type { Catalog } from './catalog.js'
 import { rememberLocale } from './display.js'
@@ -19,8 +19,11 @@ export interface LocaleOptions {
 	defaultLocale?: string
 }
 
+/** newest numbers the latest start so one it superseded can drop its results. */
+let newest = 0
+
 /**
- * Resolves the locale, loads every catalogue in parallel, and sets each under its domain.
+ * Resolves the locale, loads every catalogue in parallel, and commits catalogues and locale as one transaction.
  * @param resolve - Answers the locale the interface should stand in.
  * @param entries - The text domains to load.
  * @param options - What the start needs beyond its domains.
@@ -31,20 +34,22 @@ export async function startLocale(
 	entries: CatalogEntry[],
 	options: LocaleOptions = {},
 ): Promise<string> {
+	const started = ++newest
 	if (options.defaultLocale !== undefined) {
 		rememberLocale(options.defaultLocale)
 	}
 	const locale = await resolve()
-	rememberLocale(locale)
-	if (locale === options.defaultLocale) {
+	const loaded = locale === options.defaultLocale ? [] : await Promise.all(entries.map((entry) => entry.load(locale)))
+	if (started !== newest) {
 		return locale
 	}
-	const loaded = await Promise.all(entries.map((entry) => entry.load(locale)))
+	resetLocaleData()
 	entries.forEach((entry, at) => {
 		const catalog = loaded[at]
 		if (catalog !== undefined) {
 			setLocaleData(catalog, entry.domain)
 		}
 	})
+	rememberLocale(locale)
 	return locale
 }
