@@ -315,6 +315,41 @@ test('keeps an answer whose message shares its name with a prototype member', ()
 	expect(keepingAnswers(ours, theirs, naming)).toContain('msgid "constructor"')
 })
 
+test('an answer under a constructor context survives the merge and pollutes nothing', () => {
+	const naming = 'msgctxt "constructor"\nmsgid "Older posts"\nmsgstr ""\n'
+	const ours = 'msgid ""\nmsgstr ""\n\nmsgctxt "constructor"\nmsgid "Older posts"\nmsgstr "Entradas anteriores"\n'
+	const theirs = 'msgid ""\nmsgstr ""\n'
+
+	const held = keepingAnswers(ours, theirs, naming)
+
+	expect(held).toContain('msgctxt "constructor"')
+	expect(held).toContain('Entradas anteriores')
+	expect(Object.hasOwn(globalThis.Object, 'Older posts')).toBe(false)
+})
+
+test('drops a constructor context the template does not name', () => {
+	const theirs = 'msgid ""\nmsgstr ""\n\nmsgctxt "constructor"\nmsgid "name"\nmsgstr "nombre"\n'
+
+	const held = namedByTemplate(theirs, TEMPLATE)
+
+	expect(held).not.toContain('msgctxt "constructor"')
+	expect(held).not.toContain('nombre')
+})
+
+test('pushes an answer under a constructor context the platform lacks', async () => {
+	const naming = 'msgctxt "constructor"\nmsgid "name"\nmsgstr ""\n'
+	const ours = `${HEADER}\nmsgctxt "constructor"\nmsgid "name"\nmsgstr "nombre"\n`
+	const { platform, uploads } = exportingPlatform(['es'], { es: 'msgid ""\nmsgstr ""\n' })
+	const { held } = storeOf({ 'es-ES': ours })
+
+	const done = await pushTranslations(platform, ['es-ES'], held, naming)
+
+	expect(uploads).toHaveLength(1)
+	expect(uploads[0][1]).toContain('msgctxt "constructor"')
+	expect(uploads[0][1]).toContain('nombre')
+	expect(done.pushed).toEqual(['es-ES'])
+})
+
 test('restores an answer under a context the export does not know', () => {
 	const naming = 'msgctxt "posts"\nmsgid "Older"\nmsgstr ""\n'
 	const ours = 'msgid ""\nmsgstr ""\n\nmsgctxt "posts"\nmsgid "Older"\nmsgstr "Antiguas"\n'

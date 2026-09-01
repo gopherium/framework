@@ -121,7 +121,7 @@ export function namedByTemplate(incoming: string, template: string): string {
 	const held = po.parse(incoming)
 	for (const [context, entries] of Object.entries(held.translations)) {
 		for (const msgid of Object.keys(entries)) {
-			if (msgid !== METADATA && ownEntry(named[context], msgid) === undefined) {
+			if (msgid !== METADATA && ownEntry(ownEntry(named, context), msgid) === undefined) {
 				delete held.translations[context][msgid]
 			}
 		}
@@ -197,10 +197,11 @@ function restoring(
 	msgid: string,
 	entry: GetTextTranslation,
 ): void {
-	const arrived = ownEntry(held.translations[context], msgid)
+	const entries: Record<string, GetTextTranslation> = ownEntry(held.translations, context) ?? {}
+	held.translations[context] = entries
+	const arrived = ownEntry(entries, msgid)
 	if (arrived === undefined) {
-		held.translations[context] ??= {}
-		held.translations[context][msgid] = entry
+		entries[msgid] = entry
 		return
 	}
 	arrived.msgid_plural ??= entry.msgid_plural
@@ -246,7 +247,7 @@ export function keepingAnswers(current: string, incoming: string, template: stri
 	const held = po.parse(incoming)
 	for (const [context, entries] of Object.entries(ours)) {
 		for (const [msgid, entry] of Object.entries(entries)) {
-			const wanted = msgid !== METADATA && ownEntry(named[context], msgid) !== undefined
+			const wanted = msgid !== METADATA && ownEntry(ownEntry(named, context), msgid) !== undefined
 			if (wanted && entry.msgstr.some((form) => form !== '')) {
 				restoring(held, context, msgid, entry)
 			}
@@ -266,7 +267,7 @@ export function withoutSettled(source: string, exported: string): string {
 	const held = po.parse(source)
 	for (const [context, entries] of Object.entries(held.translations)) {
 		for (const [msgid, entry] of Object.entries(entries)) {
-			const arrived = ownEntry(theirs[context], msgid)
+			const arrived = ownEntry(ownEntry(theirs, context), msgid)
 			if (msgid === METADATA || arrived === undefined || fuzzyOf(arrived)) {
 				continue
 			}
