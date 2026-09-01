@@ -20,12 +20,39 @@ jobs:
         working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: ${{ matrix.module }}/go.mod
           cache-dependency-path: ${{ matrix.module }}/go.sum
       - run: go test -race -covermode=atomic -coverprofile=cover.out ./...
       - run: go vet ./...
+
+  gottext:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gottext
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: gottext/package.json
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: gottext/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run cover
+      - run: pnpm run lint
+      - run: pnpm exec knip
+      - run: pnpm run build
+      - run: node -e "Promise.all(['@gopherium/gottext', '@gopherium/gottext/build', '@gopherium/gottext/sync', '@gopherium/gottext/testing'].map((entry) => import(entry))).then(() => console.log('every entry loads'))"
 
   lint:
     runs-on: ubuntu-latest
@@ -35,6 +62,8 @@ jobs:
         module: ["mailkit"]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: ${{ matrix.module }}/go.mod
@@ -55,6 +84,8 @@ jobs:
         working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: ${{ matrix.module }}/go.mod

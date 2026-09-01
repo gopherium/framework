@@ -1,0 +1,85 @@
+{
+	"name": "@gopherium/gottext",
+	"version": "0.3.0",
+	"description": "The translation brick for Gopherium projects: gettext runtime, extraction and gates, and POEditor sync.",
+	"license": "Apache-2.0",
+	"type": "module",
+	"packageManager": "pnpm@11.10.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/gopherium/framework.git",
+		"directory": "gottext"
+	},
+	"keywords": [
+		"i18n",
+		"gettext",
+		"translations",
+		"poeditor",
+		"gopherium"
+	],
+	"engines": {
+		"node": ">=22"
+	},
+	"files": [
+		"CHANGELOG.md",
+		"dist",
+		"NOTICE"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		},
+		"./build": {
+			"types": "./dist/build.d.ts",
+			"default": "./dist/build.js"
+		},
+		"./sync": {
+			"types": "./dist/sync.d.ts",
+			"default": "./dist/sync.js"
+		},
+		"./testing": {
+			"types": "./dist/testing.d.ts",
+			"default": "./dist/testing.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "rm -rf dist && tsc -p tsconfig.build.json",
+		"cover": "vitest run --coverage",
+		"lint": "oxlint && eslint .",
+		"typecheck": "tsc --noEmit",
+		"prepublishOnly": "pnpm run build"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"dependencies": {
+		"gettext-parser": "^9.1.1"
+	},
+	"peerDependencies": {
+		"@wordpress/i18n": ">=6.26.0 <7.0.0",
+		"gettext-extractor": ">=4.0.6 <5.0.0"
+	},
+	"peerDependenciesMeta": {
+		"gettext-extractor": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@types/gettext-parser": "^9.0.0",
+		"@types/node": "^26.1.2",
+		"@vitest/coverage-v8": "^4.1.10",
+		"@wordpress/i18n": "6.26.0",
+		"eslint": "^10.7.0",
+		"eslint-plugin-jsdoc": "^63.2.0",
+		"eslint-plugin-sonarjs": "^4.2.0",
+		"eslint-plugin-tsdoc": "^0.5.2",
+		"gettext-extractor": "4.0.6",
+		"knip": "^6.31.0",
+		"oxlint": "^1.71.0",
+		"typescript": "~6.0.2",
+		"typescript-eslint": "^8.65.0",
+		"vitest": "^4.1.10"
+	}
+}

@@ -1,0 +1,8 @@
+peerDependencyRules:
+  allowedVersions:
+    typescript: '6'
+
+minimumReleaseAgeExclude:
+  - '@wordpress/i18n@6.26.0'
+  - 'gettext-extractor@4.0.6'
+  - 'gettext-parser@9.1.1'
