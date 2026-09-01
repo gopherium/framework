@@ -443,3 +443,38 @@ test('sees a fuzzy answer through the mismatched gate', () => {
 
 	expect(mismatched(fuzzyBroken, naming)).toEqual(['%(count)d post'])
 })
+
+test('leaves a message carrying a literal percent alone', () => {
+	const naming = 'msgid "100% done"\nmsgstr ""\n'
+	const answered = 'msgid "100% done"\nmsgstr "100% hecho"\n'
+
+	expect(mismatched(answered, naming)).toEqual([])
+})
+
+test('leaves a message carrying a literal percent before a letter alone', () => {
+	const naming = 'msgid "50% off today"\nmsgstr ""\n'
+	const answered = 'msgid "50% off today"\nmsgstr "50% de descuento hoy"\n'
+
+	expect(mismatched(answered, naming)).toEqual([])
+})
+
+test('names a translation reading an escaped percent as a placeholder', () => {
+	const naming = 'msgid "Post %%02d"\nmsgstr ""\n'
+	const broken = 'msgid "Post %%02d"\nmsgstr "Entrada %02d"\n'
+
+	expect(mismatched(broken, naming)).toEqual(['Post %%02d'])
+})
+
+test('leaves a translation keeping an escaped percent alone', () => {
+	const naming = 'msgid "Save %%s now"\nmsgstr ""\n'
+	const answered = 'msgid "Save %%s now"\nmsgstr "Guarda %%s ahora"\n'
+
+	expect(mismatched(answered, naming)).toEqual([])
+})
+
+test('reads a message under a context sharing a prototype member name', () => {
+	const naming = 'msgctxt "constructor"\nmsgid "name"\nmsgstr ""\n'
+	const unanswered = 'msgid ""\nmsgstr ""\n'
+
+	expect(mismatched(unanswered, naming)).toEqual([])
+})

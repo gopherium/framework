@@ -78,10 +78,10 @@ export function unreviewed(source: string): string[] {
 }
 
 /** NAMED is a placeholder naming what goes into it, with any flags, width, and precision it carries. */
-const NAMED = /%\(([A-Za-z_][A-Za-z0-9_]*)\)[ +0#-]*\d*(?:\.\d+)?[bcdieEfgGosuxX]/g
+const NAMED = /%%|%\(([A-Za-z_][A-Za-z0-9_]*)\)[+0#-]*\d*(?:\.\d+)?[bcdieEfgGosuxX]/g
 
 /** BARE is a placeholder naming nothing, with any flags, width, and precision it carries. */
-const BARE = /%(?:\d+\$)?[ +0#-]*\d*(?:\.\d+)?[bcdieEfgGosuxX]/g
+const BARE = /%%|%(?:\d+\$)?[+0#-]*\d*(?:\.\d+)?[bcdieEfgGosuxX]/g
 
 /**
  * Returns the named placeholders a message carries, each once and whole.
@@ -135,7 +135,7 @@ export function mismatched(source: string, template: string): string[] {
 	const broken: string[] = []
 	for (const [context, entries] of Object.entries(po.parse(template).translations)) {
 		for (const [msgid, entry] of Object.entries(entries)) {
-			const answer = held(carried[context], msgid)
+			const answer = held(held(carried, context), msgid)
 			if (msgid === METADATA || answer === undefined) {
 				continue
 			}
