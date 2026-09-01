@@ -70,7 +70,7 @@ test('speaks the answer when a template asking for a decimal lacks its value', (
 	expect(shown).toBe('the balance is short')
 })
 
-test('fills a template asking for widths and decimals', () => {
+test('fills a template rounding each value to the decimals it asks for', () => {
 	const shown = errorText(
 		{ message: 'raw', code: 'short', meta: { held: 9, needed: 12.5 } },
 		{ short: 'You hold %(held)05.2f of the %(needed).1f asked for.' },

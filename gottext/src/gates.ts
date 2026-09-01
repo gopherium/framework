@@ -77,19 +77,19 @@ export function unreviewed(source: string): string[] {
 	return waiting
 }
 
-/** NAMED is a placeholder naming what goes into it. */
-const NAMED = /%\(([A-Za-z_][A-Za-z0-9_]*)\)[bcdieEfgGosuxX]/g
+/** NAMED is a placeholder naming what goes into it, with any flags, width, and precision it carries. */
+const NAMED = /%\(([A-Za-z_][A-Za-z0-9_]*)\)[ +0#-]*\d*(?:\.\d+)?[bcdieEfgGosuxX]/g
 
-/** BARE is a placeholder naming nothing. */
-const BARE = /%(?:\d+\$)?[bcdieEfgGosuxX]/g
+/** BARE is a placeholder naming nothing, with any flags, width, and precision it carries. */
+const BARE = /%(?:\d+\$)?[ +0#-]*\d*(?:\.\d+)?[bcdieEfgGosuxX]/g
 
 /**
- * Returns the placeholders a message names, each once.
+ * Returns the named placeholders a message carries, each once and whole.
  * @param message - The message to read.
- * @returns The names, in a settled order.
+ * @returns The placeholders, in a settled order.
  */
 function placeholders(message: string): string[] {
-	return [...new Set([...message.matchAll(NAMED)].map((found) => found[1]))].sort()
+	return [...new Set([...message.matchAll(NAMED)].map((found) => found[0]))].sort()
 }
 
 /**

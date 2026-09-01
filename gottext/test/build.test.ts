@@ -300,6 +300,48 @@ test('passes a translation reordering the positional placeholders its message na
 	expect(mismatched(answered, naming)).toEqual([])
 })
 
+test('names a translation dropping a zero padded placeholder', () => {
+	const naming = 'msgid "Post %02d"\nmsgstr ""\n'
+	const dropped = 'msgid "Post %02d"\nmsgstr "Entrada"\n'
+
+	expect(mismatched(dropped, naming)).toEqual(['Post %02d'])
+})
+
+test('names a translation dropping a precision placeholder', () => {
+	const naming = 'msgid "Held %.2f"\nmsgstr ""\n'
+	const dropped = 'msgid "Held %.2f"\nmsgstr "Retenido"\n'
+
+	expect(mismatched(dropped, naming)).toEqual(['Held %.2f'])
+})
+
+test('names a translation dropping a named placeholder carrying width and precision', () => {
+	const naming = 'msgid "You hold %(held)05.2f."\nmsgstr ""\n'
+	const dropped = 'msgid "You hold %(held)05.2f."\nmsgstr "Nada retenido."\n'
+
+	expect(mismatched(dropped, naming)).toEqual(['You hold %(held)05.2f.'])
+})
+
+test('names a translation widening a padded placeholder', () => {
+	const naming = 'msgid "Post %02d"\nmsgstr ""\n'
+	const widened = 'msgid "Post %02d"\nmsgstr "Entrada %03d"\n'
+
+	expect(mismatched(widened, naming)).toEqual(['Post %02d'])
+})
+
+test('names a translation changing the precision a named placeholder asks for', () => {
+	const naming = 'msgid "You hold %(held)05.2f."\nmsgstr ""\n'
+	const changed = 'msgid "You hold %(held)05.2f."\nmsgstr "Retienes %(held)05.3f."\n'
+
+	expect(mismatched(changed, naming)).toEqual(['You hold %(held)05.2f.'])
+})
+
+test('passes a translation keeping every modified placeholder whole', () => {
+	const naming = 'msgid "You hold %(held)05.2f of %.1f."\nmsgstr ""\n'
+	const answered = 'msgid "You hold %(held)05.2f of %.1f."\nmsgstr "Retienes %(held)05.2f de %.1f."\n'
+
+	expect(mismatched(answered, naming)).toEqual([])
+})
+
 test('names a message that shares its name with a prototype member', () => {
 	const naming = 'msgid "Older posts"\nmsgstr ""\n'
 	const stale = 'msgid ""\nmsgstr ""\n\nmsgid "constructor"\nmsgstr "constructor"\n'
