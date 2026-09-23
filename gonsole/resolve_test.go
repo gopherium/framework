@@ -24,7 +24,7 @@ func echo(name string, args ...string) gonsole.Command {
 	}
 }
 
-// reports returns a program called myapp with a status word, a report namespace and one old spelling.
+// reports returns a program called myapp with a status command, a report namespace and one old spelling.
 func reports() gonsole.Program {
 	return gonsole.Program{
 		Name: "myapp",
@@ -47,9 +47,9 @@ func TestRunRunsTheCommandTheLineNames(t *testing.T) {
 		stdout string
 		stderr string
 	}{
-		{"a bare word", []string{"status"}, "status\n", ""},
-		{"a namespaced word", []string{"report:list"}, "report:list\n", ""},
-		{"a namespaced word with its argument", []string{"report:create", "Q3"}, "report:create Q3\n", ""},
+		{"a command without a namespace", []string{"status"}, "status\n", ""},
+		{"a command in a namespace", []string{"report:list"}, "report:list\n", ""},
+		{"a command in a namespace with its argument", []string{"report:create", "Q3"}, "report:create Q3\n", ""},
 		{
 			"an old two word spelling",
 			[]string{"report", "new", "Q3"},
@@ -92,15 +92,15 @@ func TestRunRefusesALineThatNamesNoCommand(t *testing.T) {
 		args   []string
 		stderr string
 	}{
-		{"an unknown bare word", []string{"reprot"}, `myapp: unknown command "reprot", ` + everyCommand + "\n"},
-		{"a flag as the first word", []string{"-v"}, `myapp: unknown command "-v", ` + everyCommand + "\n"},
+		{"an unknown command", []string{"reprot"}, `myapp: unknown command "reprot", ` + everyCommand + "\n"},
+		{"a flag in place of a command", []string{"-v"}, `myapp: unknown command "-v", ` + everyCommand + "\n"},
 		{"an unknown namespace", []string{"audit:list"}, `myapp: unknown command "audit:list", ` + everyCommand + "\n"},
-		{"a bare word used as a namespace", []string{"status:x"}, `myapp: unknown command "status:x", ` +
+		{"a command used as a namespace", []string{"status:x"}, `myapp: unknown command "status:x", ` +
 			everyCommand + "\n"},
 		{"a namespace alone", []string{"report"}, `myapp: unknown command "report", ` + reportCommands + "\n"},
-		{"a wrong word in a namespace", []string{"report:delete"}, `myapp: unknown command "report:delete", ` +
+		{"an unknown command in a namespace", []string{"report:delete"}, `myapp: unknown command "report:delete", ` +
 			reportCommands + "\n"},
-		{"an empty word in a namespace", []string{"report:"}, `myapp: unknown command "report:", ` +
+		{"a namespace with nothing after its colon", []string{"report:"}, `myapp: unknown command "report:", ` +
 			reportCommands + "\n"},
 		{"an old spelling with another second word", []string{"report", "old"}, `myapp: unknown command "report", ` +
 			reportCommands + "\n"},
@@ -124,7 +124,7 @@ func TestRunRefusesALineThatNamesNoCommand(t *testing.T) {
 	}
 }
 
-func TestRunKeepsTheBaseWordsForTheEngine(t *testing.T) {
+func TestRunKeepsTheBaseCommandsForTheEngine(t *testing.T) {
 	t.Parallel()
 
 	got := execute(t, single(echo("list")), "list")

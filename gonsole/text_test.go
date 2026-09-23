@@ -82,14 +82,14 @@ Usage:
   myapp report:revoke <id>
 `
 
-// listPage is the help page of the list base word.
+// listPage is the help page of the list base command.
 const listPage = `list every command
 
 Usage:
   myapp list
 `
 
-// helpPage is the help page of the help base word.
+// helpPage is the help page of the help base command.
 const helpPage = `print the help of one command
 
 Usage:
@@ -109,12 +109,12 @@ func TestListingShowsEveryCommandUnderItsNamespace(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"no word", nil},
-		{"the list word", []string{"list"}},
-		{"the help word", []string{"help"}},
+		{"no command", nil},
+		{"the list command", []string{"list"}},
+		{"the help command", []string{"help"}},
 		{"a short help flag", []string{"-h"}},
 		{"a long help flag", []string{"--help"}},
-		{"the help word with a help flag", []string{"help", "-h"}},
+		{"the help command with a help flag", []string{"help", "-h"}},
 		{"a help flag before a double dash and a name", []string{"-h", "--", "report:create"}},
 	}
 	for _, tc := range cases {
@@ -200,7 +200,7 @@ func TestHelpPrintsThePageOfTheNamedCommand(t *testing.T) {
 		stdout string
 		stderr string
 	}{
-		{"the help word", []string{"help", "report:create"}, createPage, ""},
+		{"the help command", []string{"help", "report:create"}, createPage, ""},
 		{"a short help flag", []string{"report:create", "-h"}, createPage, ""},
 		{"a long help flag with one dash", []string{"report:create", "-help"}, createPage, ""},
 		{"a short help flag with two dashes", []string{"report:create", "--h"}, createPage, ""},
@@ -208,11 +208,11 @@ func TestHelpPrintsThePageOfTheNamedCommand(t *testing.T) {
 		{"a help flag before the name", []string{"-h", "report:create"}, createPage, ""},
 		{"a help flag after arguments and flags", []string{"report:create", "Q3", "-owner", "x", "-h"}, createPage, ""},
 		{"a command without flags", []string{"report:revoke", "-h"}, revokePage, ""},
-		{"the list word", []string{"list", "-h"}, listPage, ""},
-		{"the help word itself", []string{"help", "help"}, helpPage, ""},
+		{"the list command", []string{"list", "-h"}, listPage, ""},
+		{"the help command itself", []string{"help", "help"}, helpPage, ""},
 		{"an old spelling", []string{"report", "new", "-h"}, createPage,
 			"myapp: \"report new\" is deprecated, use \"report:create\"\n"},
-		{"the help word before an old spelling", []string{"help", "report", "new"}, createPage,
+		{"the help command before an old spelling", []string{"help", "report", "new"}, createPage,
 			"myapp: \"report new\" is deprecated, use \"report:create\"\n"},
 		{"a short help flag with an equals sign", []string{"report:create", "-h=false", "Q3"}, createPage, ""},
 		{"a long help flag with an equals sign", []string{"report:create", "--help=1", "Q3"}, createPage, ""},
@@ -246,7 +246,7 @@ func TestHelpRefusesANameNoCommandOwns(t *testing.T) {
 		args   []string
 		stderr string
 	}{
-		{"the help word", []string{"help", "reprot"},
+		{"the help command", []string{"help", "reprot"},
 			`myapp: unknown command "reprot", run "myapp list" to see every command` + "\n"},
 		{"a help flag", []string{"reprot", "-h"},
 			`myapp: unknown command "reprot", run "myapp list" to see every command` + "\n"},
@@ -287,7 +287,7 @@ func TestHelpFlagAfterADoubleDashIsAnArgument(t *testing.T) {
 	}
 }
 
-func TestHelpWordCountsOnlyAsTheFirstWord(t *testing.T) {
+func TestHelpCountsOnlyAsTheFirstArgument(t *testing.T) {
 	t.Parallel()
 
 	got := execute(t, catalog(), "report:create", "help")
@@ -362,8 +362,8 @@ func TestRunFailsWhenTheAnswerCannotBeWritten(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"the listing of no word", nil},
-		{"the listing of the list word", []string{"list"}},
+		{"the listing of no command", nil},
+		{"the listing of the list command", []string{"list"}},
 		{"the listing of a help flag", []string{"-h"}},
 		{"a help page", []string{"report:create", "-h"}},
 		{"a help page the flag package asks for", []string{"report:create", "-h=true"}},
@@ -396,7 +396,7 @@ func TestMisuseOfAKnownCommandEndsWithItsHelpPage(t *testing.T) {
 		{"a missing argument", []string{"report:create"}, "myapp: report:create wants <title>\n\n" + createPage},
 		{"an unknown flag", []string{"report:create", "-bogus", "Q3"},
 			"myapp: report:create: flag provided but not defined: -bogus\n\n" + createPage},
-		{"a stray argument to a base word", []string{"list", "extra"},
+		{"a stray argument to a base command", []string{"list", "extra"},
 			"myapp: list takes no arguments, got 1\n\n" + listPage},
 	}
 	for _, tc := range cases {

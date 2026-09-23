@@ -12,7 +12,7 @@ import (
 
 // Command is one command a program or a plugin offers.
 type Command struct {
-	// Name is the full name, a bare word or namespace:word in lowercase words joined by hyphens.
+	// Name is the full name, such as status or report:create, in lowercase words joined by hyphens.
 	Name string
 	// Summary is the one line the listing prints beside the name.
 	Summary string
@@ -64,7 +64,7 @@ func (c Call) DatabaseURL() (string, error) {
 
 // Step is one named schema step.
 type Step struct {
-	// Name is the word the step's output line names it by.
+	// Name is the step's name in its output line.
 	Name string
 	// Run applies the step against the database at databaseURL.
 	Run func(ctx context.Context, databaseURL string) error

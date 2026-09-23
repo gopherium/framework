@@ -72,7 +72,7 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 `, ""},
 		{"a command that fails", "", nil, []string{"report:revoke", "monthly"}, gonsole.ExitFailed, "",
 			"myapp: report \"monthly\" does not exist\n"},
-		{"a word no command owns", "", nil, []string{"reprot"}, gonsole.ExitMisused, "",
+		{"a name no command owns", "", nil, []string{"reprot"}, gonsole.ExitMisused, "",
 			"myapp: unknown command \"reprot\", run \"myapp list\" to see every command\n"},
 		{"a flag no command defines", "", nil, []string{"report:list", "-bogus"}, gonsole.ExitMisused, "",
 			`myapp: report:list: flag provided but not defined: -bogus

@@ -64,7 +64,7 @@ type Program struct {
 	Database string
 	// Renamed maps an old two word spelling to the full name of the command that replaced it.
 	Renamed map[string]string
-	// BareServes reports whether a run with no word serves instead of printing the listing.
+	// BareServes reports whether a run that names no command serves instead of printing the listing.
 	BareServes bool
 	// Serve runs the server.
 	Serve func(ctx context.Context, call Call) error
@@ -74,7 +74,7 @@ type Program struct {
 	Lock func(ctx context.Context, databaseURL string) (func(context.Context) error, error)
 	// Seed stores the core demo data over a migrated schema.
 	Seed func(ctx context.Context, call Call) error
-	// Commands are the program's own commands, each a bare word or namespace:word.
+	// Commands are the program's own commands, each named alone or as namespace:command.
 	Commands []Command
 	// Authorize refuses the call's actor when that account lacks capability.
 	Authorize func(ctx context.Context, call Call, capability string) error

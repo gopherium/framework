@@ -53,12 +53,12 @@ func (r *runner) commandless(ctx context.Context) error {
 
 // help prints the help page of the command args name, or the listing when they name none.
 func (r *runner) help(args []string) error {
-	words := r.rename(subject(args))
-	if len(words) == 0 {
+	named := r.rename(subject(args))
+	if len(named) == 0 {
 		_, err := io.WriteString(r.stdout, r.listing())
 		return err
 	}
-	cmd, err := r.find(words[0])
+	cmd, err := r.find(named[0])
 	if err != nil {
 		return err
 	}
@@ -80,16 +80,16 @@ func (r *runner) rename(args []string) []string {
 	return append([]string{name}, args[2:]...)
 }
 
-// find returns the command called word.
-func (r *runner) find(word string) (Command, error) {
-	if cmd, known := r.commands[word]; known {
+// find returns the command called name.
+func (r *runner) find(name string) (Command, error) {
+	if cmd, known := r.commands[name]; known {
 		return cmd, nil
 	}
-	namespace, _, _ := strings.Cut(word, ":")
-	if names := r.namespaces[namespace]; len(names) > 0 {
-		return Command{}, Misuse(fmt.Errorf("unknown command %q, want %s", word, alternatives(names)))
+	namespace, _, _ := strings.Cut(name, ":")
+	if members := r.namespaces[namespace]; len(members) > 0 {
+		return Command{}, Misuse(fmt.Errorf("unknown command %q, want %s", name, alternatives(members)))
 	}
-	return Command{}, Misuse(fmt.Errorf("unknown command %q, run %q to see every command", word, r.program.Name+" list"))
+	return Command{}, Misuse(fmt.Errorf("unknown command %q, run %q to see every command", name, r.program.Name+" list"))
 }
 
 // alternatives joins names as a list read aloud, such as a, b or c.

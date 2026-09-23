@@ -120,7 +120,7 @@ func TestVersionPrintsTheNameAndTheVersion(t *testing.T) {
 	}
 }
 
-func TestListingShowsOnlyTheBaseWordsTheProgramOffers(t *testing.T) {
+func TestListingShowsOnlyTheBaseCommandsTheProgramOffers(t *testing.T) {
 	t.Parallel()
 
 	var s schema
@@ -145,31 +145,31 @@ Available commands:
 	}
 }
 
-func TestRunHidesEachBaseWordTheProgramDoesNotOffer(t *testing.T) {
+func TestRunHidesEachBaseCommandTheProgramDoesNotOffer(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		word  string
-		leave func(p *gonsole.Program)
+		command string
+		leave   func(p *gonsole.Program)
 	}{
 		{"serve", func(p *gonsole.Program) { p.Serve = nil }},
 		{"migrate", func(p *gonsole.Program) { p.Migrations = nil }},
 		{"seed", func(p *gonsole.Program) { p.Seed = nil }},
 	}
 	for _, tc := range cases {
-		t.Run(tc.word, func(t *testing.T) {
+		t.Run(tc.command, func(t *testing.T) {
 			t.Parallel()
 
 			var s schema
 			p := keeper(&s)
 			tc.leave(&p)
 
-			got := execute(t, p, tc.word)
+			got := execute(t, p, tc.command)
 
 			if got.code != gonsole.ExitMisused {
 				t.Errorf("code = %d, want %d", got.code, gonsole.ExitMisused)
 			}
-			want := `myapp: unknown command "` + tc.word + `", run "myapp list" to see every command` + "\n"
+			want := `myapp: unknown command "` + tc.command + `", run "myapp list" to see every command` + "\n"
 			if got.stderr != want {
 				t.Errorf("stderr = %q, want %q", got.stderr, want)
 			}
@@ -177,12 +177,12 @@ func TestRunHidesEachBaseWordTheProgramDoesNotOffer(t *testing.T) {
 	}
 }
 
-func TestHelpPagesOfTheBaseWordsShowOnlyTheirOwnSwitches(t *testing.T) {
+func TestHelpPagesOfTheBaseCommandsShowOnlyTheirOwnSwitches(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		word string
-		page string
+		command string
+		page    string
 	}{
 		{"version", `print the version
 
@@ -214,11 +214,11 @@ Usage:
 `},
 	}
 	for _, tc := range cases {
-		t.Run(tc.word, func(t *testing.T) {
+		t.Run(tc.command, func(t *testing.T) {
 			t.Parallel()
 
 			var s schema
-			got := execute(t, keeper(&s), tc.word, "-h")
+			got := execute(t, keeper(&s), tc.command, "-h")
 
 			if got.stdout != tc.page {
 				t.Errorf("stdout = %q, want %q", got.stdout, tc.page)
@@ -227,7 +227,7 @@ Usage:
 	}
 }
 
-func TestBaseWordsFailWhenTheirAnswerCannotBeWritten(t *testing.T) {
+func TestBaseCommandsFailWhenTheirAnswerCannotBeWritten(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -329,7 +329,7 @@ func TestServeRunsTheProgramServer(t *testing.T) {
 		stderr     string
 		log        []string
 	}{
-		{"the serve word", []string{"serve"}, false, nil, gonsole.ExitDone, "", []string{served}},
+		{"the serve command", []string{"serve"}, false, nil, gonsole.ExitDone, "", []string{served}},
 		{"a commandless run of a program that serves", nil, true, nil, gonsole.ExitDone, "", []string{served}},
 		{"a server that fails", []string{"serve"}, false, errors.New("port 8080 is taken"), gonsole.ExitFailed,
 			"myapp: port 8080 is taken\n", []string{served}},

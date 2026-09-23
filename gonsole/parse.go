@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// asksHelp reports whether args ask for help, with the help word first or a help flag before any double dash.
+// asksHelp reports whether args ask for help, with the help command first or a help flag before any double dash.
 func asksHelp(args []string) bool {
 	if len(args) > 0 && args[0] == "help" {
 		return true
@@ -27,21 +27,21 @@ func asksHelp(args []string) bool {
 	return false
 }
 
-// subject returns the words of a help run before any double dash, without the help word and the help flags.
+// subject returns the arguments of a help run before any double dash, without the help command and the help flags.
 func subject(args []string) []string {
 	if args[0] == "help" {
 		args = args[1:]
 	}
-	var words []string
+	var kept []string
 	for _, arg := range args {
 		if arg == "--" {
 			break
 		}
 		if !isHelpFlag(arg) {
-			words = append(words, arg)
+			kept = append(kept, arg)
 		}
 	}
-	return words
+	return kept
 }
 
 // isHelpFlag reports whether arg is one of the flags that ask for help.
