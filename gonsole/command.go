@@ -4,6 +4,7 @@ package gonsole
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"io"
 )
@@ -18,6 +19,10 @@ type Command struct {
 	Args []string
 	// Flags declares the command's own flags, nil for none.
 	Flags func(fs *flag.FlagSet)
+	// Writes marks a command that writes to the database.
+	Writes bool
+	// JSON marks a command that answers one JSON document.
+	JSON bool
 	// Run does the command's work.
 	Run func(ctx context.Context, call Call) error
 }
@@ -32,4 +37,16 @@ type Call struct {
 	Stdout io.Writer
 	// Stderr is where a command writes progress and warnings.
 	Stderr io.Writer
+	// JSON reports whether -json was passed.
+	JSON bool
+	// Apply reports whether the run applies its writes.
+	Apply bool
+}
+
+// Encode writes v to Stdout as one indented JSON document.
+func (c Call) Encode(v any) error {
+	encoder := json.NewEncoder(c.Stdout)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(v)
 }

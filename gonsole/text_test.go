@@ -4,6 +4,7 @@ package gonsole_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -35,14 +36,17 @@ func catalog() gonsole.Program {
 	}
 }
 
+// intro is the paragraph every listing prints before its commands.
+const intro = "Every command answers -h. A command that offers -json answers one JSON document. " +
+	"A command that offers -yes is a dry run until -yes.\n"
+
 // catalogListing is the listing catalog prints.
 const catalogListing = `Myapp, a report keeper. Version 1.4.0
 
 Usage:
   myapp <command> [flags] [arguments]
 
-Every command answers -h.
-
+` + intro + `
 Available commands:
   help           print the help of one command
   list           list every command
@@ -148,8 +152,7 @@ func TestListingLeavesOutWhatTheProgramDoesNotSet(t *testing.T) {
 Usage:
   myapp <command> [flags] [arguments]
 
-Every command answers -h.
-
+` + intro + `
 Available commands:
   help    print the help of one command
   list    list every command
@@ -164,8 +167,7 @@ Available commands:
 Usage:
   myapp <command> [flags] [arguments]
 
-Every command answers -h.
-
+` + intro + `
 Available commands:
   help    print the help of one command
   list    list every command
@@ -291,6 +293,36 @@ func TestHelpWordCountsOnlyAsTheFirstWord(t *testing.T) {
 		t.Errorf("code = %d, want %d, stderr %q", got.code, gonsole.ExitDone, got.stderr)
 	}
 	if want := "title=help owner= draft=false\n"; got.stdout != want {
+		t.Errorf("stdout = %q, want %q", got.stdout, want)
+	}
+}
+
+func TestHelpPageListsTheEngineSwitchesTheCommandOffers(t *testing.T) {
+	t.Parallel()
+
+	create := gonsole.Command{
+		Name:    "report:create",
+		Summary: "create a report",
+		Args:    []string{"title"},
+		Writes:  true,
+		JSON:    true,
+		Run:     func(context.Context, gonsole.Call) error { return nil },
+	}
+
+	got := execute(t, single(create), "report:create", "-h")
+
+	want := `create a report
+
+Usage:
+  myapp report:create [flags] <title>
+
+Flags:
+  -json
+    	answer one JSON document
+  -yes
+    	apply the change, a dry run without it
+`
+	if got.stdout != want {
 		t.Errorf("stdout = %q, want %q", got.stdout, want)
 	}
 }

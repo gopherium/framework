@@ -15,7 +15,8 @@ import (
 func (r *runner) listing() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\nUsage:\n  %s <command> [flags] [arguments]\n\n", r.heading(), r.program.Name)
-	b.WriteString("Every command answers -h.\n\nAvailable commands:\n")
+	b.WriteString("Every command answers -h. A command that offers -json answers one JSON document. ")
+	b.WriteString("A command that offers -yes is a dry run until -yes.\n\nAvailable commands:\n")
 	width := r.width()
 	for _, name := range r.bare() {
 		fmt.Fprintf(&b, "  %-*s%s\n", width, name, r.commands[name].Summary)

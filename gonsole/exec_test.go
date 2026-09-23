@@ -52,8 +52,17 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 		stderr string
 	}{
 		{"a command that succeeds", "", []string{"report:list"}, gonsole.ExitDone, "quarterly\nyearly\n", ""},
-		{"a command that reads its input", "sales by region\n", []string{"report:create", "Q3"}, gonsole.ExitDone,
+		{"a write that reads its input", "sales by region\n", []string{"report:create", "-yes", "Q3"}, gonsole.ExitDone,
 			"created Q3: sales by region\n", ""},
+		{"a dry run of a write", "sales by region\n", []string{"report:create", "Q3"}, gonsole.ExitDone,
+			"would create Q3: sales by region\n", "myapp: dry run, nothing changed, pass -yes to apply\n"},
+		{"a command that answers a document", "", []string{"report:list", "-json"}, gonsole.ExitDone, `{
+  "reports": [
+    "quarterly",
+    "yearly"
+  ]
+}
+`, ""},
 		{"a command that fails", "", []string{"report:revoke", "monthly"}, gonsole.ExitFailed, "",
 			"myapp: report \"monthly\" does not exist\n"},
 		{"a word no command owns", "", []string{"reprot"}, gonsole.ExitMisused, "",
@@ -64,7 +73,11 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 list every report
 
 Usage:
-  myapp report:list
+  myapp report:list [flags]
+
+Flags:
+  -json
+    	answer one JSON document
 `},
 	}
 	for _, tc := range cases {

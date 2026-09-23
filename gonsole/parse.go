@@ -53,19 +53,32 @@ func isHelpFlag(arg string) bool {
 	return false
 }
 
-// flagSet returns a fresh flag set holding cmd's flags.
-func flagSet(cmd Command) *flag.FlagSet {
+// switches holds the engine flags one run of a command reads.
+type switches struct {
+	yes  bool
+	json bool
+}
+
+// flagSet returns a fresh flag set holding cmd's flags and the engine flags it offers, which set s.
+func flagSet(cmd Command, s *switches) *flag.FlagSet {
 	fs := flag.NewFlagSet(cmd.Name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	if cmd.Flags != nil {
 		cmd.Flags(fs)
+	}
+	if cmd.Writes {
+		fs.BoolVar(&s.yes, "yes", false, "apply the change, a dry run without it")
+	}
+	if cmd.JSON {
+		fs.BoolVar(&s.json, "json", false, "answer one JSON document")
 	}
 	return fs
 }
 
 // invoke reads args against cmd's flags and arguments and runs it.
 func (r *runner) invoke(ctx context.Context, cmd Command, args []string) error {
-	fs := flagSet(cmd)
+	var s switches
+	fs := flagSet(cmd, &s)
 	r.reached, r.flags = cmd, fs
 	positional, err := parse(fs, args)
 	if errors.Is(err, flag.ErrHelp) {
@@ -78,7 +91,15 @@ func (r *runner) invoke(ctx context.Context, cmd Command, args []string) error {
 	if err := arity(cmd, positional); err != nil {
 		return err
 	}
-	return cmd.Run(ctx, Call{Args: positional, Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr})
+	call := Call{
+		Args: positional, Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr,
+		JSON: s.json, Apply: s.yes || !cmd.Writes,
+	}
+	if err := cmd.Run(ctx, call); err != nil || call.Apply {
+		return err
+	}
+	r.warn("dry run, nothing changed, pass -yes to apply")
+	return nil
 }
 
 // parse sets the flags in args on fs and returns the positional arguments, flags and arguments in any order.

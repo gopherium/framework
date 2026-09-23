@@ -34,12 +34,17 @@ func createCommand() gonsole.Command {
 		Name:    "report:create",
 		Summary: "create a report",
 		Args:    []string{"title"},
+		Writes:  true,
 		Run: func(_ context.Context, call gonsole.Call) error {
 			description, err := bufio.NewReader(call.Stdin).ReadString('\n')
 			if err != nil && !errors.Is(err, io.EOF) {
 				return err
 			}
-			_, err = fmt.Fprintf(call.Stdout, "created %s: %s\n", call.Args[0], strings.TrimSpace(description))
+			verb := "would create"
+			if call.Apply {
+				verb = "created"
+			}
+			_, err = fmt.Fprintf(call.Stdout, "%s %s: %s\n", verb, call.Args[0], strings.TrimSpace(description))
 			return err
 		},
 	}
@@ -50,7 +55,11 @@ func listCommand() gonsole.Command {
 	return gonsole.Command{
 		Name:    "report:list",
 		Summary: "list every report",
+		JSON:    true,
 		Run: func(_ context.Context, call gonsole.Call) error {
+			if call.JSON {
+				return call.Encode(map[string][]string{"reports": held()})
+			}
 			for _, name := range held() {
 				if _, err := fmt.Fprintln(call.Stdout, name); err != nil {
 					return err
