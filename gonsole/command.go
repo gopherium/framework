@@ -23,6 +23,8 @@ type Command struct {
 	Writes bool
 	// JSON marks a command that answers one JSON document.
 	JSON bool
+	// Capability names the capability the acting account must hold, empty for none.
+	Capability string
 	// Run does the command's work.
 	Run func(ctx context.Context, call Call) error
 }
@@ -41,6 +43,8 @@ type Call struct {
 	JSON bool
 	// Apply reports whether the run applies its writes.
 	Apply bool
+	// Actor is the account the -as flag names.
+	Actor string
 }
 
 // Encode writes v to Stdout as one indented JSON document.

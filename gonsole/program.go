@@ -61,6 +61,10 @@ type Program struct {
 	Renamed map[string]string
 	// Commands are the program's own commands, each a bare word or namespace:word.
 	Commands []Command
+	// Authorize refuses the call's actor when that account lacks capability.
+	Authorize func(ctx context.Context, call Call, capability string) error
+	// Record stores one entry naming the actor and the command it applied.
+	Record func(ctx context.Context, call Call, command string) error
 }
 
 // Main runs p over the process arguments and the standard streams and returns the exit code.

@@ -57,6 +57,7 @@ func isHelpFlag(arg string) bool {
 type switches struct {
 	yes  bool
 	json bool
+	as   string
 }
 
 // flagSet returns a fresh flag set holding cmd's flags and the engine flags it offers, which set s.
@@ -72,34 +73,44 @@ func flagSet(cmd Command, s *switches) *flag.FlagSet {
 	if cmd.JSON {
 		fs.BoolVar(&s.json, "json", false, "answer one JSON document")
 	}
+	if cmd.Capability != "" {
+		fs.StringVar(&s.as, "as", "", "`email` address of the account acting")
+	}
 	return fs
 }
 
-// invoke reads args against cmd's flags and arguments and runs it.
+// invoke reads args against cmd's flags and arguments and runs it, or prints its help page when they ask for it.
 func (r *runner) invoke(ctx context.Context, cmd Command, args []string) error {
+	call, err := r.prepare(cmd, args)
+	if errors.Is(err, flag.ErrHelp) {
+		_, err = io.WriteString(r.stdout, r.page(r.reached, r.flags))
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	return r.perform(ctx, cmd, call)
+}
+
+// prepare reads args against cmd's flags and arguments and returns the call that runs it.
+func (r *runner) prepare(cmd Command, args []string) (Call, error) {
 	var s switches
 	fs := flagSet(cmd, &s)
 	r.reached, r.flags = cmd, fs
 	positional, err := parse(fs, args)
-	if errors.Is(err, flag.ErrHelp) {
-		_, err = io.WriteString(r.stdout, r.page(cmd, fs))
-		return err
-	}
 	if err != nil {
-		return Misuse(fmt.Errorf("%s: %w", cmd.Name, err))
+		return Call{}, Misuse(fmt.Errorf("%s: %w", cmd.Name, err))
 	}
 	if err := arity(cmd, positional); err != nil {
-		return err
+		return Call{}, err
 	}
-	call := Call{
+	if cmd.Capability != "" && s.as == "" {
+		return Call{}, Misuse(fmt.Errorf("%s wants -as <email>", cmd.Name))
+	}
+	return Call{
 		Args: positional, Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr,
-		JSON: s.json, Apply: s.yes || !cmd.Writes,
-	}
-	if err := cmd.Run(ctx, call); err != nil || call.Apply {
-		return err
-	}
-	r.warn("dry run, nothing changed, pass -yes to apply")
-	return nil
+		JSON: s.json, Apply: s.yes || !cmd.Writes, Actor: s.as,
+	}, nil
 }
 
 // parse sets the flags in args on fs and returns the positional arguments, flags and arguments in any order.
