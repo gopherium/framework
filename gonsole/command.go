@@ -39,6 +39,8 @@ type Call struct {
 	Stdout io.Writer
 	// Stderr is where a command writes progress and warnings.
 	Stderr io.Writer
+	// Env reads the program's settings.
+	Env Env
 	// JSON reports whether -json was passed.
 	JSON bool
 	// Apply reports whether the run applies its writes.

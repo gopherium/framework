@@ -57,6 +57,8 @@ type Program struct {
 	Version string
 	// Footer is the text the listing closes with.
 	Footer string
+	// Env reads the program's settings under its prefix.
+	Env Env
 	// Renamed maps an old two word spelling to the full name of the command that replaced it.
 	Renamed map[string]string
 	// Commands are the program's own commands, each a bare word or namespace:word.

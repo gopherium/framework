@@ -108,7 +108,7 @@ func (r *runner) prepare(cmd Command, args []string) (Call, error) {
 		return Call{}, Misuse(fmt.Errorf("%s wants -as <email>", cmd.Name))
 	}
 	return Call{
-		Args: positional, Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr,
+		Args: positional, Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr, Env: r.settings(),
 		JSON: s.json, Apply: s.yes || !cmd.Writes, Actor: s.as,
 	}, nil
 }
