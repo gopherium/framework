@@ -59,7 +59,13 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 		{"a word no command owns", "", []string{"reprot"}, gonsole.ExitMisused, "",
 			"myapp: unknown command \"reprot\", run \"myapp list\" to see every command\n"},
 		{"a flag no command defines", "", []string{"report:list", "-bogus"}, gonsole.ExitMisused, "",
-			"myapp: report:list: flag provided but not defined: -bogus\n"},
+			`myapp: report:list: flag provided but not defined: -bogus
+
+list every report
+
+Usage:
+  myapp report:list
+`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

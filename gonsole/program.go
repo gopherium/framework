@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 )
 
 // ExitDone is the code of a finished command, a help page or a dry run.
@@ -50,6 +51,12 @@ func (m misuse) Unwrap() []error {
 type Program struct {
 	// Name is the executable name, the first word of every usage line and error.
 	Name string
+	// Title is the line the listing opens with.
+	Title string
+	// Version is the program's version.
+	Version string
+	// Footer is the text the listing closes with.
+	Footer string
 	// Renamed maps an old two word spelling to the full name of the command that replaced it.
 	Renamed map[string]string
 	// Commands are the program's own commands, each a bare word or namespace:word.
@@ -63,11 +70,8 @@ func Main(p Program) int {
 
 // Run runs the command args name and returns the exit code.
 func (p Program) Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	commands, namespaces := index(p.Commands)
-	r := &runner{
-		program: p, commands: commands, namespaces: namespaces,
-		stdin: stdin, stdout: stdout, stderr: stderr,
-	}
+	r := &runner{program: p, stdin: stdin, stdout: stdout, stderr: stderr}
+	r.commands, r.namespaces = index(slices.Concat(p.Commands, r.base()))
 	return r.exit(r.dispatch(ctx, args))
 }
 
@@ -79,6 +83,8 @@ type runner struct {
 	stdin      io.Reader
 	stdout     io.Writer
 	stderr     io.Writer
+	reached    Command
+	flags      *flag.FlagSet
 }
 
 // exit prints err and returns the exit code it earns.
@@ -87,10 +93,13 @@ func (r *runner) exit(err error) int {
 		return ExitDone
 	}
 	r.warn("%v", err)
-	if errors.Is(err, ErrMisused) {
-		return ExitMisused
+	if !errors.Is(err, ErrMisused) {
+		return ExitFailed
 	}
-	return ExitFailed
+	if r.flags != nil {
+		_, _ = io.WriteString(r.stderr, "\n"+r.page(r.reached, r.flags))
+	}
+	return ExitMisused
 }
 
 // warn writes one line to stderr opened by the program name.

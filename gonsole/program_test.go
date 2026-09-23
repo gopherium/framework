@@ -92,7 +92,13 @@ func TestRunAnswersTheExitCodeTheCommandEarns(t *testing.T) {
 			"a command that reports misuse",
 			gonsole.Misuse(errors.New(`unknown format "pdf"`)),
 			gonsole.ExitMisused,
-			"myapp: unknown format \"pdf\"\n",
+			`myapp: unknown format "pdf"
+
+list every report
+
+Usage:
+  myapp report:list
+`,
 		},
 		{"a command that wraps the help error", fmt.Errorf("report:list: %w", flag.ErrHelp), gonsole.ExitDone, ""},
 	}

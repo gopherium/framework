@@ -5,6 +5,7 @@ package gonsole
 import (
 	"context"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 )
@@ -25,22 +26,36 @@ func index(commands []Command) (map[string]Command, map[string][]string) {
 	return byName, namespaces
 }
 
-// dispatch runs the command args name.
+// dispatch runs the command args name, the help they ask for, or the listing when they name none.
 func (r *runner) dispatch(ctx context.Context, args []string) error {
-	word, rest := head(r.rename(args))
-	cmd, err := r.find(word)
+	if asksHelp(args) {
+		return r.help(args)
+	}
+	if len(args) == 0 {
+		_, err := io.WriteString(r.stdout, r.listing())
+		return err
+	}
+	args = r.rename(args)
+	cmd, err := r.find(args[0])
 	if err != nil {
 		return err
 	}
-	return r.invoke(ctx, cmd, rest)
+	return r.invoke(ctx, cmd, args[1:])
 }
 
-// head splits args into the first word and the rest.
-func head(args []string) (string, []string) {
-	if len(args) == 0 {
-		return "", nil
+// help prints the help page of the command args name, or the listing when they name none.
+func (r *runner) help(args []string) error {
+	words := r.rename(subject(args))
+	if len(words) == 0 {
+		_, err := io.WriteString(r.stdout, r.listing())
+		return err
 	}
-	return args[0], args[1:]
+	cmd, err := r.find(words[0])
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(r.stdout, r.page(cmd, flagSet(cmd)))
+	return err
 }
 
 // rename returns args with an old two word spelling replaced by the name of the command that replaced it.

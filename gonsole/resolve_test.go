@@ -92,7 +92,6 @@ func TestRunRefusesALineThatNamesNoCommand(t *testing.T) {
 		args   []string
 		stderr string
 	}{
-		{"no word", nil, `myapp: unknown command "", ` + everyCommand + "\n"},
 		{"an unknown bare word", []string{"reprot"}, `myapp: unknown command "reprot", ` + everyCommand + "\n"},
 		{"a flag as the first word", []string{"-v"}, `myapp: unknown command "-v", ` + everyCommand + "\n"},
 		{"an unknown namespace", []string{"audit:list"}, `myapp: unknown command "audit:list", ` + everyCommand + "\n"},
@@ -122,6 +121,16 @@ func TestRunRefusesALineThatNamesNoCommand(t *testing.T) {
 				t.Errorf("stdout = %q, want empty", got.stdout)
 			}
 		})
+	}
+}
+
+func TestRunKeepsTheBaseWordsForTheEngine(t *testing.T) {
+	t.Parallel()
+
+	got := execute(t, single(echo("list")), "list")
+
+	if !strings.HasPrefix(got.stdout, "myapp\n\nUsage:\n") {
+		t.Errorf("stdout = %q, want the listing", got.stdout)
 	}
 }
 

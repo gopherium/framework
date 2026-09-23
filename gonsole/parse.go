@@ -4,20 +4,74 @@ package gonsole
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"strings"
 )
 
-// invoke reads args against cmd's flags and arguments and runs it.
-func (r *runner) invoke(ctx context.Context, cmd Command, args []string) error {
+// asksHelp reports whether args ask for help, with the help word first or a help flag before any double dash.
+func asksHelp(args []string) bool {
+	if len(args) > 0 && args[0] == "help" {
+		return true
+	}
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if isHelpFlag(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+// subject returns the words of a help run before any double dash, without the help word and the help flags.
+func subject(args []string) []string {
+	if args[0] == "help" {
+		args = args[1:]
+	}
+	var words []string
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if !isHelpFlag(arg) {
+			words = append(words, arg)
+		}
+	}
+	return words
+}
+
+// isHelpFlag reports whether arg is one of the flags that ask for help.
+func isHelpFlag(arg string) bool {
+	switch arg {
+	case "-h", "-help", "--h", "--help":
+		return true
+	}
+	return false
+}
+
+// flagSet returns a fresh flag set holding cmd's flags.
+func flagSet(cmd Command) *flag.FlagSet {
 	fs := flag.NewFlagSet(cmd.Name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	if cmd.Flags != nil {
 		cmd.Flags(fs)
 	}
+	return fs
+}
+
+// invoke reads args against cmd's flags and arguments and runs it.
+func (r *runner) invoke(ctx context.Context, cmd Command, args []string) error {
+	fs := flagSet(cmd)
+	r.reached, r.flags = cmd, fs
 	positional, err := parse(fs, args)
+	if errors.Is(err, flag.ErrHelp) {
+		_, err = io.WriteString(r.stdout, r.page(cmd, fs))
+		return err
+	}
 	if err != nil {
 		return Misuse(fmt.Errorf("%s: %w", cmd.Name, err))
 	}

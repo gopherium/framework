@@ -112,8 +112,8 @@ func TestRunRefusesAMalformedCommandLine(t *testing.T) {
 			if got.code != gonsole.ExitMisused {
 				t.Errorf("code = %d, want %d", got.code, gonsole.ExitMisused)
 			}
-			if got.stderr != tc.stderr {
-				t.Errorf("stderr = %q, want %q", got.stderr, tc.stderr)
+			if firstLine(got.stderr) != tc.stderr {
+				t.Errorf("stderr opens with %q, want %q", firstLine(got.stderr), tc.stderr)
 			}
 			if got.stdout != "" {
 				t.Errorf("stdout = %q, want the command never run", got.stdout)
@@ -147,8 +147,8 @@ func TestRunCountsArgumentsInPlainEnglish(t *testing.T) {
 			if got.code != gonsole.ExitMisused {
 				t.Errorf("code = %d, want %d", got.code, gonsole.ExitMisused)
 			}
-			if got.stderr != tc.stderr {
-				t.Errorf("stderr = %q, want %q", got.stderr, tc.stderr)
+			if firstLine(got.stderr) != tc.stderr {
+				t.Errorf("stderr opens with %q, want %q", firstLine(got.stderr), tc.stderr)
 			}
 		})
 	}
@@ -162,8 +162,8 @@ func TestRunRefusesAFlagOnACommandWithoutFlags(t *testing.T) {
 	if got.code != gonsole.ExitMisused {
 		t.Errorf("code = %d, want %d", got.code, gonsole.ExitMisused)
 	}
-	if want := "myapp: report:list: flag provided but not defined: -all\n"; got.stderr != want {
-		t.Errorf("stderr = %q, want %q", got.stderr, want)
+	if want := "myapp: report:list: flag provided but not defined: -all\n"; firstLine(got.stderr) != want {
+		t.Errorf("stderr opens with %q, want %q", firstLine(got.stderr), want)
 	}
 }
 
