@@ -20,6 +20,7 @@ func (r *runner) base() []Command {
 		{Name: "help", Summary: "print the help of one command", Run: list},
 		{Name: "list", Summary: "list every command", Run: list},
 		{Name: "version", Summary: "print the version", JSON: true, Run: r.version},
+		{Name: "check", Summary: "check every setting, every plugin and every command name", Run: r.check},
 	}
 	if r.program.Serve != nil {
 		commands = append(commands, Command{Name: "serve", Summary: "run the server", Run: r.program.Serve})
@@ -32,6 +33,17 @@ func (r *runner) base() []Command {
 		commands = append(commands, Command{Name: "seed", Summary: "store the demo data", Writes: true, Run: r.seed})
 	}
 	return commands
+}
+
+// check runs the program's settings check and answers that the settings and command names are valid.
+func (r *runner) check(ctx context.Context, call Call) error {
+	if r.program.Validate != nil {
+		if err := r.program.Validate(ctx, call); err != nil {
+			return err
+		}
+	}
+	_, err := io.WriteString(call.Stdout, "settings, plugins and command names are valid\n")
+	return err
 }
 
 // version prints the program's name and version, as one document with -json.

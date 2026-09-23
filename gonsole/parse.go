@@ -61,11 +61,13 @@ type switches struct {
 }
 
 // flagSet returns a fresh flag set holding cmd's flags and the engine flags it offers, which set s.
-func flagSet(cmd Command, s *switches) *flag.FlagSet {
+func flagSet(cmd Command, s *switches) (*flag.FlagSet, error) {
 	fs := flag.NewFlagSet(cmd.Name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	if cmd.Flags != nil {
-		cmd.Flags(fs)
+		if value, panicked := declare(cmd, fs); panicked {
+			return nil, fmt.Errorf("gonsole: "+flagsPanicked, cmd.Name, value)
+		}
 	}
 	if cmd.Writes {
 		fs.BoolVar(&s.yes, "yes", false, "apply the change, a dry run without it")
@@ -76,11 +78,12 @@ func flagSet(cmd Command, s *switches) *flag.FlagSet {
 	if cmd.Capability != "" {
 		fs.StringVar(&s.as, "as", "", "`email` address of the account acting")
 	}
-	return fs
+	return fs, nil
 }
 
 // invoke reads args against cmd's flags and arguments and runs it, or prints its help page when they ask for it.
-func (r *runner) invoke(ctx context.Context, cmd Command, args []string) error {
+func (r *runner) invoke(ctx context.Context, cmd Command, args []string) (err error) {
+	defer recoverRun(cmd.Name, &err)
 	call, err := r.prepare(cmd, args)
 	if errors.Is(err, flag.ErrHelp) {
 		_, err = io.WriteString(r.stdout, r.page(r.reached, r.flags))
@@ -95,7 +98,10 @@ func (r *runner) invoke(ctx context.Context, cmd Command, args []string) error {
 // prepare reads args against cmd's flags and arguments and returns the call that runs it.
 func (r *runner) prepare(cmd Command, args []string) (Call, error) {
 	var s switches
-	fs := flagSet(cmd, &s)
+	fs, err := flagSet(cmd, &s)
+	if err != nil {
+		return Call{}, err
+	}
 	r.reached, r.flags = cmd, fs
 	positional, err := parse(fs, args)
 	if err != nil {

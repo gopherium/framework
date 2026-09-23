@@ -2,7 +2,11 @@
 
 package gonsole
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"runtime/debug"
+)
 
 // perform authorizes the acting account of call, migrates when cmd asks, runs cmd and records the run when it applied.
 func (r *runner) perform(ctx context.Context, cmd Command, call Call) error {
@@ -38,4 +42,23 @@ func (r *runner) record(ctx context.Context, cmd Command, call Call) error {
 		return nil
 	}
 	return r.program.Record(ctx, call, cmd.Name)
+}
+
+// panicked is a panic recovered from the run of one command.
+type panicked struct {
+	command string
+	value   any
+	stack   []byte
+}
+
+// Error returns the line naming the command and the panic value.
+func (p panicked) Error() string {
+	return fmt.Sprintf("%s: panic: %v", p.command, p.value)
+}
+
+// recoverRun turns a panic in the run of the command called name into the error err points at.
+func recoverRun(name string, err *error) {
+	if value := recover(); value != nil {
+		*err = panicked{command: name, value: value, stack: debug.Stack()}
+	}
 }

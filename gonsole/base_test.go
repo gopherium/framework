@@ -133,6 +133,7 @@ Usage:
 
 ` + intro + `
 Available commands:
+  check    check every setting, every plugin and every command name
   help     print the help of one command
   list     list every command
   migrate  apply every schema step
@@ -212,6 +213,11 @@ Flags:
 Usage:
   myapp serve
 `},
+		{"check", `check every setting, every plugin and every command name
+
+Usage:
+  myapp check
+`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.command, func(t *testing.T) {
@@ -237,6 +243,7 @@ func TestBaseCommandsFailWhenTheirAnswerCannotBeWritten(t *testing.T) {
 		{"the version", []string{"version"}},
 		{"the version document", []string{"version", "-json"}},
 		{"a seed dry run", []string{"seed"}},
+		{"the check", []string{"check"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -62,12 +62,16 @@ type Program struct {
 	Env Env
 	// Database is the name of the setting that holds the database address.
 	Database string
+	// Reserved lists namespaces core keeps before any of its commands uses them.
+	Reserved []string
 	// Renamed maps an old two word spelling to the full name of the command that replaced it.
 	Renamed map[string]string
 	// BareServes reports whether a run that names no command serves instead of printing the listing.
 	BareServes bool
 	// Serve runs the server.
 	Serve func(ctx context.Context, call Call) error
+	// Validate reads and checks every core setting.
+	Validate func(ctx context.Context, call Call) error
 	// Migrations are the core schema steps in the order they apply.
 	Migrations []Step
 	// Lock holds the database against concurrent migrations and returns its release.
@@ -91,6 +95,9 @@ func Main(p Program) int {
 func (p Program) Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	r := &runner{program: p, stdin: stdin, stdout: stdout, stderr: stderr}
 	r.commands, r.namespaces = index(slices.Concat(p.Commands, r.base()))
+	if err := p.Check(Loaded{}); err != nil {
+		return r.exit(err)
+	}
 	return r.exit(r.dispatch(ctx, args))
 }
 
@@ -113,6 +120,10 @@ func (r *runner) exit(err error) int {
 	}
 	for line := range strings.SplitSeq(err.Error(), "\n") {
 		r.warn("%s", line)
+	}
+	var crash panicked
+	if errors.As(err, &crash) {
+		_, _ = r.stderr.Write(crash.stack)
 	}
 	if !errors.Is(err, ErrMisused) {
 		return ExitFailed

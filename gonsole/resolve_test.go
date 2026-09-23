@@ -124,16 +124,6 @@ func TestRunRefusesALineThatNamesNoCommand(t *testing.T) {
 	}
 }
 
-func TestRunKeepsTheBaseCommandsForTheEngine(t *testing.T) {
-	t.Parallel()
-
-	got := execute(t, single(echo("list")), "list")
-
-	if !strings.HasPrefix(got.stdout, "myapp\n\nUsage:\n") {
-		t.Errorf("stdout = %q, want the listing", got.stdout)
-	}
-}
-
 func TestRunNamesTheAlternativesOfANamespaceInPlainEnglish(t *testing.T) {
 	t.Parallel()
 

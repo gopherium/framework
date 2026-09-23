@@ -48,6 +48,7 @@ Usage:
 
 ` + intro + `
 Available commands:
+  check          check every setting, every plugin and every command name
   help           print the help of one command
   list           list every command
   status         print the store status
@@ -155,6 +156,7 @@ Usage:
 
 ` + intro + `
 Available commands:
+  check    check every setting, every plugin and every command name
   help     print the help of one command
   list     list every command
   status   print the store status
@@ -171,6 +173,7 @@ Usage:
 
 ` + intro + `
 Available commands:
+  check    check every setting, every plugin and every command name
   help     print the help of one command
   list     list every command
   status   print the store status

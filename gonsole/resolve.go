@@ -62,7 +62,11 @@ func (r *runner) help(args []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.WriteString(r.stdout, r.page(cmd, flagSet(cmd, &switches{})))
+	fs, err := flagSet(cmd, &switches{})
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(r.stdout, r.page(cmd, fs))
 	return err
 }
 
