@@ -26,14 +26,13 @@ func index(commands []Command) (map[string]Command, map[string][]string) {
 	return byName, namespaces
 }
 
-// dispatch runs the command args name, the help they ask for, or the listing when they name none.
+// dispatch runs the command args name, the help they ask for, or the commandless run when they name none.
 func (r *runner) dispatch(ctx context.Context, args []string) error {
 	if asksHelp(args) {
 		return r.help(args)
 	}
 	if len(args) == 0 {
-		_, err := io.WriteString(r.stdout, r.listing())
-		return err
+		return r.commandless(ctx)
 	}
 	args = r.rename(args)
 	cmd, err := r.find(args[0])
@@ -41,6 +40,15 @@ func (r *runner) dispatch(ctx context.Context, args []string) error {
 		return err
 	}
 	return r.invoke(ctx, cmd, args[1:])
+}
+
+// commandless serves when the program serves on a run that names no command, and prints the listing otherwise.
+func (r *runner) commandless(ctx context.Context) error {
+	if r.program.BareServes {
+		return r.dispatch(ctx, []string{"serve"})
+	}
+	_, err := io.WriteString(r.stdout, r.listing())
+	return err
 }
 
 // help prints the help page of the command args name, or the listing when they name none.

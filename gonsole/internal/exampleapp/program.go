@@ -20,11 +20,14 @@ func held() []string {
 	return []string{"quarterly", "yearly"}
 }
 
-// Program returns the example program, myapp, with its report commands.
-func Program() gonsole.Program {
+// Program returns the example program, myapp, whose settings getenv reads.
+func Program(getenv func(string) string) gonsole.Program {
 	return gonsole.Program{
-		Name:     "myapp",
-		Commands: []gonsole.Command{createCommand(), listCommand(), revokeCommand()},
+		Name:       "myapp",
+		Env:        gonsole.Env{Prefix: "MYAPP_", Getenv: getenv},
+		Database:   "DATABASE_URL",
+		Migrations: []gonsole.Step{{Name: "reports", Run: func(context.Context, string) error { return nil }}},
+		Commands:   []gonsole.Command{createCommand(), listCommand(), revokeCommand()},
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 )
 
 // ExitDone is the code of a finished command, a help page or a dry run.
@@ -53,14 +54,26 @@ type Program struct {
 	Name string
 	// Title is the line the listing opens with.
 	Title string
-	// Version is the program's version.
+	// Version is the version the version command prints.
 	Version string
 	// Footer is the text the listing closes with.
 	Footer string
 	// Env reads the program's settings under its prefix.
 	Env Env
+	// Database is the name of the setting that holds the database address.
+	Database string
 	// Renamed maps an old two word spelling to the full name of the command that replaced it.
 	Renamed map[string]string
+	// BareServes reports whether a run with no word serves instead of printing the listing.
+	BareServes bool
+	// Serve runs the server.
+	Serve func(ctx context.Context, call Call) error
+	// Migrations are the core schema steps in the order they apply.
+	Migrations []Step
+	// Lock holds the database against concurrent migrations and returns its release.
+	Lock func(ctx context.Context, databaseURL string) (func(context.Context) error, error)
+	// Seed stores the core demo data over a migrated schema.
+	Seed func(ctx context.Context, call Call) error
 	// Commands are the program's own commands, each a bare word or namespace:word.
 	Commands []Command
 	// Authorize refuses the call's actor when that account lacks capability.
@@ -98,7 +111,9 @@ func (r *runner) exit(err error) int {
 	if err == nil || errors.Is(err, flag.ErrHelp) {
 		return ExitDone
 	}
-	r.warn("%v", err)
+	for line := range strings.SplitSeq(err.Error(), "\n") {
+		r.warn("%s", line)
+	}
 	if !errors.Is(err, ErrMisused) {
 		return ExitFailed
 	}

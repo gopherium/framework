@@ -5,6 +5,7 @@ package gonsole
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 )
@@ -23,6 +24,8 @@ type Command struct {
 	Writes bool
 	// JSON marks a command that answers one JSON document.
 	JSON bool
+	// Migrates marks a core command the core schema steps run before.
+	Migrates bool
 	// Capability names the capability the acting account must hold, empty for none.
 	Capability string
 	// Run does the command's work.
@@ -47,6 +50,24 @@ type Call struct {
 	Apply bool
 	// Actor is the account the -as flag names.
 	Actor string
+	// database is the name of the setting that holds the database address.
+	database string
+}
+
+// DatabaseURL returns the program's database address, an error naming the setting when it is empty.
+func (c Call) DatabaseURL() (string, error) {
+	if c.database == "" {
+		return "", errors.New("gonsole: no database setting in this call")
+	}
+	return c.Env.Required(c.database)
+}
+
+// Step is one named schema step.
+type Step struct {
+	// Name is the word the step's output line names it by.
+	Name string
+	// Run applies the step against the database at databaseURL.
+	Run func(ctx context.Context, databaseURL string) error
 }
 
 // Encode writes v to Stdout as one indented JSON document.

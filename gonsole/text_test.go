@@ -51,6 +51,7 @@ Available commands:
   help           print the help of one command
   list           list every command
   status         print the store status
+  version        print the version
  audit
   audit:export   export the audit trail
  report
@@ -154,9 +155,10 @@ Usage:
 
 ` + intro + `
 Available commands:
-  help    print the help of one command
-  list    list every command
-  status  print the store status
+  help     print the help of one command
+  list     list every command
+  status   print the store status
+  version  print the version
 `,
 		},
 		{
@@ -169,9 +171,10 @@ Usage:
 
 ` + intro + `
 Available commands:
-  help    print the help of one command
-  list    list every command
-  status  print the store status
+  help     print the help of one command
+  list     list every command
+  status   print the store status
+  version  print the version
 `,
 		},
 	}
