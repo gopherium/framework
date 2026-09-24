@@ -11,6 +11,8 @@ need and ignore the rest.
 
 ## Modules
 
+- [`gonsole`](gonsole/) runs the command line of a Go program built from
+  core commands, settings and compiled plugins.
 - [`gottext`](gottext/) reads, writes and syncs gettext catalogs for
   TypeScript applications, published to npm as `@gopherium/gottext`.
 - [`mailkit`](mailkit/) renders mail from template files and sends it
@@ -18,13 +20,12 @@ need and ignore the rest.
 
 ## Design
 
-One repository, one self-contained brick per directory, no shared code
-between them. A Go brick carries its own go.mod and a TypeScript brick
-its own package.json, each with its own CHANGELOG and lint
-configuration, released independently under a path-prefixed tag such
-as `mailkit/v0.1.0` or `gottext/v0.4.0`. Bricks depend on published
-versions only, never on sibling source, so what you pin is what you
-get.
+One repository, one self-contained brick per directory. A Go brick
+carries its own go.mod and a TypeScript brick its own package.json,
+each with its own CHANGELOG and lint configuration, released
+independently under a path-prefixed tag such as `mailkit/v0.1.0` or
+`gottext/v0.4.0`. Bricks share code only through those published tags,
+never through sibling source, so what you pin is what you get.
 
 ## Reporting security issues
 
