@@ -82,6 +82,8 @@ type Program struct {
 	Seed func(ctx context.Context, call Call) error
 	// Commands are the program's own commands, each named alone or as namespace:command.
 	Commands []Command
+	// Plugins registers the compiled plugins and starts none of them.
+	Plugins func(ctx context.Context, call Call) (Loaded, error)
 	// Authorize refuses the call's actor when that account lacks capability.
 	Authorize func(ctx context.Context, call Call, capability string) error
 	// Record stores one entry naming the actor and the command it applied.
@@ -103,7 +105,10 @@ func (p Program) Run(ctx context.Context, args []string, stdin io.Reader, stdout
 	if err := p.Check(Loaded{}); err != nil {
 		return r.exit(err)
 	}
-	return r.exit(r.dispatch(ctx, args))
+	r.plugins = &memo{register: p.Plugins, call: Call{
+		Stdin: stdin, Stdout: stdout, Stderr: stderr, Env: r.settings(), database: p.Database,
+	}}
+	return r.exit(r.finish(ctx, r.dispatch(ctx, args)))
 }
 
 // runner is one run of a program over its streams.
@@ -111,11 +116,21 @@ type runner struct {
 	program    Program
 	commands   map[string]Command
 	namespaces map[string][]string
+	plugins    *memo
 	stdin      io.Reader
 	stdout     io.Writer
 	stderr     io.Writer
 	reached    Command
 	flags      *flag.FlagSet
+}
+
+// finish releases the plugins and returns err joined with the release failure, the failure alone after a help answer.
+func (r *runner) finish(ctx context.Context, err error) error {
+	released := r.plugins.release(ctx)
+	if errors.Is(err, flag.ErrHelp) {
+		return released
+	}
+	return errors.Join(err, released)
 }
 
 // exit prints err and returns the exit code it earns.
@@ -126,8 +141,7 @@ func (r *runner) exit(err error) int {
 	for line := range strings.SplitSeq(err.Error(), "\n") {
 		r.warn("%s", line)
 	}
-	var crash panicked
-	if errors.As(err, &crash) {
+	for _, crash := range crashes(err) {
 		_, _ = r.stderr.Write(crash.stack)
 	}
 	if !errors.Is(err, ErrMisused) {

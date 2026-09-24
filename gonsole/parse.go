@@ -115,7 +115,7 @@ func (r *runner) prepare(cmd Command, args []string) (Call, error) {
 	}
 	return Call{
 		Args: positional, Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr, Env: r.settings(),
-		JSON: s.json, Apply: s.yes || !cmd.Writes, Actor: s.as, database: r.program.Database,
+		JSON: s.json, Apply: s.yes || !cmd.Writes, Actor: s.as, database: r.program.Database, plugins: r.plugins,
 	}, nil
 }
 

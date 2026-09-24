@@ -3,8 +3,10 @@
 package gonsole
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"sync"
 )
 
 // Group is the commands one plugin offers under the namespace equal to its id.
@@ -56,4 +58,47 @@ func provided(id string, p Provider) (commands []Command, err error) {
 type Loaded struct {
 	// Groups are the command groups, one per plugin that offers commands.
 	Groups []Group
+	// Release stops every registered plugin and closes what registering opened.
+	Release func(ctx context.Context) error
+}
+
+// memo is the one registration of the plugins a run makes.
+type memo struct {
+	register func(ctx context.Context, call Call) (Loaded, error)
+	call     Call
+	mu       sync.Mutex
+	done     bool
+	loaded   Loaded
+	err      error
+}
+
+// answer registers the plugins on its first call and returns that registration's answer on every call.
+func (m *memo) answer(ctx context.Context) (Loaded, error) {
+	if m.register == nil {
+		return Loaded{}, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.done {
+		m.done = true
+		m.loaded, m.err = m.registered(ctx)
+	}
+	return m.loaded, m.err
+}
+
+// registered returns what the program's Plugins answers, a panic inside it as the error naming the plugins.
+func (m *memo) registered(ctx context.Context) (loaded Loaded, err error) {
+	defer recoverRun("plugins", &err)
+	return m.register(ctx, m.call)
+}
+
+// release stops the registered plugins under a context the end of the run cannot cancel, nothing when none registered.
+func (m *memo) release(ctx context.Context) (err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	defer recoverRun("plugins", &err)
+	if err := stopWithin(context.WithoutCancel(ctx), m.loaded.Release); err != nil {
+		return fmt.Errorf("release the plugins: %w", err)
+	}
+	return nil
 }

@@ -56,6 +56,23 @@ func (p panicked) Error() string {
 	return fmt.Sprintf("%s: panic: %v", p.command, p.value)
 }
 
+// crashes returns every panic err holds, in the order its message names them.
+func crashes(err error) []panicked {
+	switch e := err.(type) {
+	case panicked:
+		return []panicked{e}
+	case interface{ Unwrap() []error }:
+		var all []panicked
+		for _, inner := range e.Unwrap() {
+			all = append(all, crashes(inner)...)
+		}
+		return all
+	case interface{ Unwrap() error }:
+		return crashes(e.Unwrap())
+	}
+	return nil
+}
+
 // recoverRun turns a panic in the run of the command called name into the error err points at.
 func recoverRun(name string, err *error) {
 	if value := recover(); value != nil {

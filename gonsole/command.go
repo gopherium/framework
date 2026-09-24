@@ -52,6 +52,8 @@ type Call struct {
 	Actor string
 	// database is the name of the setting that holds the database address.
 	database string
+	// plugins is the registration of the plugins the run shares.
+	plugins *memo
 }
 
 // DatabaseURL returns the program's database address, an error naming the setting when it is empty.
@@ -60,6 +62,14 @@ func (c Call) DatabaseURL() (string, error) {
 		return "", errors.New("gonsole: no database setting in this call")
 	}
 	return c.Env.Required(c.database)
+}
+
+// Plugins returns the registered plugins' command groups and schema steps.
+func (c Call) Plugins(ctx context.Context) (Loaded, error) {
+	if c.plugins == nil {
+		return Loaded{}, errors.New("gonsole: no plugins in this call")
+	}
+	return c.plugins.answer(ctx)
 }
 
 // Step is one named schema step.
