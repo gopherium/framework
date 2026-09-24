@@ -124,7 +124,7 @@ func importCommand() gonsole.Command {
 			if _, err := fmt.Fprintln(call.Stderr, "reading the reports to import from the input"); err != nil {
 				return err
 			}
-			input, err := io.ReadAll(call.Stdin)
+			count, err := countNames(call.Stdin)
 			if err != nil {
 				return err
 			}
@@ -132,10 +132,22 @@ func importCommand() gonsole.Command {
 			if call.Apply {
 				verb = "imported"
 			}
-			_, err = fmt.Fprintf(call.Stdout, "%s %d reports\n", verb, len(strings.Fields(string(input))))
+			_, err = fmt.Fprintf(call.Stdout, "%s %d reports\n", verb, count)
 			return err
 		},
 	}
+}
+
+// countNames returns how many lines of input hold a report name.
+func countNames(input io.Reader) (int, error) {
+	count := 0
+	lines := bufio.NewScanner(input)
+	for lines.Scan() {
+		if strings.TrimSpace(lines.Text()) != "" {
+			count++
+		}
+	}
+	return count, lines.Err()
 }
 
 // listCommand returns report:list, which lists every report.

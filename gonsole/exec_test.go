@@ -116,6 +116,8 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 			"would create Q3: sales by region\n", "myapp: dry run, nothing changed, pass -yes to apply\n"},
 		{"a write that reads every line of its input", "quarterly\nyearly\n", nil, []string{"report:import", "-yes"},
 			gonsole.ExitDone, "imported 2 reports\n", importing + "\n"},
+		{"an import of names made of several words", "Q3 sales\n\nQ4 plan\n", nil, []string{"report:import", "-yes"},
+			gonsole.ExitDone, "imported 2 reports\n", importing + "\n"},
 		{"a command that answers a document", "", nil, []string{"report:list", "-json"}, gonsole.ExitDone, `{
   "reports": [
     "quarterly",
