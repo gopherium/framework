@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 )
 
 // ExitDone is the code of a finished command, a help page or a dry run.
@@ -86,9 +88,12 @@ type Program struct {
 	Record func(ctx context.Context, call Call, command string) error
 }
 
-// Main runs p over the process arguments and the standard streams and returns the exit code.
+// Main runs p over os.Args[1:] and the standard streams under a context the first SIGINT or SIGTERM ends.
 func Main(p Program) int {
-	return p.Run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	context.AfterFunc(ctx, stop)
+	return p.Run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 }
 
 // Run runs the command args name and returns the exit code.

@@ -5,12 +5,16 @@ package exampleapp
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/gopherium/framework/gonsole"
 )
@@ -26,8 +30,28 @@ func Program(getenv func(string) string) gonsole.Program {
 		Name:       "myapp",
 		Env:        gonsole.Env{Prefix: "MYAPP_", Getenv: getenv},
 		Database:   "DATABASE_URL",
+		Serve:      serve,
 		Migrations: []gonsole.Step{{Name: "reports", Run: func(context.Context, string) error { return nil }}},
 		Commands:   []gonsole.Command{createCommand(), listCommand(), revokeCommand()},
+	}
+}
+
+// serve answers every request with the report names until the run ends.
+func serve(ctx context.Context, call gonsole.Call) error {
+	timeouts, err := call.Env.Timeouts(gonsole.Timeouts{
+		ReadHeader: 10 * time.Second, Read: 30 * time.Second, Idle: 120 * time.Second, Grace: 10 * time.Second,
+	})
+	if err != nil {
+		return err
+	}
+	srv := gonsole.NewServer(cmp.Or(call.Env.Value("ADDR"), "localhost:8080"), http.HandlerFunc(answer), timeouts)
+	return gonsole.Serve(ctx, srv, timeouts, nil, slog.New(slog.NewTextHandler(call.Stderr, nil)))
+}
+
+// answer writes the names of the reports.
+func answer(w http.ResponseWriter, _ *http.Request) {
+	for _, name := range held() {
+		_, _ = fmt.Fprintln(w, name)
 	}
 }
 

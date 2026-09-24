@@ -3,13 +3,16 @@
 package gonsole_test
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"os"
 	"os/exec"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/gopherium/framework/gonsole"
 	"github.com/gopherium/framework/gonsole/internal/exampleapp"
@@ -25,12 +28,17 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// exampleEnvironment returns the environment of the example program, no inherited MYAPP_ variable and variables added.
+func exampleEnvironment(variables ...string) []string {
+	inherited := slices.DeleteFunc(os.Environ(), func(entry string) bool { return strings.HasPrefix(entry, "MYAPP_") })
+	return append(append(inherited, exampleSwitch+"=1"), variables...)
+}
+
 // runExample runs the example program in its own process over args, stdin and extra variables and answers its output.
 func runExample(t *testing.T, stdin string, variables []string, args ...string) result {
 	t.Helper()
-	inherited := slices.DeleteFunc(os.Environ(), func(entry string) bool { return strings.HasPrefix(entry, "MYAPP_") })
 	cmd := exec.CommandContext(t.Context(), os.Args[0], args...)
-	cmd.Env = append(append(inherited, exampleSwitch+"=1"), variables...)
+	cmd.Env = exampleEnvironment(variables...)
 	cmd.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -104,4 +112,95 @@ Flags:
 			}
 		})
 	}
+}
+
+func TestMainServesUntilASignalEndsTheRun(t *testing.T) {
+	t.Parallel()
+
+	for _, signal := range []os.Signal{syscall.SIGTERM, os.Interrupt} {
+		t.Run(signal.String(), func(t *testing.T) {
+			t.Parallel()
+
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "serve")
+			cmd.Env = exampleEnvironment("MYAPP_ADDR=127.0.0.1:0")
+			stderr, err := cmd.StderrPipe()
+			if err != nil {
+				t.Fatalf("piping stderr: %v", err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("starting the example program: %v", err)
+			}
+			lines := bufio.NewScanner(stderr)
+			address := listeningAddress(t, lines)
+
+			body := get(t, address)
+			if err := cmd.Process.Signal(signal); err != nil {
+				t.Fatalf("signalling: %v", err)
+			}
+			var rest []string
+			for lines.Scan() {
+				rest = append(rest, lines.Text())
+			}
+			err = cmd.Wait()
+
+			if err != nil {
+				t.Errorf("exit = %v, want 0", err)
+			}
+			if body != "quarterly\nyearly\n" {
+				t.Errorf("body = %q, want the report names", body)
+			}
+			if !slices.ContainsFunc(rest, func(line string) bool { return strings.Contains(line, "shutting down") }) {
+				t.Errorf("stderr after the signal = %q, want a shutting down line", rest)
+			}
+		})
+	}
+}
+
+func TestMainLetsASecondSignalEndACommandThatIgnoresTheFirst(t *testing.T) {
+	t.Parallel()
+
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "report:create", "-yes", "Q3")
+	cmd.Env = exampleEnvironment()
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("piping stdin: %v", err)
+	}
+	defer func() { _ = stdin.Close() }()
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting the example program: %v", err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	time.Sleep(300 * time.Millisecond)
+
+	_ = cmd.Process.Signal(os.Interrupt)
+	select {
+	case err := <-exited:
+		t.Fatalf("the first signal ended the program with %v, want the run cancelled only", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	_ = cmd.Process.Signal(os.Interrupt)
+
+	select {
+	case <-exited:
+		status, known := cmd.ProcessState.Sys().(syscall.WaitStatus)
+		if !known || !status.Signaled() {
+			t.Errorf("state = %v, want the second signal to end the program", cmd.ProcessState)
+		}
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Errorf("the second signal left the program running")
+	}
+}
+
+// listeningAddress reads lines until the server says it listens and returns the address it names.
+func listeningAddress(t *testing.T, lines *bufio.Scanner) string {
+	t.Helper()
+	for lines.Scan() {
+		if _, address, found := strings.Cut(lines.Text(), "msg=listening addr="); found {
+			return address
+		}
+	}
+	t.Fatalf("the example program never said it listens")
+	return ""
 }
