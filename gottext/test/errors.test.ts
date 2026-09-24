@@ -7,7 +7,7 @@ import { errorText } from '../src/index.js'
 const TEMPLATES = {
 	first_out_of_range: 'Ask for between %(min)d and %(max)d at a time.',
 	name_taken: 'That name is already taken.',
-	locale_unknown: 'AlphOne does not speak %(wanted)s yet.',
+	locale_unknown: 'This site does not speak %(wanted)s yet.',
 }
 
 const FALLBACK = 'Something went wrong. Try again.'
