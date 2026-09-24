@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -50,6 +51,9 @@ func runExample(t *testing.T, stdin string, variables []string, args ...string) 
 	return result{code: cmd.ProcessState.ExitCode(), stdout: stdout.String(), stderr: stderr.String()}
 }
 
+// importing is the line report:import writes to stderr before it reads its input.
+const importing = "reading the reports to import from the input"
+
 // exampleListing is the listing the example program prints.
 const exampleListing = `myapp
 
@@ -69,6 +73,7 @@ Available commands:
   demo:sync      sync the demo
  report
   report:create  create a report
+  report:import  import one report per line of the input
   report:list    list every report
   report:revoke  revoke one report
 `
@@ -109,6 +114,8 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 			gonsole.ExitDone, "created Q3: sales by region\n", ""},
 		{"a dry run of a write", "sales by region\n", nil, []string{"report:create", "Q3"}, gonsole.ExitDone,
 			"would create Q3: sales by region\n", "myapp: dry run, nothing changed, pass -yes to apply\n"},
+		{"a write that reads every line of its input", "quarterly\nyearly\n", nil, []string{"report:import", "-yes"},
+			gonsole.ExitDone, "imported 2 reports\n", importing + "\n"},
 		{"a command that answers a document", "", nil, []string{"report:list", "-json"}, gonsole.ExitDone, `{
   "reports": [
     "quarterly",
@@ -210,19 +217,31 @@ func TestMainServesUntilASignalEndsTheRun(t *testing.T) {
 func TestMainLetsASecondSignalEndACommandThatIgnoresTheFirst(t *testing.T) {
 	t.Parallel()
 
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "report:create", "-yes", "Q3")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "report:import", "-yes")
 	cmd.Env = exampleEnvironment()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("piping stdin: %v", err)
 	}
 	defer func() { _ = stdin.Close() }()
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatalf("piping stderr: %v", err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting the example program: %v", err)
 	}
+	stuck := time.AfterFunc(10*time.Second, func() { _ = cmd.Process.Kill() })
+	defer stuck.Stop()
+	lines := bufio.NewScanner(stderr)
+	if !lines.Scan() || lines.Text() != importing {
+		t.Fatalf("stderr opens with %q, want %q before any signal", lines.Text(), importing)
+	}
 	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
-	time.Sleep(300 * time.Millisecond)
+	go func() {
+		_, _ = io.Copy(io.Discard, stderr)
+		exited <- cmd.Wait()
+	}()
 
 	_ = cmd.Process.Signal(os.Interrupt)
 	select {

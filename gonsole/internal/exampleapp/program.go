@@ -32,7 +32,7 @@ func Program(getenv func(string) string) gonsole.Program {
 		Database:   "DATABASE_URL",
 		Serve:      serve,
 		Migrations: []gonsole.Step{{Name: "reports", Run: func(context.Context, string) error { return nil }}},
-		Commands:   []gonsole.Command{createCommand(), listCommand(), revokeCommand()},
+		Commands:   []gonsole.Command{createCommand(), importCommand(), listCommand(), revokeCommand()},
 		Plugins:    plugins,
 	}
 }
@@ -109,6 +109,30 @@ func createCommand() gonsole.Command {
 				verb = "created"
 			}
 			_, err = fmt.Fprintf(call.Stdout, "%s %s: %s\n", verb, call.Args[0], strings.TrimSpace(description))
+			return err
+		},
+	}
+}
+
+// importCommand returns report:import, which imports one report per line of its input after saying it reads it.
+func importCommand() gonsole.Command {
+	return gonsole.Command{
+		Name:    "report:import",
+		Summary: "import one report per line of the input",
+		Writes:  true,
+		Run: func(_ context.Context, call gonsole.Call) error {
+			if _, err := fmt.Fprintln(call.Stderr, "reading the reports to import from the input"); err != nil {
+				return err
+			}
+			input, err := io.ReadAll(call.Stdin)
+			if err != nil {
+				return err
+			}
+			verb := "would import"
+			if call.Apply {
+				verb = "imported"
+			}
+			_, err = fmt.Fprintf(call.Stdout, "%s %d reports\n", verb, len(strings.Fields(string(input))))
 			return err
 		},
 	}
