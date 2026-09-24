@@ -219,6 +219,12 @@ func TestCheckRefusesThePluginOffences(t *testing.T) {
 		{"a plugin named like a base command", gonsole.Group{Namespace: "list",
 			Commands: []gonsole.Command{echo("list:all")}},
 			[]string{`gonsole: plugin list takes the name of the base command list`}},
+		{"a plugin named like a base command with a command of its own offence", gonsole.Group{Namespace: "list",
+			Commands: []gonsole.Command{summarized(echo("list:all"), "")}},
+			[]string{
+				`gonsole: plugin list takes the name of the base command list`,
+				`gonsole: command "list:all" has no summary`,
+			}},
 		{"a plugin named like a core command", gonsole.Group{Namespace: "status",
 			Commands: []gonsole.Command{echo("status:all")}},
 			[]string{`gonsole: plugin status takes the name of the core command status`}},
@@ -480,5 +486,160 @@ func TestCheckWritesNothingToTheProcessStderr(t *testing.T) {
 	}
 	if len(leaked) != 0 {
 		t.Errorf("process stderr = %q, want nothing", leaked)
+	}
+}
+
+// offending returns a plugin group, demo, holding demo:ok, one command for each offence and demo:twice declared twice.
+func offending() gonsole.Group {
+	idle := echo("demo:idle")
+	idle.Run = nil
+	fragile := echo("demo:fragile")
+	fragile.Flags = func(*flag.FlagSet) { panic("the flag table vanished") }
+	schema := echo("demo:schema")
+	schema.Migrates = true
+	again := echo("demo:twice")
+	again.Run = func(_ context.Context, call gonsole.Call) error {
+		_, err := io.WriteString(call.Stdout, "the second demo:twice\n")
+		return err
+	}
+	return gonsole.Group{Namespace: "demo", Commands: []gonsole.Command{
+		echo("demo:ok"), echo("demo:Sync"), summarized(echo("demo:quiet"), ""),
+		summarized(echo("demo:split"), "sync\nthe demo"), idle, flagged(echo("demo:loud"), "yes"), fragile, schema,
+		echo("other:x"), echo("sync"), echo("demo:twice"), again, summarized(echo("demo:gone"), ""), echo("demo:gone"),
+	}}
+}
+
+func TestRunDropsThePluginCommandsThatBreakARule(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		args   []string
+		code   int
+		stdout string
+		stderr string
+	}{
+		{[]string{"demo:ok"}, gonsole.ExitDone, "demo:ok\n", ""},
+		{[]string{"demo:twice"}, gonsole.ExitDone, "demo:twice\n", ""},
+		{[]string{"demo:Sync"}, gonsole.ExitMisused, "", unknownLine("demo:Sync")},
+		{[]string{"demo:quiet"}, gonsole.ExitFailed, "", "myapp: gonsole: command \"demo:quiet\" has no summary\n"},
+		{[]string{"demo:quiet", "-h"}, gonsole.ExitFailed, "",
+			"myapp: gonsole: command \"demo:quiet\" has no summary\n"},
+		{[]string{"help", "demo:quiet"}, gonsole.ExitFailed, "",
+			"myapp: gonsole: command \"demo:quiet\" has no summary\n"},
+		{[]string{"sync"}, gonsole.ExitFailed, "",
+			"myapp: gonsole: command \"sync\" of plugin demo is outside its namespace\n"},
+		{[]string{"demo:gone"}, gonsole.ExitFailed, "",
+			"myapp: gonsole: command \"demo:gone\" has no summary\nmyapp: gonsole: command \"demo:gone\" is declared twice\n"},
+		{[]string{"demo:split"}, gonsole.ExitFailed, "",
+			"myapp: gonsole: command \"demo:split\" has a summary of more than one line\n"},
+		{[]string{"demo:idle"}, gonsole.ExitFailed, "", "myapp: gonsole: command \"demo:idle\" has no run\n"},
+		{[]string{"demo:loud"}, gonsole.ExitFailed, "",
+			"myapp: gonsole: command \"demo:loud\" declares the engine flag -yes\n"},
+		{[]string{"demo:fragile"}, gonsole.ExitFailed, "",
+			"myapp: gonsole: command \"demo:fragile\" panicked declaring its flags: the flag table vanished\n"},
+		{[]string{"demo:schema"}, gonsole.ExitFailed, "",
+			"myapp: gonsole: plugin command \"demo:schema\" asks for the core schema steps\n"},
+		{[]string{"other:x"}, gonsole.ExitFailed, "",
+			"myapp: gonsole: command \"other:x\" of plugin demo is outside its namespace\n"},
+		{[]string{"demo:nope"}, gonsole.ExitMisused, "",
+			"myapp: unknown command \"demo:nope\", want demo:ok or demo:twice\n"},
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			t.Parallel()
+
+			got := execute(t, plugged(&registry{groups: []gonsole.Group{offending()}}), tc.args...)
+
+			if got.code != tc.code || got.stdout != tc.stdout || got.stderr != tc.stderr {
+				t.Errorf("run = %d, %q, %q, want %d, %q, %q", got.code, got.stdout, got.stderr, tc.code, tc.stdout,
+					tc.stderr)
+			}
+		})
+	}
+}
+
+func TestRunDropsAPluginCommandTheProgramCannotGuard(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		args   []string
+		code   int
+		stdout string
+		stderr string
+	}{
+		{[]string{"demo:move", "-as", actingAccount}, gonsole.ExitFailed, "",
+			"myapp: gonsole: command \"demo:move\" names capability manage_demo without Authorize\n" +
+				"myapp: gonsole: command \"demo:move\" names capability manage_demo without Record\n"},
+		{[]string{"demo:sync", "-yes"}, gonsole.ExitDone, "sync apply=true\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			t.Parallel()
+
+			p := plugged(&registry{groups: demoGroups()})
+			p.Authorize, p.Record = nil, nil
+
+			got := execute(t, p, tc.args...)
+
+			if got.code != tc.code || got.stdout != tc.stdout || got.stderr != tc.stderr {
+				t.Errorf("run = %d, %q, %q, want %d, %q, %q", got.code, got.stdout, got.stderr, tc.code, tc.stdout,
+					tc.stderr)
+			}
+		})
+	}
+}
+
+func TestRunAnswersAGroupLeftWithoutCommandsAsNoGroup(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"demo:x", "demo"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &registry{groups: []gonsole.Group{{Namespace: "demo", Commands: []gonsole.Command{echo("demo:Sync")}}}}
+
+			got := execute(t, plugged(r), name)
+
+			if got.code != gonsole.ExitMisused || got.stderr != unknownLine(name) {
+				t.Errorf("run = %d, %q, want %d, %q", got.code, got.stderr, gonsole.ExitMisused, unknownLine(name))
+			}
+		})
+	}
+}
+
+func TestRunMergesTwoGroupsOfOneNamespace(t *testing.T) {
+	t.Parallel()
+
+	again := echo("demo:a")
+	again.Run = func(_ context.Context, call gonsole.Call) error {
+		_, err := io.WriteString(call.Stdout, "the second demo:a\n")
+		return err
+	}
+	cases := []struct {
+		args   []string
+		code   int
+		stdout string
+		stderr string
+	}{
+		{[]string{"demo:a"}, gonsole.ExitDone, "demo:a\n", ""},
+		{[]string{"demo:b"}, gonsole.ExitDone, "demo:b\n", ""},
+		{[]string{"demo:x"}, gonsole.ExitMisused, "", "myapp: unknown command \"demo:x\", want demo:a or demo:b\n"},
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			t.Parallel()
+
+			r := &registry{groups: []gonsole.Group{
+				{Namespace: "demo", Commands: []gonsole.Command{echo("demo:a")}},
+				{Namespace: "demo", Commands: []gonsole.Command{again, echo("demo:b")}},
+			}}
+
+			got := execute(t, plugged(r), tc.args...)
+
+			if got.code != tc.code || got.stdout != tc.stdout || got.stderr != tc.stderr {
+				t.Errorf("run = %d, %q, %q, want %d, %q, %q", got.code, got.stdout, got.stderr, tc.code, tc.stdout,
+					tc.stderr)
+			}
+		})
 	}
 }

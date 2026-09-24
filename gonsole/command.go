@@ -50,6 +50,8 @@ type Call struct {
 	Apply bool
 	// Actor is the account the -as flag names.
 	Actor string
+	// Describe reports a run that needs only command descriptors.
+	Describe bool
 	// database is the name of the setting that holds the database address.
 	database string
 	// plugins is the registration of the plugins the run shares.
@@ -69,7 +71,7 @@ func (c Call) Plugins(ctx context.Context) (Loaded, error) {
 	if c.plugins == nil {
 		return Loaded{}, errors.New("gonsole: no plugins in this call")
 	}
-	return c.plugins.answer(ctx)
+	return c.plugins.answer(ctx, false)
 }
 
 // Step is one named schema step.

@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"slices"
-	"strings"
 	"syscall"
 )
 
@@ -102,10 +101,12 @@ func Main(p Program) int {
 func (p Program) Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	r := &runner{program: p, stdin: stdin, stdout: stdout, stderr: stderr}
 	r.commands, r.namespaces = index(slices.Concat(p.Commands, r.base()))
-	if err := p.Check(Loaded{}); err != nil {
+	a := newAudit(p)
+	a.core()
+	if err := errors.Join(a.offences...); err != nil {
 		return r.exit(err)
 	}
-	r.plugins = &memo{register: p.Plugins, call: Call{
+	r.plugins = &memo{register: p.Plugins, audit: a, call: Call{
 		Stdin: stdin, Stdout: stdout, Stderr: stderr, Env: r.settings(), database: p.Database,
 	}}
 	return r.exit(r.finish(ctx, r.dispatch(ctx, args)))
@@ -138,7 +139,7 @@ func (r *runner) exit(err error) int {
 	if err == nil || errors.Is(err, flag.ErrHelp) {
 		return ExitDone
 	}
-	for line := range strings.SplitSeq(err.Error(), "\n") {
+	for _, line := range lines(err) {
 		r.warn("%s", line)
 	}
 	for _, crash := range crashes(err) {

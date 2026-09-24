@@ -50,6 +50,21 @@ func runExample(t *testing.T, stdin string, variables []string, args ...string) 
 	return result{code: cmd.ProcessState.ExitCode(), stdout: stdout.String(), stderr: stderr.String()}
 }
 
+func TestExamplePluginsDescribeTheDemoGroup(t *testing.T) {
+	t.Parallel()
+
+	p := exampleapp.Program(func(string) string { return "" })
+
+	loaded, err := p.Plugins(t.Context(), gonsole.Call{Describe: true, Env: gonsole.Env{Prefix: "MYAPP_"}})
+
+	if err != nil || loaded.Failed != nil || !slices.Equal(namespaces(loaded.Groups), []string{"demo"}) {
+		t.Fatalf("Plugins() = %v failing %v, %v, want demo, nil and nil", namespaces(loaded.Groups), loaded.Failed, err)
+	}
+	if err := p.Check(loaded); err != nil {
+		t.Errorf("Check() = %v, want nil", err)
+	}
+}
+
 func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 	t.Parallel()
 
@@ -80,6 +95,18 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 `, ""},
 		{"a command that fails", "", nil, []string{"report:revoke", "monthly"}, gonsole.ExitFailed, "",
 			"myapp: report \"monthly\" does not exist\n"},
+		{"a plugin write", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress}, []string{"demo:sync", "-yes"},
+			gonsole.ExitDone, "synced the demo\n", ""},
+		{"a dry run of a plugin write", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress}, []string{"demo:sync"},
+			gonsole.ExitDone, "would sync the demo\n", dryRun},
+		{"a plugin write without its setting", "", nil, []string{"demo:sync"}, gonsole.ExitFailed, "",
+			"myapp: MYAPP_DATABASE_URL is required\n"},
+		{"the help of a plugin command without its setting", "", nil, []string{"demo:sync", "-h"}, gonsole.ExitDone,
+			syncPage, ""},
+		{"a name no plugin command owns", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress},
+			[]string{"demo:nope"}, gonsole.ExitMisused, "", "myapp: unknown command \"demo:nope\", want demo:sync\n"},
+		{"a namespace no plugin owns", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress}, []string{"nope:x"},
+			gonsole.ExitMisused, "", "myapp: unknown command \"nope:x\", want a command in demo\n"},
 		{"a name no command owns", "", nil, []string{"reprot"}, gonsole.ExitMisused, "",
 			"myapp: unknown command \"reprot\", run \"myapp list\" to see every command\n"},
 		{"a flag no command defines", "", nil, []string{"report:list", "-bogus"}, gonsole.ExitMisused, "",

@@ -244,20 +244,29 @@ func TestWalkJoinsEveryPanic(t *testing.T) {
 type registry struct {
 	mu             sync.Mutex
 	groups         []gonsole.Group
+	failed         error
 	fail           error
 	lost           error
+	refuse         error
 	withoutRelease bool
 	calls          []gonsole.Call
 	log            []string
 }
 
-// register answers the groups and the failure r holds, with a release unless r goes without one.
+// note appends one entry to the log.
+func (r *registry) note(format string, args ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.log = append(r.log, fmt.Sprintf(format, args...))
+}
+
+// register answers the groups, the plugin failures and the failure r holds, with a release unless r goes without one.
 func (r *registry) register(_ context.Context, call gonsole.Call) (gonsole.Loaded, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, call)
-	r.log = append(r.log, "register")
-	loaded := gonsole.Loaded{Groups: r.groups}
+	r.log = append(r.log, fmt.Sprintf("register describe=%t", call.Describe))
+	loaded := gonsole.Loaded{Groups: r.groups, Failed: r.failed}
 	if !r.withoutRelease {
 		loaded.Release = r.release
 	}
@@ -272,9 +281,27 @@ func (r *registry) release(ctx context.Context) error {
 	return r.lost
 }
 
-// demoGroups returns one plugin group, demo, offering demo:sync.
+// demoGroups returns one plugin group, demo, whose demo:list answers a document, demo:move acts and demo:sync writes.
 func demoGroups() []gonsole.Group {
-	return []gonsole.Group{{Namespace: "demo", Commands: []gonsole.Command{echo("demo:sync")}}}
+	list := gonsole.Command{Name: "demo:list", Summary: "list the demo", JSON: true,
+		Run: func(_ context.Context, call gonsole.Call) error {
+			if call.JSON {
+				return call.Encode(map[string][]string{"demo": {"synced"}})
+			}
+			_, err := fmt.Fprintln(call.Stdout, "synced")
+			return err
+		}}
+	move := gonsole.Command{Name: "demo:move", Summary: "move the demo", Capability: "manage_demo",
+		Run: func(_ context.Context, call gonsole.Call) error {
+			_, err := fmt.Fprintf(call.Stdout, "moved as %s\n", call.Actor)
+			return err
+		}}
+	sync := gonsole.Command{Name: "demo:sync", Summary: "sync the demo", Writes: true,
+		Run: func(_ context.Context, call gonsole.Call) error {
+			_, err := fmt.Fprintf(call.Stdout, "sync apply=%t\n", call.Apply)
+			return err
+		}}
+	return []gonsole.Group{{Namespace: "demo", Commands: []gonsole.Command{list, move, sync}}}
 }
 
 // plugged returns a program called myapp whose plugins r registers, with a status command and report:plugins.
@@ -297,6 +324,14 @@ func plugged(r *registry) gonsole.Program {
 		Database: "DATABASE_URL",
 		Commands: []gonsole.Command{echo("status"), namespaced},
 		Plugins:  r.register,
+		Authorize: func(_ context.Context, call gonsole.Call, capability string) error {
+			r.note("authorize %s for %s", call.Actor, capability)
+			return r.refuse
+		},
+		Record: func(_ context.Context, call gonsole.Call, command string) error {
+			r.note("record %s ran %s", call.Actor, command)
+			return nil
+		},
 	}
 }
 
@@ -381,7 +416,7 @@ func TestRunRegistersThePluginsOnceAndReleasesThemOnce(t *testing.T) {
 			if want := slices.Repeat([]string{tc.want}, 4); !slices.Equal(answers, want) {
 				t.Errorf("answers = %q, want %q", answers, want)
 			}
-			if want := []string{"register", "release live=true"}; !slices.Equal(r.log, want) {
+			if want := []string{"register describe=false", "release live=true"}; !slices.Equal(r.log, want) {
 				t.Errorf("calls = %q, want %q", r.log, want)
 			}
 		})
@@ -404,7 +439,8 @@ func TestPluginsRegisterOnceForEveryGoroutineOfARun(t *testing.T) {
 
 	got := execute(t, p, "report:plugins")
 
-	if want := []string{"register", "release live=true"}; got.code != gonsole.ExitDone || !slices.Equal(r.log, want) {
+	want := []string{"register describe=false", "release live=true"}
+	if got.code != gonsole.ExitDone || !slices.Equal(r.log, want) {
 		t.Errorf("code %d, calls = %q, want 0 and %q", got.code, r.log, want)
 	}
 }
@@ -428,8 +464,27 @@ func TestPluginsRegisterWithTheStreamsAndSettingsOfTheRun(t *testing.T) {
 	if address, err := call.DatabaseURL(); address != databaseAddress || err != nil {
 		t.Errorf("DatabaseURL() = %q, %v, want %q", address, err, databaseAddress)
 	}
-	if call.Env.Prefix != "MYAPP_" || call.Args != nil || call.JSON || call.Apply || call.Actor != "" {
+	if call.Env.Prefix != "MYAPP_" || call.Args != nil || call.JSON || call.Apply || call.Actor != "" || call.Describe {
 		t.Errorf("registration call = %+v, want the program settings and nothing of the command", call)
+	}
+}
+
+func TestPluginsHandACoreCommandTheFailuresWithoutAWarning(t *testing.T) {
+	t.Parallel()
+
+	failed := errors.New("plugin billing: no signing key")
+	var seen error
+	p := plugged(&registry{groups: demoGroups(), failed: failed})
+	p.Commands[1].Run = func(ctx context.Context, call gonsole.Call) error {
+		loaded, err := call.Plugins(ctx)
+		seen = loaded.Failed
+		return err
+	}
+
+	got := execute(t, p, "report:plugins")
+
+	if got.code != gonsole.ExitDone || got.stderr != "" || !errors.Is(seen, failed) {
+		t.Errorf("run = %d, %q, Failed %v, want 0, no warning and %v", got.code, got.stderr, seen, failed)
 	}
 }
 

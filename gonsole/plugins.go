@@ -58,22 +58,27 @@ func provided(id string, p Provider) (commands []Command, err error) {
 type Loaded struct {
 	// Groups are the command groups, one per plugin that offers commands.
 	Groups []Group
+	// Failed joins the errors of plugins that failed to register or to describe their commands.
+	Failed error
 	// Release stops every registered plugin and closes what registering opened.
 	Release func(ctx context.Context) error
 }
 
 // memo is the one registration of the plugins a run makes.
 type memo struct {
-	register func(ctx context.Context, call Call) (Loaded, error)
-	call     Call
-	mu       sync.Mutex
-	done     bool
-	loaded   Loaded
-	err      error
+	register   func(ctx context.Context, call Call) (Loaded, error)
+	call       Call
+	audit      *audit
+	mu         sync.Mutex
+	done       bool
+	loaded     Loaded
+	err        error
+	commands   map[string]Command
+	namespaces map[string][]string
 }
 
-// answer registers the plugins on its first call and returns that registration's answer on every call.
-func (m *memo) answer(ctx context.Context) (Loaded, error) {
+// answer registers the plugins once, in describe mode when describe is set, and returns that registration's answer.
+func (m *memo) answer(ctx context.Context, describe bool) (Loaded, error) {
 	if m.register == nil {
 		return Loaded{}, nil
 	}
@@ -81,9 +86,22 @@ func (m *memo) answer(ctx context.Context) (Loaded, error) {
 	defer m.mu.Unlock()
 	if !m.done {
 		m.done = true
+		m.call.Describe = describe
 		m.loaded, m.err = m.registered(ctx)
+		if m.err == nil {
+			m.admit()
+		}
 	}
 	return m.loaded, m.err
+}
+
+// admit indexes the commands of the registered groups that break no rule.
+func (m *memo) admit() {
+	var kept []Command
+	for _, group := range m.loaded.Groups {
+		kept = append(kept, m.audit.admit(group)...)
+	}
+	m.commands, m.namespaces = index(kept)
 }
 
 // registered returns what the program's Plugins answers, a panic inside it as the error naming the plugins.

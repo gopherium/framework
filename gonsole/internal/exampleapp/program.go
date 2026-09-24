@@ -33,7 +33,44 @@ func Program(getenv func(string) string) gonsole.Program {
 		Serve:      serve,
 		Migrations: []gonsole.Step{{Name: "reports", Run: func(context.Context, string) error { return nil }}},
 		Commands:   []gonsole.Command{createCommand(), listCommand(), revokeCommand()},
+		Plugins:    plugins,
 	}
+}
+
+// plugins registers the demo plugin, reading the database setting unless the run only describes commands.
+func plugins(_ context.Context, call gonsole.Call) (gonsole.Loaded, error) {
+	if !call.Describe {
+		if _, err := call.DatabaseURL(); err != nil {
+			return gonsole.Loaded{}, err
+		}
+	}
+	groups, err := gonsole.Walk([]demo{{}})
+	return gonsole.Loaded{Groups: groups, Failed: err}, nil
+}
+
+// demo is the example program's one compiled plugin.
+type demo struct{}
+
+// ID returns the plugin's id.
+func (demo) ID() string {
+	return "demo"
+}
+
+// Commands returns demo:sync, which syncs the demo data.
+func (demo) Commands() []gonsole.Command {
+	return []gonsole.Command{{
+		Name:    "demo:sync",
+		Summary: "sync the demo",
+		Writes:  true,
+		Run: func(_ context.Context, call gonsole.Call) error {
+			verb := "would sync"
+			if call.Apply {
+				verb = "synced"
+			}
+			_, err := fmt.Fprintf(call.Stdout, "%s the demo\n", verb)
+			return err
+		},
+	}}
 }
 
 // serve answers every request with the report names until the run ends.

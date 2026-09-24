@@ -33,7 +33,7 @@ func (p Program) Check(loaded Loaded) error {
 	a := newAudit(p)
 	a.core()
 	for _, group := range loaded.Groups {
-		a.group(group)
+		a.admit(group)
 	}
 	return errors.Join(a.offences...)
 }
@@ -42,6 +42,7 @@ func (p Program) Check(loaded Loaded) error {
 type audit struct {
 	program    Program
 	offences   []error
+	dropped    map[string][]error
 	declared   map[string]bool
 	names      map[string]bool
 	namespaces map[string]bool
@@ -51,7 +52,7 @@ type audit struct {
 // newAudit returns an audit of p knowing the names and namespaces its commands use.
 func newAudit(p Program) *audit {
 	a := &audit{
-		program: p, declared: map[string]bool{}, names: map[string]bool{},
+		program: p, dropped: map[string][]error{}, declared: map[string]bool{}, names: map[string]bool{},
 		namespaces: map[string]bool{}, reserved: map[string]bool{},
 	}
 	for _, cmd := range p.Commands {
@@ -87,18 +88,33 @@ func (a *audit) core() {
 	}
 }
 
-// group refuses the offences of one plugin's command group.
-func (a *audit) group(g Group) {
-	a.claims(g.Namespace)
+// admit returns the commands of one plugin's group that break no rule.
+func (a *audit) admit(g Group) []Command {
+	claimed := a.claims(g.Namespace)
+	var kept []Command
 	for _, cmd := range g.Commands {
-		a.inspect(cmd)
-		a.once(cmd.Name)
-		a.inside(g, cmd)
-		a.guarded(cmd)
-		if cmd.Migrates {
-			a.refuse("plugin command %q asks for the core schema steps", cmd.Name)
+		if a.command(g, cmd) && !claimed {
+			kept = append(kept, cmd)
 		}
 	}
+	return kept
+}
+
+// command refuses the offences of one command of g and reports whether it has none.
+func (a *audit) command(g Group, cmd Command) bool {
+	before := len(a.offences)
+	a.inspect(cmd)
+	a.once(cmd.Name)
+	a.inside(g, cmd)
+	a.guarded(cmd)
+	if cmd.Migrates {
+		a.refuse("plugin command %q asks for the core schema steps", cmd.Name)
+	}
+	if len(a.offences) == before {
+		return true
+	}
+	a.dropped[cmd.Name] = append(a.dropped[cmd.Name], a.offences[before:]...)
+	return false
 }
 
 // owned refuses a program command that takes a base command or an engine namespace.
@@ -210,18 +226,28 @@ func (a *audit) renamed() {
 	}
 }
 
-// claims refuses a plugin whose namespace a base command, a core command or a core or reserved namespace holds.
-func (a *audit) claims(namespace string) {
+// claims refuses a plugin whose namespace the engine or core holds and reports whether it did.
+func (a *audit) claims(namespace string) bool {
+	held := a.holder(namespace)
+	if held != "" {
+		a.refuse("%s", held)
+	}
+	return held != ""
+}
+
+// holder returns the offence of a plugin that takes a namespace the engine or core holds, empty for a free one.
+func (a *audit) holder(namespace string) string {
 	switch {
 	case slices.Contains(baseCommands, namespace):
-		a.refuse("plugin %s takes the name of the base command %s", namespace, namespace)
+		return fmt.Sprintf("plugin %s takes the name of the base command %s", namespace, namespace)
 	case a.names[namespace]:
-		a.refuse("plugin %s takes the name of the core command %s", namespace, namespace)
+		return fmt.Sprintf("plugin %s takes the name of the core command %s", namespace, namespace)
 	case a.namespaces[namespace]:
-		a.refuse("plugin %s takes the core namespace %s", namespace, namespace)
+		return fmt.Sprintf("plugin %s takes the core namespace %s", namespace, namespace)
 	case a.reserved[namespace]:
-		a.refuse("plugin %s takes the reserved namespace %s", namespace, namespace)
+		return fmt.Sprintf("plugin %s takes the reserved namespace %s", namespace, namespace)
 	}
+	return ""
 }
 
 // inside refuses a plugin command outside the namespace of its group.
