@@ -50,6 +50,28 @@ func runExample(t *testing.T, stdin string, variables []string, args ...string) 
 	return result{code: cmd.ProcessState.ExitCode(), stdout: stdout.String(), stderr: stderr.String()}
 }
 
+// exampleListing is the listing the example program prints.
+const exampleListing = `myapp
+
+Usage:
+  myapp <command> [flags] [arguments]
+
+` + intro + `
+Available commands:
+  check          check every setting, every plugin and every command name
+  help           print the help of one command
+  list           list every command
+  migrate        apply every schema step
+  serve          run the server
+  version        print the version
+ demo            plugin
+  demo:sync      sync the demo
+ report
+  report:create  create a report
+  report:list    list every report
+  report:revoke  revoke one report
+`
+
 func TestExamplePluginsDescribeTheDemoGroup(t *testing.T) {
 	t.Parallel()
 
@@ -103,6 +125,7 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 			"myapp: MYAPP_DATABASE_URL is required\n"},
 		{"the help of a plugin command without its setting", "", nil, []string{"demo:sync", "-h"}, gonsole.ExitDone,
 			syncPage, ""},
+		{"the listing without the database setting", "", nil, []string{"list"}, gonsole.ExitDone, exampleListing, ""},
 		{"a name no plugin command owns", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress},
 			[]string{"demo:nope"}, gonsole.ExitMisused, "", "myapp: unknown command \"demo:nope\", want demo:sync\n"},
 		{"a namespace no plugin owns", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress}, []string{"nope:x"},

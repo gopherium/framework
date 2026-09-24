@@ -95,6 +95,18 @@ func (m *memo) answer(ctx context.Context, describe bool) (Loaded, error) {
 	return m.loaded, m.err
 }
 
+// missing returns the lines of what failed to load: the registration error, or the plugin failures and the offences.
+func (m *memo) missing() []string {
+	if m.err != nil {
+		return lines(m.err)
+	}
+	failed := lines(m.loaded.Failed)
+	for _, offence := range m.audit.offences {
+		failed = append(failed, lines(offence)...)
+	}
+	return failed
+}
+
 // admit indexes the commands of the registered groups that break no rule.
 func (m *memo) admit() {
 	var kept []Command

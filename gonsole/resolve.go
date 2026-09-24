@@ -49,16 +49,14 @@ func (r *runner) commandless(ctx context.Context) error {
 	if r.program.BareServes {
 		return r.dispatch(ctx, []string{"serve"})
 	}
-	_, err := io.WriteString(r.stdout, r.listing())
-	return err
+	return r.list(ctx, r.stdout)
 }
 
 // help prints the help page of the command args name, or the listing when they name none.
 func (r *runner) help(ctx context.Context, args []string) error {
 	named := r.rename(subject(args))
 	if len(named) == 0 {
-		_, err := io.WriteString(r.stdout, r.listing())
-		return err
+		return r.list(ctx, r.stdout)
 	}
 	cmd, err := r.find(ctx, named[0], true)
 	if err != nil {

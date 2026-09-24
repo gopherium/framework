@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
+	"slices"
 	"strings"
 	"testing"
 
@@ -416,6 +418,223 @@ func TestMisuseOfAKnownCommandEndsWithItsHelpPage(t *testing.T) {
 			}
 			if got.stdout != "" {
 				t.Errorf("stdout = %q, want empty", got.stdout)
+			}
+		})
+	}
+}
+
+// pluggedHeading is the opening of every listing plugged prints, down to its bare commands.
+const pluggedHeading = `myapp
+
+Usage:
+  myapp <command> [flags] [arguments]
+
+` + intro + `
+Available commands:
+`
+
+// pluggedListing is the listing plugged prints with the demo plugin loaded.
+const pluggedListing = pluggedHeading + `  check           check every setting, every plugin and every command name
+  help            print the help of one command
+  list            list every command
+  status          print the arguments
+  version         print the version
+ demo             plugin
+  demo:list       list the demo
+  demo:move       move the demo
+  demo:sync       sync the demo
+ report
+  report:plugins  print the plugin namespaces
+`
+
+// pluggedFooter is the footer the Not loaded tests give plugged.
+const pluggedFooter = "Read the guide at https://example.com/myapp."
+
+func TestListingShowsTheNamespaceOfEveryPlugin(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{nil, {"list"}, {"help"}, {"-h"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+
+			r := &registry{groups: demoGroups()}
+
+			got := execute(t, plugged(r), args...)
+
+			if got.code != gonsole.ExitDone || got.stdout != pluggedListing || got.stderr != "" {
+				t.Errorf("listing = %d, %q, %q, want 0, %q, nothing", got.code, got.stdout, got.stderr, pluggedListing)
+			}
+			if !slices.Equal(r.log, describedPlugins) {
+				t.Errorf("calls = %q, want %q", r.log, describedPlugins)
+			}
+		})
+	}
+}
+
+func TestListingWidensTheNameColumnOnlyForALoadedPluginCommand(t *testing.T) {
+	t.Parallel()
+
+	r := &registry{groups: []gonsole.Group{{Namespace: "demo", Commands: []gonsole.Command{
+		echo("demo:synchronize-everything"), summarized(echo("demo:a-dropped-command-with-the-longest-name"), ""),
+	}}}}
+
+	got := execute(t, plugged(r), "list")
+
+	want := pluggedHeading + `  check                        check every setting, every plugin and every command name
+  help                         print the help of one command
+  list                         list every command
+  status                       print the arguments
+  version                      print the version
+ demo                          plugin
+  demo:synchronize-everything  print the arguments
+ report
+  report:plugins               print the plugin namespaces
+
+Not loaded:
+  gonsole: command "demo:a-dropped-command-with-the-longest-name" has no summary
+`
+	if got.code != gonsole.ExitDone || got.stdout != want {
+		t.Errorf("listing = %d, %q, want 0, %q", got.code, got.stdout, want)
+	}
+}
+
+func TestListingShowsWhatFailedToLoadBeforeTheFooter(t *testing.T) {
+	t.Parallel()
+
+	commands := `  check           check every setting, every plugin and every command name
+  help            print the help of one command
+  list            list every command
+  status          print the arguments
+  version         print the version
+`
+	cases := []struct {
+		name   string
+		groups []gonsole.Group
+		failed error
+		fail   error
+		want   string
+	}{
+		{"a registration that fails", demoGroups(), errors.New("plugin mail: no relay host"),
+			errors.New("the plugin table is locked\nby another run"), commands + ` report
+  report:plugins  print the plugin namespaces
+
+Not loaded:
+  the plugin table is locked
+  by another run
+`},
+		{"plugins that failed beside groups that break the rules", []gonsole.Group{
+			{Namespace: "list", Commands: []gonsole.Command{echo("list:all")}},
+			{Namespace: "demo", Commands: []gonsole.Command{echo("demo:sync")}},
+			{Namespace: "tenancy", Commands: []gonsole.Command{echo("report:plugins")}},
+		}, errors.Join(errors.New("plugin billing: no signing key"), errors.New("plugin mail: no relay host")), nil,
+			commands + ` demo             plugin
+  demo:sync       print the arguments
+ report
+  report:plugins  print the plugin namespaces
+
+Not loaded:
+  plugin billing: no signing key
+  plugin mail: no relay host
+  gonsole: plugin list takes the name of the base command list
+  gonsole: command "report:plugins" is declared twice
+  gonsole: command "report:plugins" of plugin tenancy is outside its namespace
+`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := plugged(&registry{groups: tc.groups, failed: tc.failed, fail: tc.fail})
+			p.Footer = pluggedFooter
+
+			got := execute(t, p, "list")
+
+			want := pluggedHeading + tc.want + "\n" + pluggedFooter + "\n"
+			if got.code != gonsole.ExitDone || got.stdout != want || got.stderr != "" {
+				t.Errorf("listing = %d, %q, %q, want 0, %q, nothing", got.code, got.stdout, got.stderr, want)
+			}
+		})
+	}
+}
+
+func TestListingShowsTheSameOffencesAsCheck(t *testing.T) {
+	t.Parallel()
+
+	groups := []gonsole.Group{offending(), {Namespace: "tenancy", Commands: []gonsole.Command{echo("report:plugins")}}}
+	p := plugged(&registry{groups: groups})
+
+	got := execute(t, p, "list")
+
+	_, block, found := strings.Cut(got.stdout, "\nNot loaded:\n")
+	var want strings.Builder
+	for _, offence := range offences(p.Check(gonsole.Loaded{Groups: groups})) {
+		want.WriteString("  " + offence + "\n")
+	}
+	if !found || block != want.String() {
+		t.Errorf("Not loaded = %q, want %q", block, want.String())
+	}
+}
+
+func TestListingIndentsEveryLineOfAnOffence(t *testing.T) {
+	t.Parallel()
+
+	fragile := echo("demo:fragile")
+	fragile.Flags = func(*flag.FlagSet) { panic("the flag table\nvanished") }
+	p := plugged(&registry{groups: []gonsole.Group{{Namespace: "demo", Commands: []gonsole.Command{fragile}}}})
+
+	got := execute(t, p, "list")
+
+	_, block, found := strings.Cut(got.stdout, "\nNot loaded:\n")
+	want := "  gonsole: command \"demo:fragile\" panicked declaring its flags: the flag table\n  vanished\n"
+	if !found || block != want {
+		t.Errorf("Not loaded = %q, want %q", block, want)
+	}
+}
+
+func TestListingRegistersThePluginsUnderTheRunContext(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{nil, {"list"}, {"help"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+
+			type key struct{}
+			var seen any
+			p := plugged(&registry{})
+			p.Plugins = func(ctx context.Context, _ gonsole.Call) (gonsole.Loaded, error) {
+				seen = ctx.Value(key{})
+				return gonsole.Loaded{}, nil
+			}
+
+			code := p.Run(context.WithValue(t.Context(), key{}, "run"), args, strings.NewReader(""), &bytes.Buffer{},
+				&bytes.Buffer{})
+
+			if code != gonsole.ExitDone || seen != "run" {
+				t.Errorf("code %d, registration saw %v, want 0 and the run context", code, seen)
+			}
+		})
+	}
+}
+
+func TestListingFailsWhenTheRegistrationPanics(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{nil, {"list"}, {"help"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+
+			p := plugged(&registry{})
+			p.Plugins = func(context.Context, gonsole.Call) (gonsole.Loaded, error) {
+				panic("the plugin table vanished")
+			}
+
+			got := execute(t, p, args...)
+
+			const line = "myapp: plugins: panic: the plugin table vanished\n"
+			stack, opened := strings.CutPrefix(got.stderr, line)
+			if got.code != gonsole.ExitFailed || got.stdout != "" || !opened || !strings.HasPrefix(stack, "goroutine ") {
+				t.Errorf("listing = %d, %q, %q, want %d, nothing, %q and the stack", got.code, got.stdout,
+					firstLine(got.stderr), gonsole.ExitFailed, line)
 			}
 		})
 	}

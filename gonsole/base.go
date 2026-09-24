@@ -12,9 +12,8 @@ import (
 
 // base returns the commands the engine owns in the program.
 func (r *runner) base() []Command {
-	list := func(_ context.Context, call Call) error {
-		_, err := io.WriteString(call.Stdout, r.listing())
-		return err
+	list := func(ctx context.Context, call Call) error {
+		return r.list(ctx, call.Stdout)
 	}
 	commands := []Command{
 		{Name: "help", Summary: "print the help of one command", Run: list},
