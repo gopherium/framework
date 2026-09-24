@@ -121,7 +121,7 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 		{"a plugin write", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress}, []string{"demo:sync", "-yes"},
 			gonsole.ExitDone, "synced the demo\n", ""},
 		{"a dry run of a plugin write", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress}, []string{"demo:sync"},
-			gonsole.ExitDone, "would sync the demo\n", dryRun},
+			gonsole.ExitDone, "would sync the demo\n", dryRunNotice},
 		{"a plugin write without its setting", "", nil, []string{"demo:sync"}, gonsole.ExitFailed, "",
 			"myapp: MYAPP_DATABASE_URL is required\n"},
 		{"the help of a plugin command without its setting", "", nil, []string{"demo:sync", "-h"}, gonsole.ExitDone,

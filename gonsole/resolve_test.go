@@ -161,9 +161,6 @@ func demoLine(name string) string {
 	return fmt.Sprintf("myapp: unknown command %q, want demo:list, demo:move or demo:sync\n", name)
 }
 
-// dryRun is the line a dry run of myapp ends with on stderr.
-const dryRun = "myapp: dry run, nothing changed, pass -yes to apply\n"
-
 // ranPlugins is the log of a run that registered the plugins to run a command.
 var ranPlugins = []string{"register describe=false", "release live=true"}
 
@@ -207,7 +204,7 @@ func TestRunRunsThePluginCommandTheLineNames(t *testing.T) {
 		stderr string
 		log    []string
 	}{
-		{"a dry run of a write", []string{"demo:sync"}, "sync apply=false\n", dryRun, ranPlugins},
+		{"a dry run of a write", []string{"demo:sync"}, "sync apply=false\n", dryRunNotice, ranPlugins},
 		{"an applied write", []string{"demo:sync", "-yes"}, "sync apply=true\n", "", ranPlugins},
 		{"a read", []string{"demo:list"}, "synced\n", "", ranPlugins},
 		{"a read that answers a document", []string{"demo:list", "-json"}, "{\n  \"demo\": [\n    \"synced\"\n  ]\n}\n",
@@ -433,11 +430,11 @@ func TestRunWarnsOfFailedPluginsBeforeAPluginCommand(t *testing.T) {
 		code   int
 		stderr string
 	}{
-		{"a run", []string{"demo:sync"}, errors.Join(billing, mail), gonsole.ExitDone, warnings + dryRun},
+		{"a run", []string{"demo:sync"}, errors.Join(billing, mail), gonsole.ExitDone, warnings + dryRunNotice},
 		{"a failure of two lines", []string{"demo:sync"},
 			errors.Join(errors.Join(billing, mail), errors.New("plugin chat: no token\nand no webhook")),
 			gonsole.ExitDone,
-			warnings + "myapp: warning: plugin chat: no token\nmyapp: warning: and no webhook\n" + dryRun},
+			warnings + "myapp: warning: plugin chat: no token\nmyapp: warning: and no webhook\n" + dryRunNotice},
 		{"a misused run", []string{"demo:sync", "-bogus"}, errors.Join(billing, mail), gonsole.ExitMisused,
 			warnings + "myapp: demo:sync: flag provided but not defined: -bogus\n\n" + syncPage},
 	}
