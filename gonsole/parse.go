@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 )
 
@@ -114,9 +115,20 @@ func (r *runner) prepare(cmd Command, args []string) (Call, error) {
 		return Call{}, Misuse(fmt.Errorf("%s wants -as <email>", cmd.Name))
 	}
 	return Call{
-		Args: positional, Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr, Env: r.settings(),
+		Args: positional, Flags: given(fs), Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr, Env: r.settings(),
 		JSON: s.json, Apply: s.yes || !cmd.Writes, Actor: s.as, database: r.program.Database, plugins: r.plugins,
 	}, nil
+}
+
+// given returns the value of each of the command's own flags the line set on fs, the engine flags left out.
+func given(fs *flag.FlagSet) map[string]string {
+	flags := map[string]string{}
+	fs.Visit(func(f *flag.Flag) {
+		if !slices.Contains(engineFlags, f.Name) {
+			flags[f.Name] = f.Value.String()
+		}
+	})
+	return flags
 }
 
 // parse sets the flags in args on fs and returns the positional arguments, flags and arguments in any order.

@@ -36,6 +36,8 @@ type Command struct {
 type Call struct {
 	// Args holds the positional arguments, one per name in Command.Args.
 	Args []string
+	// Flags maps each of the command's own flags the line set to its value, the engine flags left out.
+	Flags map[string]string
 	// Stdin is the input a command reads, such as a password.
 	Stdin io.Reader
 	// Stdout is where a command writes its answer.

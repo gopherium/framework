@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/gopherium/framework/gonsole"
@@ -392,5 +393,78 @@ func TestRunKeepsTheDryRunDocumentAloneOnStdout(t *testing.T) {
 	}
 	if got.stderr != dryRunNotice {
 		t.Errorf("stderr = %q, want %q", got.stderr, dryRunNotice)
+	}
+}
+
+// flagsSeen are the flags each hook of one run found in its call.
+type flagsSeen struct {
+	authorize map[string]string
+	run       map[string]string
+	record    map[string]string
+}
+
+// flagging returns a program whose report:create writes, answers JSON, acts and notes the flags every hook sees in s.
+func flagging(s *flagsSeen) gonsole.Program {
+	p := single(gonsole.Command{
+		Name: "report:create", Summary: "create a report", Args: []string{"title"}, Writes: true, JSON: true,
+		Capability: "manage_reports",
+		Flags: func(fs *flag.FlagSet) {
+			fs.String("owner", "", "email address of the owner")
+			fs.Bool("draft", false, "keep the report as a draft")
+		},
+		Run: func(_ context.Context, call gonsole.Call) error {
+			s.run = call.Flags
+			return nil
+		},
+	})
+	p.Authorize = func(_ context.Context, call gonsole.Call, _ string) error {
+		s.authorize = call.Flags
+		return nil
+	}
+	p.Record = func(_ context.Context, call gonsole.Call, _ string) error {
+		s.record = call.Flags
+		return nil
+	}
+	return p
+}
+
+func TestCallHoldsTheCommandsOwnFlagsTheLineSet(t *testing.T) {
+	t.Parallel()
+
+	const owner = "maria.perez@example.com"
+	cases := []struct {
+		name string
+		args []string
+		want map[string]string
+	}{
+		{"no flag", []string{"Q3"}, map[string]string{}},
+		{"a flag and a switch", []string{"-owner", owner, "-draft", "Q3"},
+			map[string]string{"owner": owner, "draft": "true"}},
+		{"a switch set to its default", []string{"-draft=false", "Q3"}, map[string]string{"draft": "false"}},
+		{"a flag given twice", []string{"-owner", "someone@example.com", "-owner", owner, "Q3"},
+			map[string]string{"owner": owner}},
+		{"a flag after a double dash", []string{"--", "-owner"}, map[string]string{}},
+		{"the engine flags beside a flag", []string{"-json", "-owner", owner, "Q3"}, map[string]string{"owner": owner}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var seen flagsSeen
+			args := append([]string{"report:create", "-yes", "-as", actingAccount}, tc.args...)
+
+			got := execute(t, flagging(&seen), args...)
+
+			if got.code != gonsole.ExitDone {
+				t.Fatalf("code = %d, want %d, stderr %q", got.code, gonsole.ExitDone, got.stderr)
+			}
+			for hook, flags := range map[string]map[string]string{
+				"Authorize": seen.authorize, "Run": seen.run, "Record": seen.record,
+			} {
+				if !reflect.DeepEqual(flags, tc.want) {
+					t.Errorf("%s saw Flags %#v, want %#v", hook, flags, tc.want)
+				}
+			}
+		})
 	}
 }
