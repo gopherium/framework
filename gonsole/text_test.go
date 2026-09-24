@@ -437,6 +437,8 @@ Available commands:
 const pluggedListing = pluggedHeading + `  check           check every setting, every plugin and every command name
   help            print the help of one command
   list            list every command
+  migrate         apply every schema step
+  seed            store the demo data
   status          print the arguments
   version         print the version
  demo             plugin
@@ -483,6 +485,8 @@ func TestListingWidensTheNameColumnOnlyForALoadedPluginCommand(t *testing.T) {
 	want := pluggedHeading + `  check                        check every setting, every plugin and every command name
   help                         print the help of one command
   list                         list every command
+  migrate                      apply every schema step
+  seed                         store the demo data
   status                       print the arguments
   version                      print the version
  demo                          plugin
@@ -504,6 +508,8 @@ func TestListingShowsWhatFailedToLoadBeforeTheFooter(t *testing.T) {
 	commands := `  check           check every setting, every plugin and every command name
   help            print the help of one command
   list            list every command
+  migrate         apply every schema step
+  seed            store the demo data
   status          print the arguments
   version         print the version
 `

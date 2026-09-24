@@ -23,12 +23,45 @@ const demoNotice = "myapp: demo data is for development only, never seed a produ
 
 // schema are the answers a program's schema hooks give and the log of every call they receive.
 type schema struct {
-	lockFails    error
-	releaseFails error
-	stepFails    string
-	seedFails    error
-	serveFails   error
-	log          []string
+	lockFails      error
+	releaseFails   error
+	stepFails      string
+	seedFails      error
+	serveFails     error
+	registerFails  error
+	pluginsFailed  error
+	pluginsMigrate error
+	pluginsSeed    error
+	pluginsBare    bool
+	log            []string
+}
+
+// plugins registers plugins whose schema, demo data and release are noted in s, without them when s says bare.
+func (s *schema) plugins(_ context.Context, call gonsole.Call) (gonsole.Loaded, error) {
+	s.note("register describe=%t", call.Describe)
+	loaded := gonsole.Loaded{Failed: s.pluginsFailed, Release: func(ctx context.Context) error {
+		s.note("release the plugins live=%t", ctx.Err() == nil)
+		return nil
+	}}
+	if s.pluginsBare {
+		return loaded, s.registerFails
+	}
+	loaded.Migrate = func(context.Context) error {
+		s.note("migrate the plugins")
+		return s.pluginsMigrate
+	}
+	loaded.Seed = func(context.Context) error {
+		s.note("seed the plugins")
+		return s.pluginsSeed
+	}
+	return loaded, s.registerFails
+}
+
+// pluggedKeeper returns keeper with plugins, all noted in s.
+func pluggedKeeper(s *schema) gonsole.Program {
+	p := keeper(s)
+	p.Plugins = s.plugins
+	return p
 }
 
 // note appends one entry to the log.
@@ -289,6 +322,23 @@ func TestSchemaHooksGetTheRunContext(t *testing.T) {
 		look("seed", ctx)
 		return nil
 	}
+	p.Plugins = func(ctx context.Context, _ gonsole.Call) (gonsole.Loaded, error) {
+		look("register", ctx)
+		return gonsole.Loaded{
+			Migrate: func(ctx context.Context) error {
+				look("migrate the plugins", ctx)
+				return nil
+			},
+			Seed: func(ctx context.Context) error {
+				look("seed the plugins", ctx)
+				return nil
+			},
+			Release: func(ctx context.Context) error {
+				look("release the plugins", ctx)
+				return nil
+			},
+		}, nil
+	}
 	ctx := context.WithValue(t.Context(), key{}, "run")
 
 	code := p.Run(ctx, []string{"seed", "-yes"}, strings.NewReader(""), io.Discard, io.Discard)
@@ -296,7 +346,11 @@ func TestSchemaHooksGetTheRunContext(t *testing.T) {
 	if code != gonsole.ExitDone {
 		t.Errorf("code = %d, want %d", code, gonsole.ExitDone)
 	}
-	want := []string{"lock run live=true", "step run live=true", "release run live=true", "seed run live=true"}
+	want := []string{
+		"lock run live=true", "step run live=true", "register run live=true", "migrate the plugins run live=true",
+		"release run live=true", "seed run live=true", "seed the plugins run live=true",
+		"release the plugins run live=true",
+	}
 	if !slices.Equal(seen, want) {
 		t.Errorf("hooks saw %q, want %q", seen, want)
 	}
@@ -458,6 +512,51 @@ func TestMigrateStopsAndReleasesWhenItsAnswerCannotBeWritten(t *testing.T) {
 	}
 }
 
+func TestMigrateFailsWhenThePluginLineCannotBeWritten(t *testing.T) {
+	t.Parallel()
+
+	var s schema
+	p := pluggedKeeper(&s)
+	p.Migrations = nil
+	var stderr strings.Builder
+
+	code := p.Run(t.Context(), []string{"migrate"}, strings.NewReader(""), closedWriter{}, &stderr)
+
+	if want := "myapp: stdout is closed\n"; code != gonsole.ExitFailed || stderr.String() != want {
+		t.Errorf("migrate = %d, %q, want %d, %q", code, stderr.String(), gonsole.ExitFailed, want)
+	}
+	want := []string{"lock " + databaseAddress, "register describe=false", "migrate the plugins",
+		"release with the context live=true", "release the plugins live=true"}
+	if !slices.Equal(s.log, want) {
+		t.Errorf("calls = %q, want %q", s.log, want)
+	}
+}
+
+func TestRunMigratesOnlyTheCoreStepsBeforeACommandThatAsksForThem(t *testing.T) {
+	t.Parallel()
+
+	var s schema
+	p := pluggedKeeper(&s)
+	p.Commands = []gonsole.Command{{
+		Name: "createadmin", Summary: "create an account", Migrates: true,
+		Run: func(_ context.Context, call gonsole.Call) error {
+			s.note("run apply=%t", call.Apply)
+			return nil
+		},
+	}}
+
+	got := execute(t, p, "createadmin")
+
+	if want := "migrated accounts\nmigrated reports\n"; got.code != gonsole.ExitDone || got.stderr != want {
+		t.Errorf("run = %d, %q, want 0, %q", got.code, got.stderr, want)
+	}
+	want := []string{"lock " + databaseAddress, "step accounts at " + databaseAddress,
+		"step reports at " + databaseAddress, "release with the context live=true", "run apply=true"}
+	if !slices.Equal(s.log, want) {
+		t.Errorf("calls = %q, want %q", s.log, want)
+	}
+}
+
 func TestMigrateWithoutALockAppliesEveryStep(t *testing.T) {
 	t.Parallel()
 
@@ -533,6 +632,165 @@ func TestSeedStoresTheDemoDataOnlyWithYes(t *testing.T) {
 			}
 			if got.stderr != tc.stderr {
 				t.Errorf("stderr = %q, want %q", got.stderr, tc.stderr)
+			}
+			if !slices.Equal(s.log, tc.log) {
+				t.Errorf("calls = %q, want %q", s.log, tc.log)
+			}
+		})
+	}
+}
+
+// pluginFailures are the failures of two plugins that did not register.
+var pluginFailures = errors.Join(errors.New("plugin billing: no signing key"), errors.New("plugin mail: no relay host"))
+
+// pluginFailureLines are the lines pluginFailures prints.
+const pluginFailureLines = "myapp: plugin billing: no signing key\nmyapp: plugin mail: no relay host\n"
+
+func TestListingShowsMigrateAndSeedForAProgramWithPlugins(t *testing.T) {
+	t.Parallel()
+
+	var s schema
+	p := pluggedKeeper(&s)
+	p.Migrations, p.Seed = nil, nil
+
+	got := execute(t, p, "list")
+
+	want := `myapp Version 1.4.0
+
+Usage:
+  myapp <command> [flags] [arguments]
+
+` + intro + `
+Available commands:
+  check    check every setting, every plugin and every command name
+  help     print the help of one command
+  list     list every command
+  migrate  apply every schema step
+  seed     store the demo data
+  serve    run the server
+  version  print the version
+`
+	if got.code != gonsole.ExitDone || got.stdout != want {
+		t.Errorf("listing = %d, %q, want 0, %q", got.code, got.stdout, want)
+	}
+}
+
+func TestMigrateAppliesThePluginSchemaAfterTheCoreSteps(t *testing.T) {
+	t.Parallel()
+
+	locked := "lock " + databaseAddress
+	accounts := "step accounts at " + databaseAddress
+	reports := "step reports at " + databaseAddress
+	registered := "register describe=false"
+	schemaApplied := "migrate the plugins"
+	released := "release with the context live=true"
+	freed := "release the plugins live=true"
+	core := "migrated accounts\nmigrated reports\n"
+	cases := []struct {
+		name    string
+		schema  schema
+		noSteps bool
+		code    int
+		stdout  string
+		stderr  string
+		log     []string
+	}{
+		{"every step and the plugins", schema{}, false, gonsole.ExitDone, core + "migrated plugins\n", "",
+			[]string{locked, accounts, reports, registered, schemaApplied, released, freed}},
+		{"plugins without a schema", schema{pluginsBare: true}, false, gonsole.ExitDone, core + "migrated plugins\n", "",
+			[]string{locked, accounts, reports, registered, released, freed}},
+		{"plugins without core steps", schema{}, true, gonsole.ExitDone, "migrated plugins\n", "",
+			[]string{locked, registered, schemaApplied, released, freed}},
+		{"plugins that failed", schema{pluginsFailed: pluginFailures}, false, gonsole.ExitFailed, core,
+			pluginFailureLines, []string{locked, accounts, reports, registered, released, freed}},
+		{"a registration that fails", schema{registerFails: errors.New("the plugin table is locked")}, false,
+			gonsole.ExitFailed, core, "myapp: the plugin table is locked\n",
+			[]string{locked, accounts, reports, registered, released, freed}},
+		{"a plugin schema that fails", schema{pluginsMigrate: errors.New("relation tenants already exists")}, false,
+			gonsole.ExitFailed, core, "myapp: migrate plugins: relation tenants already exists\n",
+			[]string{locked, accounts, reports, registered, schemaApplied, released, freed}},
+		{"a core step that fails", schema{stepFails: "reports"}, false, gonsole.ExitFailed, "migrated accounts\n",
+			"myapp: migrate reports: relation already exists\n", []string{locked, accounts, reports, released}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := tc.schema
+			p := pluggedKeeper(&s)
+			if tc.noSteps {
+				p.Migrations = nil
+			}
+
+			got := execute(t, p, "migrate")
+
+			if got.code != tc.code || got.stdout != tc.stdout || got.stderr != tc.stderr {
+				t.Errorf("migrate = %d, %q, %q, want %d, %q, %q", got.code, got.stdout, got.stderr, tc.code, tc.stdout,
+					tc.stderr)
+			}
+			if !slices.Equal(s.log, tc.log) {
+				t.Errorf("calls = %q, want %q", s.log, tc.log)
+			}
+		})
+	}
+}
+
+func TestSeedStoresThePluginDemoDataAfterTheCoreDemoData(t *testing.T) {
+	t.Parallel()
+
+	locked := "lock " + databaseAddress
+	accounts := "step accounts at " + databaseAddress
+	reports := "step reports at " + databaseAddress
+	registered := "register describe=false"
+	schemaApplied := "migrate the plugins"
+	released := "release with the context live=true"
+	sown := "seed the plugins"
+	freed := "release the plugins live=true"
+	core := "migrated accounts\nmigrated reports\n"
+	migrated := core + "migrated plugins\n"
+	cases := []struct {
+		name   string
+		schema schema
+		args   []string
+		noSeed bool
+		code   int
+		stdout string
+		stderr string
+		log    []string
+	}{
+		{"a dry run", schema{}, nil, false, gonsole.ExitDone, "would store the demo data\n", dryRunNotice, nil},
+		{"an applied seed", schema{}, []string{"-yes"}, false, gonsole.ExitDone, "stored the demo reports\n",
+			migrated + demoNotice,
+			[]string{locked, accounts, reports, registered, schemaApplied, released, "seed", sown, freed}},
+		{"no core demo data", schema{}, []string{"-yes"}, true, gonsole.ExitDone, "", migrated + demoNotice,
+			[]string{locked, accounts, reports, registered, schemaApplied, released, sown, freed}},
+		{"plugins without demo data", schema{pluginsBare: true}, []string{"-yes"}, false, gonsole.ExitDone,
+			"stored the demo reports\n", migrated + demoNotice,
+			[]string{locked, accounts, reports, registered, released, "seed", freed}},
+		{"plugins that failed", schema{pluginsFailed: pluginFailures}, []string{"-yes"}, false, gonsole.ExitFailed, "",
+			core + pluginFailureLines, []string{locked, accounts, reports, registered, released, freed}},
+		{"a registration that fails", schema{registerFails: errors.New("the plugin table is locked")},
+			[]string{"-yes"}, false, gonsole.ExitFailed, "", core + "myapp: the plugin table is locked\n",
+			[]string{locked, accounts, reports, registered, released, freed}},
+		{"plugin demo data that fails", schema{pluginsSeed: errors.New("the demo tenant exists")}, []string{"-yes"},
+			false, gonsole.ExitFailed, "stored the demo reports\n", migrated + "myapp: the demo tenant exists\n",
+			[]string{locked, accounts, reports, registered, schemaApplied, released, "seed", sown, freed}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := tc.schema
+			p := pluggedKeeper(&s)
+			if tc.noSeed {
+				p.Seed = nil
+			}
+
+			got := execute(t, p, append([]string{"seed"}, tc.args...)...)
+
+			if got.code != tc.code || got.stdout != tc.stdout || got.stderr != tc.stderr {
+				t.Errorf("seed = %d, %q, %q, want %d, %q, %q", got.code, got.stdout, got.stderr, tc.code, tc.stdout,
+					tc.stderr)
 			}
 			if !slices.Equal(s.log, tc.log) {
 				t.Errorf("calls = %q, want %q", s.log, tc.log)

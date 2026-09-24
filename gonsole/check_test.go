@@ -8,6 +8,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -351,6 +352,63 @@ func TestCheckCommandReportsTheSettings(t *testing.T) {
 			}
 			if got.stderr != tc.stderr {
 				t.Errorf("stderr = %q, want %q", got.stderr, tc.stderr)
+			}
+		})
+	}
+}
+
+func TestCheckCommandReportsThePlugins(t *testing.T) {
+	t.Parallel()
+
+	const valid = "settings, plugins and command names are valid\n"
+	checked := []string{"validate", "register describe=false", "release live=true"}
+	cases := []struct {
+		name     string
+		validate error
+		groups   []gonsole.Group
+		failed   error
+		fail     error
+		code     int
+		stdout   string
+		stderr   string
+		log      []string
+	}{
+		{"plugins that load", nil, demoGroups(), nil, nil, gonsole.ExitDone, valid, "", checked},
+		{"groups that break the rules", nil, []gonsole.Group{
+			{Namespace: "list", Commands: []gonsole.Command{echo("list:all")}},
+		}, nil, nil, gonsole.ExitFailed, "", "myapp: gonsole: plugin list takes the name of the base command list\n",
+			checked},
+		{"plugins that failed beside groups that break the rules", nil, []gonsole.Group{
+			{Namespace: "list", Commands: []gonsole.Command{echo("list:all")}},
+			{Namespace: "demo", Commands: []gonsole.Command{summarized(echo("demo:sync"), ""), echo("demo:list")}},
+		}, pluginFailures, nil, gonsole.ExitFailed, "", pluginFailureLines +
+			"myapp: gonsole: plugin list takes the name of the base command list\n" +
+			"myapp: gonsole: command \"demo:sync\" has no summary\n", checked},
+		{"a registration that fails", nil, demoGroups(), errors.New("plugin mail: no relay host"),
+			errors.New("the plugin table is locked"), gonsole.ExitFailed, "", "myapp: the plugin table is locked\n",
+			checked},
+		{"settings that fail", errors.New("MYAPP_ADDR: must be a port, got \"web\""), demoGroups(), nil, nil,
+			gonsole.ExitFailed, "", "myapp: MYAPP_ADDR: must be a port, got \"web\"\n", []string{"validate"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &registry{groups: tc.groups, failed: tc.failed, fail: tc.fail}
+			p := plugged(r)
+			p.Validate = func(context.Context, gonsole.Call) error {
+				r.note("validate")
+				return tc.validate
+			}
+
+			got := execute(t, p, "check")
+
+			if got.code != tc.code || got.stdout != tc.stdout || got.stderr != tc.stderr {
+				t.Errorf("check = %d, %q, %q, want %d, %q, %q", got.code, got.stdout, got.stderr, tc.code, tc.stdout,
+					tc.stderr)
+			}
+			if !slices.Equal(r.log, tc.log) {
+				t.Errorf("calls = %q, want %q", r.log, tc.log)
 			}
 		})
 	}

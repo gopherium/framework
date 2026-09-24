@@ -58,6 +58,10 @@ func provided(id string, p Provider) (commands []Command, err error) {
 type Loaded struct {
 	// Groups are the command groups, one per plugin that offers commands.
 	Groups []Group
+	// Migrate applies every plugin's schema in registration order.
+	Migrate func(ctx context.Context) error
+	// Seed stores every plugin's demo data in registration order.
+	Seed func(ctx context.Context) error
 	// Failed joins the errors of plugins that failed to register or to describe their commands.
 	Failed error
 	// Release stops every registered plugin and closes what registering opened.
@@ -127,7 +131,7 @@ func (m *memo) release(ctx context.Context) (err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	defer recoverRun("plugins", &err)
-	if err := stopWithin(context.WithoutCancel(ctx), m.loaded.Release); err != nil {
+	if err := optional(context.WithoutCancel(ctx), m.loaded.Release); err != nil {
 		return fmt.Errorf("release the plugins: %w", err)
 	}
 	return nil

@@ -62,6 +62,7 @@ Available commands:
   help           print the help of one command
   list           list every command
   migrate        apply every schema step
+  seed           store the demo data
   serve          run the server
   version        print the version
  demo            plugin
@@ -101,7 +102,7 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 	}{
 		{"a command that succeeds", "", nil, []string{"report:list"}, gonsole.ExitDone, "quarterly\nyearly\n", ""},
 		{"a migration that reads its setting", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress},
-			[]string{"migrate"}, gonsole.ExitDone, "migrated reports\n", ""},
+			[]string{"migrate"}, gonsole.ExitDone, "migrated reports\nmigrated plugins\n", ""},
 		{"a migration without its setting", "", nil, []string{"migrate"}, gonsole.ExitFailed, "",
 			"myapp: MYAPP_DATABASE_URL is required\n"},
 		{"a write that reads its input", "sales by region\n", nil, []string{"report:create", "-yes", "Q3"},

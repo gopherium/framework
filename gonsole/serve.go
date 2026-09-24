@@ -54,7 +54,7 @@ func Serve(
 	if err != nil {
 		grace, cancel := context.WithTimeout(context.WithoutCancel(ctx), t.Grace)
 		defer cancel()
-		return errors.Join(fmt.Errorf("http server: %w", err), stopWithin(grace, stop))
+		return errors.Join(fmt.Errorf("http server: %w", err), optional(grace, stop))
 	}
 	return serveOn(ctx, srv, listener, t, stop, logger)
 }
@@ -84,13 +84,13 @@ func serveOn(
 	if failed == nil {
 		<-served
 	}
-	return errors.Join(failed, shut, stopWithin(grace, stop))
+	return errors.Join(failed, shut, optional(grace, stop))
 }
 
-// stopWithin calls stop under ctx, nothing when stop is nil.
-func stopWithin(ctx context.Context, stop func(context.Context) error) error {
-	if stop == nil {
+// optional calls fn under ctx, nothing when fn is nil.
+func optional(ctx context.Context, fn func(context.Context) error) error {
+	if fn == nil {
 		return nil
 	}
-	return stop(ctx)
+	return fn(ctx)
 }
