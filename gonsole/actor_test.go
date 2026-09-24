@@ -159,6 +159,34 @@ func TestRunHandsTheHooksTheRunContext(t *testing.T) {
 	}
 }
 
+func TestRunRecordsAnAppliedWriteAfterTheRunIsCancelled(t *testing.T) {
+	t.Parallel()
+
+	type key struct{}
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), key{}, "run"))
+	var seen string
+	var h hooks
+	p := guarded(&h)
+	p.Commands[0].Run = func(context.Context, gonsole.Call) error {
+		cancel()
+		return nil
+	}
+	p.Record = func(ctx context.Context, _ gonsole.Call, _ string) error {
+		seen = fmt.Sprintf("%v live=%t", ctx.Value(key{}), ctx.Err() == nil)
+		return ctx.Err()
+	}
+
+	code := p.Run(ctx, []string{"report:revoke", "-as", actingAccount, "-yes", "Q3"}, strings.NewReader(""),
+		io.Discard, io.Discard)
+
+	if code != gonsole.ExitDone {
+		t.Errorf("code = %d, want %d", code, gonsole.ExitDone)
+	}
+	if seen != "run live=true" {
+		t.Errorf("Record saw %q, want the run's values on a live context", seen)
+	}
+}
+
 func TestRunRefusesACommandThatNeedsAnActingAccountWithoutOne(t *testing.T) {
 	t.Parallel()
 

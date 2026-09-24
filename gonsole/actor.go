@@ -36,12 +36,12 @@ func (r *runner) authorize(ctx context.Context, cmd Command, call Call) error {
 	return r.program.Authorize(ctx, call, cmd.Capability)
 }
 
-// record stores the applied run of cmd when cmd names a capability.
+// record stores the applied run of cmd when cmd names a capability, under a context the end of the run cannot cancel.
 func (r *runner) record(ctx context.Context, cmd Command, call Call) error {
 	if cmd.Capability == "" {
 		return nil
 	}
-	return r.program.Record(ctx, call, cmd.Name)
+	return r.program.Record(context.WithoutCancel(ctx), call, cmd.Name)
 }
 
 // panicked is a panic recovered from the run of one command.
