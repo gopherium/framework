@@ -63,11 +63,29 @@ func NewServer(addr string, handler http.Handler, t Timeouts) *http.Server {
 func Serve(
 	ctx context.Context, srv *http.Server, t Timeouts, stop func(context.Context) error, logger *slog.Logger,
 ) error {
+	if err := refuseGraces(t); err != nil {
+		return err
+	}
 	listener, err := net.Listen("tcp", cmp.Or(srv.Addr, ":http"))
 	if err != nil {
 		return errors.Join(fmt.Errorf("http server: %w", err), stopWithin(ctx, t, stop))
 	}
 	return serveOn(ctx, srv, listener, t, stop, logger)
+}
+
+// refuseGraces returns an error naming each grace of t that does not stand above zero.
+func refuseGraces(t Timeouts) error {
+	graces := []struct {
+		name  string
+		grace time.Duration
+	}{{"Grace", t.Grace}, {"CancelGrace", t.CancelGrace}, {"StopGrace", t.StopGrace}}
+	var refused []error
+	for _, g := range graces {
+		if g.grace <= 0 {
+			refused = append(refused, fmt.Errorf("gonsole: Timeouts.%s must stand above zero, got %v", g.name, g.grace))
+		}
+	}
+	return errors.Join(refused...)
 }
 
 // serveOn serves srv on listener until ctx ends or serving fails, then drains it and calls stop within the stop grace.

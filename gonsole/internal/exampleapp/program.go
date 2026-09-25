@@ -77,6 +77,7 @@ func (demo) Commands() []gonsole.Command {
 func serve(ctx context.Context, call gonsole.Call) error {
 	timeouts, err := call.Env.Timeouts(gonsole.Timeouts{
 		ReadHeader: 10 * time.Second, Read: 30 * time.Second, Idle: 120 * time.Second, Grace: 10 * time.Second,
+		CancelGrace: 5 * time.Second, StopGrace: 5 * time.Second,
 	})
 	if err != nil {
 		return err

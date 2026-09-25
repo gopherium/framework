@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gopherium/framework/gonsole"
+	"github.com/gopherium/framework/gonsole/testkit"
 )
 
 // defaults are the timeouts a program falls back to when its settings are empty.
@@ -571,6 +572,51 @@ func TestServeStopsOnlyAfterTheServerHasDrained(t *testing.T) {
 	}
 	if sawStop.Load() {
 		t.Errorf("stop ran while a request was still being served")
+	}
+}
+
+func TestServeRefusesAGraceThatIsNotAboveZero(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		set  func(*gonsole.Timeouts)
+		err  string
+	}{
+		{"a zero grace", func(to *gonsole.Timeouts) { to.Grace = 0 },
+			"gonsole: Timeouts.Grace must stand above zero, got 0s"},
+		{"a zero cancel grace", func(to *gonsole.Timeouts) { to.CancelGrace = 0 },
+			"gonsole: Timeouts.CancelGrace must stand above zero, got 0s"},
+		{"a negative stop grace", func(to *gonsole.Timeouts) { to.StopGrace = -time.Second },
+			"gonsole: Timeouts.StopGrace must stand above zero, got -1s"},
+		{"no grace at all", func(to *gonsole.Timeouts) { to.Grace, to.CancelGrace, to.StopGrace = 0, 0, 0 },
+			"gonsole: Timeouts.Grace must stand above zero, got 0s\n" +
+				"gonsole: Timeouts.CancelGrace must stand above zero, got 0s\n" +
+				"gonsole: Timeouts.StopGrace must stand above zero, got 0s"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			timeouts := defaults
+			tc.set(&timeouts)
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			var s stopper
+			j := newJournal()
+			address := testkit.FreeAddr(t)
+
+			err := gonsole.Serve(ctx, gonsole.NewServer(address, reportNames(), timeouts), timeouts, s.stop, j.logger())
+
+			again, taken := net.Listen("tcp", address)
+			if taken == nil {
+				_ = again.Close()
+			}
+			if errorText(err) != tc.err || j.said("msg=listening") || taken != nil || s.calls != 0 {
+				t.Errorf("Serve() = %q, listened %t, port taken %v, stop calls %d, want %q with nothing bound or stopped",
+					errorText(err), j.said("msg=listening"), taken, s.calls, tc.err)
+			}
+		})
 	}
 }
 

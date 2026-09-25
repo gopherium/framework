@@ -48,7 +48,8 @@ func TestServeShutsTheServerDownBeforeItStopsWhenServingFails(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, "quarterly\n")
 	})
-	timeouts := Timeouts{ReadHeader: time.Second, Read: time.Second, Idle: time.Minute, Grace: 5 * time.Second}
+	timeouts := Timeouts{ReadHeader: time.Second, Read: time.Second, Idle: time.Minute, Grace: 5 * time.Second,
+		CancelGrace: 5 * time.Second, StopGrace: 5 * time.Second}
 	srv := NewServer(inner.Addr().String(), handler, timeouts)
 	stop := func(ctx context.Context) error {
 		stopped.Store(true)
@@ -68,8 +69,8 @@ func TestServeShutsTheServerDownBeforeItStopsWhenServingFails(t *testing.T) {
 	served := <-done
 	_, second := client.Get(address)
 
-	if !strings.HasPrefix(errorLine(served), "http server: the listener broke") {
-		t.Errorf("serveOn() = %v, want the serving failure", served)
+	if errorLine(served) != "http server: the listener broke" {
+		t.Errorf("serveOn() = %v, want only the serving failure", served)
 	}
 	if second == nil || late.Load() != 0 {
 		t.Errorf("a request after the failure = %v, handled after stop %d times, want none handled", second, late.Load())
