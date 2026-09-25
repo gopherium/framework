@@ -221,13 +221,32 @@ func servingUnder(
 	case address := <-j.listening:
 		return address, func() error {
 			cancel()
-			return <-done
+			return ended(t, done, timeouts)
 		}
 	case err := <-done:
 		cancel()
 		t.Fatalf("Serve() returned %v before listening", err)
 	}
 	return "", nil
+}
+
+// slack is how much longer than its graces a Serve run may take before a test calls it stuck.
+const slack = 5 * time.Second
+
+// errStuck is what ended answers for a Serve run that outlived its graces.
+var errStuck = errors.New("the serve run outlived its graces")
+
+// ended waits for the answer of a Serve run under timeouts, failing t when the run outlives its graces.
+func ended(t *testing.T, done <-chan error, timeouts gonsole.Timeouts) error {
+	t.Helper()
+	bound := timeouts.Grace + timeouts.CancelGrace + timeouts.StopGrace + slack
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(bound):
+		t.Errorf("Serve() still running %v after the run ended, want it to end within its graces", bound)
+		return errStuck
+	}
 }
 
 func TestServeAnswersUntilTheRunEnds(t *testing.T) {
@@ -275,11 +294,15 @@ func TestServeGivesStopItsOwnGrace(t *testing.T) {
 func TestServeCancelsARequestThatOutlastsTheGrace(t *testing.T) {
 	t.Parallel()
 
+	grace := 50 * time.Millisecond
+	j := newJournal()
 	arrived := make(chan struct{})
 	causes := make(chan error, 1)
+	var kept time.Duration
 	waiting := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		close(arrived)
 		<-r.Context().Done()
+		kept = j.sinceDown()
 		causes <- context.Cause(r.Context())
 	})
 	var s stopper
@@ -288,8 +311,7 @@ func TestServeCancelsARequestThatOutlastsTheGrace(t *testing.T) {
 		endedFirst = len(causes) == 1
 		return s.stop(ctx)
 	}
-	j := newJournal()
-	address, end := serving(t, waiting, 50*time.Millisecond, stop, j)
+	address, end := serving(t, waiting, grace, stop, j)
 	go func() { _, _ = http.Get("http://" + address + "/") }()
 	<-arrived
 
@@ -302,6 +324,10 @@ func TestServeCancelsARequestThatOutlastsTheGrace(t *testing.T) {
 	case cause := <-causes:
 		if !errors.Is(cause, gonsole.ErrGraceRanOut) {
 			t.Errorf("cause = %v, want the grace to have run out", cause)
+		}
+		if kept < grace || kept >= defaults.CancelGrace {
+			t.Errorf("request cancelled %v after the shutdown began, want once the grace of %v ran out, well within %v",
+				kept, grace, defaults.CancelGrace)
 		}
 	default:
 		t.Errorf("the request was still running when Serve returned")
@@ -495,7 +521,7 @@ func TestServeClosesAConnectionThatNeverSentARequest(t *testing.T) {
 	<-accepted
 
 	cancel()
-	served := <-done
+	served := ended(t, done, timeouts)
 
 	_ = silent.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, read := silent.Read(make([]byte, 1))
@@ -543,7 +569,7 @@ func TestServeStartsNoRequestThatArrivesOnceTheShutdownBegan(t *testing.T) {
 	if handled.Load() != 0 || len(reply) != 0 {
 		t.Errorf("handled %d, reply %q, want no request started once the shutdown began", handled.Load(), reply)
 	}
-	if err := <-done; err != nil {
+	if err := ended(t, done, defaults); err != nil {
 		t.Errorf("Serve() = %v, want nil", err)
 	}
 }
@@ -788,7 +814,7 @@ func TestServeRunsWithoutAStop(t *testing.T) {
 
 	cancel()
 
-	if err := <-done; err != nil {
+	if err := ended(t, done, defaults); err != nil {
 		t.Errorf("Serve() = %v, want nil", err)
 	}
 }
@@ -841,7 +867,7 @@ func TestServeKeepsTheErrorLogTheServerAlreadyHas(t *testing.T) {
 	_, _ = bufio.NewReader(connection).ReadString('\n')
 	_ = connection.Close()
 	cancel()
-	<-done
+	_ = ended(t, done, defaults)
 
 	mu.Lock()
 	defer mu.Unlock()
