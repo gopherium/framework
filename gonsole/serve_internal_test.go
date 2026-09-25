@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -75,6 +76,129 @@ func TestServeShutsTheServerDownBeforeItStopsWhenServingFails(t *testing.T) {
 	}
 	if strings.Contains(logged.String(), "shutting down") {
 		t.Errorf("log = %q, want no shutting down line after a failure", logged.String())
+	}
+}
+
+func TestServeCancelsBeforeItStopsWhenServingFails(t *testing.T) {
+	t.Parallel()
+
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	arrived := make(chan struct{})
+	causes := make(chan error, 1)
+	waiting := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-r.Context().Done()
+		causes <- context.Cause(r.Context())
+	})
+	timeouts := Timeouts{ReadHeader: time.Second, Read: time.Second, Idle: time.Minute, Grace: 50 * time.Millisecond,
+		CancelGrace: 5 * time.Second, StopGrace: 5 * time.Second}
+	srv := NewServer(inner.Addr().String(), waiting, timeouts)
+	endedFirst := false
+	stop := func(ctx context.Context) error {
+		endedFirst = len(causes) == 1
+		return ctx.Err()
+	}
+	listener := &brittle{Listener: inner, broken: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() { done <- serveOn(t.Context(), srv, listener, timeouts, stop, nil) }()
+	client := &http.Client{Transport: &http.Transport{}}
+	go func() { _, _ = client.Get("http://" + inner.Addr().String() + "/") }()
+	<-arrived
+
+	close(listener.broken)
+	served := <-done
+
+	if errorLine(served) != "http server: the listener broke" || !endedFirst {
+		t.Errorf("serveOn() = %v, request ended before stop %t, want only the serving failure after it ended",
+			served, endedFirst)
+	}
+	select {
+	case cause := <-causes:
+		if !errors.Is(cause, ErrGraceRanOut) {
+			t.Errorf("cause = %v, want the grace to have run out", cause)
+		}
+	default:
+		t.Errorf("the request was still running when serveOn returned")
+	}
+}
+
+// watched is a context that says when its Done channel is first asked for.
+type watched struct {
+	context.Context
+	once  sync.Once
+	asked chan struct{}
+}
+
+// newWatched returns ctx, watched for the first ask of its Done channel.
+func newWatched(ctx context.Context) *watched {
+	return &watched{Context: ctx, asked: make(chan struct{})}
+}
+
+// Done closes asked on its first call and returns the context's Done channel.
+func (w *watched) Done() <-chan struct{} {
+	w.once.Do(func() { close(w.asked) })
+	return w.Context.Done()
+}
+
+func TestSettleReturnsAtOnceWhenNoRequestRuns(t *testing.T) {
+	t.Parallel()
+
+	var requests inflight
+	requests.enter()
+	requests.leave()
+	requests.enter()
+	requests.leave()
+	ctx := newWatched(t.Context())
+
+	running := requests.settle(ctx)
+
+	select {
+	case <-ctx.asked:
+		t.Errorf("settle waited on its context with no request running")
+	default:
+	}
+	if running != 0 {
+		t.Errorf("settle() = %d, want 0", running)
+	}
+}
+
+func TestSettleReturnsOnceTheRunningRequestsEnd(t *testing.T) {
+	t.Parallel()
+
+	var requests inflight
+	requests.enter()
+	ctx := newWatched(t.Context())
+	settled := make(chan int, 1)
+	go func() { settled <- requests.settle(ctx) }()
+	<-ctx.asked
+
+	requests.leave()
+
+	if running := <-settled; running != 0 {
+		t.Errorf("settle() = %d, want 0 once the request ended", running)
+	}
+}
+
+func TestSettleCountsTheRequestsStillRunningWhenItsContextEnds(t *testing.T) {
+	t.Parallel()
+
+	var requests inflight
+	requests.enter()
+	requests.enter()
+	ctx, cancel := context.WithCancel(t.Context())
+	watching := newWatched(ctx)
+	settled := make(chan int, 1)
+	go func() { settled <- requests.settle(watching) }()
+	<-watching.asked
+	requests.leave()
+
+	cancel()
+
+	if running := <-settled; running != 1 {
+		t.Errorf("settle() = %d, want the one request still running", running)
 	}
 }
 
