@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// Timeouts are the HTTP timeouts and the shutdown grace one server runs under.
+// Timeouts are the HTTP timeouts and the shutdown graces one server runs under.
 type Timeouts struct {
 	// ReadHeader bounds reading one request's headers, the HTTP_READ_HEADER_TIMEOUT setting.
 	ReadHeader time.Duration
@@ -21,18 +21,21 @@ type Timeouts struct {
 	Read time.Duration
 	// Idle bounds how long a kept alive connection waits for its next request, the HTTP_IDLE_TIMEOUT setting.
 	Idle time.Duration
-	// Grace bounds the shutdown of the server and the stop of what it serves, the SHUTDOWN_GRACE setting.
+	// Grace bounds how long open requests get to finish once the run ends, the SHUTDOWN_GRACE setting.
 	Grace time.Duration
+	// StopGrace bounds the stop of what the server serves, the SHUTDOWN_STOP_GRACE setting.
+	StopGrace time.Duration
 }
 
-// Timeouts returns the HTTP timeouts and the shutdown grace, each falling back to fallback.
+// Timeouts returns the HTTP timeouts and the shutdown graces, each falling back to fallback.
 func (e Env) Timeouts(fallback Timeouts) (Timeouts, error) {
 	var read Timeouts
-	var failed [4]error
+	var failed [5]error
 	read.ReadHeader, failed[0] = e.Duration("HTTP_READ_HEADER_TIMEOUT", fallback.ReadHeader)
 	read.Read, failed[1] = e.Duration("HTTP_READ_TIMEOUT", fallback.Read)
 	read.Idle, failed[2] = e.Duration("HTTP_IDLE_TIMEOUT", fallback.Idle)
 	read.Grace, failed[3] = e.Duration("SHUTDOWN_GRACE", fallback.Grace)
+	read.StopGrace, failed[4] = e.Duration("SHUTDOWN_STOP_GRACE", fallback.StopGrace)
 	if err := errors.Join(failed[:]...); err != nil {
 		return Timeouts{}, err
 	}
@@ -46,20 +49,18 @@ func NewServer(addr string, handler http.Handler, t Timeouts) *http.Server {
 	}
 }
 
-// Serve serves srv until ctx ends or serving fails, then shuts it down and calls stop within the grace.
+// Serve serves srv until ctx ends or serving fails, then shuts it down and calls stop, each within its own grace.
 func Serve(
 	ctx context.Context, srv *http.Server, t Timeouts, stop func(context.Context) error, logger *slog.Logger,
 ) error {
 	listener, err := net.Listen("tcp", cmp.Or(srv.Addr, ":http"))
 	if err != nil {
-		grace, cancel := context.WithTimeout(context.WithoutCancel(ctx), t.Grace)
-		defer cancel()
-		return errors.Join(fmt.Errorf("http server: %w", err), optional(grace, stop))
+		return errors.Join(fmt.Errorf("http server: %w", err), stopWithin(ctx, t, stop))
 	}
 	return serveOn(ctx, srv, listener, t, stop, logger)
 }
 
-// serveOn serves srv on listener until ctx ends or serving fails, then shuts it down and calls stop within the grace.
+// serveOn serves srv on listener until ctx ends or serving fails, then shuts it down and calls stop, each in its grace.
 func serveOn(
 	ctx context.Context, srv *http.Server, listener net.Listener, t Timeouts, stop func(context.Context) error,
 	logger *slog.Logger,
@@ -84,7 +85,14 @@ func serveOn(
 	if failed == nil {
 		<-served
 	}
-	return errors.Join(failed, shut, optional(grace, stop))
+	return errors.Join(failed, shut, stopWithin(ctx, t, stop))
+}
+
+// stopWithin calls stop, when set, under a context the stop grace bounds and the end of ctx cannot cancel.
+func stopWithin(ctx context.Context, t Timeouts, stop func(context.Context) error) error {
+	bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), t.StopGrace)
+	defer cancel()
+	return optional(bounded, stop)
 }
 
 // optional calls fn under ctx, nothing when fn is nil.

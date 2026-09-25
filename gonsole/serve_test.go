@@ -23,6 +23,7 @@ import (
 // defaults are the timeouts a program falls back to when its settings are empty.
 var defaults = gonsole.Timeouts{
 	ReadHeader: 10 * time.Second, Read: 30 * time.Second, Idle: 120 * time.Second, Grace: 15 * time.Second,
+	StopGrace: 10 * time.Second,
 }
 
 func TestEnvReadsTheTimeouts(t *testing.T) {
@@ -37,16 +38,17 @@ func TestEnvReadsTheTimeouts(t *testing.T) {
 		{"no settings", nil, defaults, ""},
 		{"every setting", map[string]string{
 			"MYAPP_HTTP_READ_HEADER_TIMEOUT": "2s", "MYAPP_HTTP_READ_TIMEOUT": "5s",
-			"MYAPP_HTTP_IDLE_TIMEOUT": "1m", "MYAPP_SHUTDOWN_GRACE": "3s",
+			"MYAPP_HTTP_IDLE_TIMEOUT": "1m", "MYAPP_SHUTDOWN_GRACE": "3s", "MYAPP_SHUTDOWN_STOP_GRACE": "6s",
 		}, gonsole.Timeouts{ReadHeader: 2 * time.Second, Read: 5 * time.Second, Idle: time.Minute,
-			Grace: 3 * time.Second}, ""},
+			Grace: 3 * time.Second, StopGrace: 6 * time.Second}, ""},
 		{"settings that fail", map[string]string{
 			"MYAPP_HTTP_READ_HEADER_TIMEOUT": "soon", "MYAPP_HTTP_READ_TIMEOUT": "0s",
-			"MYAPP_HTTP_IDLE_TIMEOUT": "-1s", "MYAPP_SHUTDOWN_GRACE": "later",
+			"MYAPP_HTTP_IDLE_TIMEOUT": "-1s", "MYAPP_SHUTDOWN_GRACE": "later", "MYAPP_SHUTDOWN_STOP_GRACE": "never",
 		}, gonsole.Timeouts{}, `MYAPP_HTTP_READ_HEADER_TIMEOUT: must be a duration like 30s, got "soon"
 MYAPP_HTTP_READ_TIMEOUT: must stand above zero, got "0s"
 MYAPP_HTTP_IDLE_TIMEOUT: must stand above zero, got "-1s"
-MYAPP_SHUTDOWN_GRACE: must be a duration like 30s, got "later"`},
+MYAPP_SHUTDOWN_GRACE: must be a duration like 30s, got "later"
+MYAPP_SHUTDOWN_STOP_GRACE: must be a duration like 30s, got "never"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -146,6 +148,13 @@ func (s *stopper) stop(ctx context.Context) error {
 	return s.fails
 }
 
+// ranOnceWithin reports whether stop ran once, under a live context whose deadline stood about grace away.
+func (s *stopper) ranOnceWithin(grace time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls == 1 && s.live && s.deadline > grace-time.Second && s.deadline <= grace
+}
+
 // reportNames answers every request with the report names.
 func reportNames() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -215,8 +224,25 @@ func TestServeAnswersUntilTheRunEnds(t *testing.T) {
 	if !j.said("msg=\"shutting down\"") {
 		t.Errorf("log = %q, want a shutting down line", j.lines)
 	}
-	if s.calls != 1 || !s.live || s.deadline <= 0 || s.deadline > time.Minute {
-		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the grace",
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace",
+			s.calls, s.live, s.deadline)
+	}
+}
+
+func TestServeGivesStopItsOwnGrace(t *testing.T) {
+	t.Parallel()
+
+	var s stopper
+	_, end := serving(t, reportNames(), time.Hour, s.stop, newJournal())
+
+	err := end()
+
+	if err != nil {
+		t.Errorf("Serve() = %v, want nil", err)
+	}
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace, not the grace",
 			s.calls, s.live, s.deadline)
 	}
 }
@@ -241,8 +267,9 @@ func TestServeGivesUpOnARequestThatOutlastsTheGrace(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Serve() = %v, want the grace to run out", err)
 	}
-	if s.calls != 1 {
-		t.Errorf("stop calls = %d, want 1", s.calls)
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace",
+			s.calls, s.live, s.deadline)
 	}
 }
 
@@ -341,7 +368,7 @@ func TestServeGivesThePortBackBeforeItReturns(t *testing.T) {
 	}
 }
 
-func TestServeStopsWithinTheGraceWhenTheRunEndedBeforeTheListenFailed(t *testing.T) {
+func TestServeStopsWithinTheStopGraceWhenTheRunEndedBeforeTheListenFailed(t *testing.T) {
 	t.Parallel()
 
 	taken, err := net.Listen("tcp", "127.0.0.1:0")
@@ -355,8 +382,8 @@ func TestServeStopsWithinTheGraceWhenTheRunEndedBeforeTheListenFailed(t *testing
 
 	_ = gonsole.Serve(ctx, gonsole.NewServer(taken.Addr().String(), reportNames(), defaults), defaults, s.stop, nil)
 
-	if s.calls != 1 || !s.live || s.deadline <= 0 || s.deadline > defaults.Grace {
-		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the grace",
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace",
 			s.calls, s.live, s.deadline)
 	}
 }
@@ -393,8 +420,8 @@ func TestServeReportsAnAddressItCannotTake(t *testing.T) {
 	if !strings.HasSuffix(errorText(err), "\nthe reports plugin did not stop") {
 		t.Errorf("Serve() = %v, want the stop error joined", err)
 	}
-	if s.calls != 1 || !s.live || s.deadline <= 0 || s.deadline > defaults.Grace {
-		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the grace",
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace",
 			s.calls, s.live, s.deadline)
 	}
 }
