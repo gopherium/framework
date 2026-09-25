@@ -67,7 +67,7 @@ func TestServeShutsTheServerDownBeforeItStopsWhenServingFails(t *testing.T) {
 
 	fetch(t, client, address)
 	close(listener.broken)
-	served := <-done
+	served := ended(t, done, timeouts)
 	_, second := client.Get(address)
 
 	if errorLine(served) != "http server: the listener broke" {
@@ -111,7 +111,7 @@ func TestServeCancelsBeforeItStopsWhenServingFails(t *testing.T) {
 	<-arrived
 
 	close(listener.broken)
-	served := <-done
+	served := ended(t, done, timeouts)
 
 	if errorLine(served) != "http server: the listener broke" || !endedFirst {
 		t.Errorf("serveOn() = %v, request ended before stop %t, want only the serving failure after it ended",
@@ -209,7 +209,7 @@ func TestServeDeliversACancelledResponseOverASlowConnection(t *testing.T) {
 	<-arrived
 
 	cancel()
-	served := <-done
+	served := ended(t, done, timeouts)
 
 	if code := <-answered; served != nil || code != http.StatusServiceUnavailable {
 		t.Errorf("serveOn() = %v, answer %d, want nil and the cancelled request's own 503", served, code)
@@ -248,7 +248,7 @@ func TestServeWarnsWhenTheCancelGraceCutsAResponseStillBeingWritten(t *testing.T
 	<-arrived
 
 	cancel()
-	served := <-done
+	served := ended(t, done, timeouts)
 
 	if cut := <-answered; served != nil || !errors.Is(cut, io.EOF) {
 		t.Errorf("serveOn() = %v, client error %v, want nil and the response cut", served, cut)
@@ -332,6 +332,22 @@ func TestSettleCountsTheRequestsStillRunningWhenItsContextEnds(t *testing.T) {
 
 	if running := <-settled; running != 1 {
 		t.Errorf("settle() = %d, want the one request still running", running)
+	}
+}
+
+// slack is how much longer than its graces a serveOn run may take before a test calls it stuck.
+const slack = 5 * time.Second
+
+// ended waits for the answer of a serveOn run under timeouts, stopping t when the run outlives its graces.
+func ended(t *testing.T, done <-chan error, timeouts Timeouts) error {
+	t.Helper()
+	bound := timeouts.Grace + timeouts.CancelGrace + timeouts.StopGrace + slack
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(bound):
+		t.Fatalf("serveOn() still running %v after the run ended, want it to end within its graces", bound)
+		return nil
 	}
 }
 
