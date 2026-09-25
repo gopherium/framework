@@ -8,6 +8,25 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `Timeouts.CancelGrace` and `Timeouts.StopGrace`, read from the `SHUTDOWN_CANCEL_GRACE` and `SHUTDOWN_STOP_GRACE` settings.
+- `ErrGraceRanOut`, the cause a request cancelled after the shutdown grace sees, and `ErrStillServing`.
+
+### Changed
+
+- `Serve` cancels the requests still running when the shutdown grace ends and logs a warning with their count.
+- `Serve` closes the connections left when the cancel grace ends and returns `ErrStillServing`. A hijacked connection stays open.
+- `Serve` sets `BaseContext` and wraps `Handler` on the server it runs.
+- `Serve` refuses a grace, cancel grace or stop grace that is not above zero, before it listens.
+- `Serve` no longer returns the deadline error of the server's own shutdown.
+
+### Fixed
+
+- `Serve` calls stop under the stop grace once the requests ended, never with what the shutdown grace left.
+
 ## [0.1.0] - 2026-09-25
 
 ### Added
