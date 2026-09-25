@@ -134,6 +134,7 @@ func drain(ctx context.Context, srv *http.Server, requests *inflight, t Timeouts
 	}()
 	grace, endGrace := context.WithTimeout(context.WithoutCancel(ctx), t.Grace)
 	defer endGrace()
+	await(grace, shut)
 	if running := requests.settle(grace); running > 0 {
 		logger.Warn("cancelling the requests still running after the shutdown grace", "count", running)
 	}

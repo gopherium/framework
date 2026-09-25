@@ -525,6 +525,41 @@ func TestServeClosesAConnectionThatNeverSentARequest(t *testing.T) {
 	}
 }
 
+func TestServeKeepsAConnectionsContextLiveThroughTheGrace(t *testing.T) {
+	t.Parallel()
+
+	grace := 300 * time.Millisecond
+	timeouts := defaults
+	timeouts.Grace, timeouts.CancelGrace = grace, 50*time.Millisecond
+	ctx, cancel := context.WithCancel(t.Context())
+	srv := gonsole.NewServer("127.0.0.1:0", reportNames(), timeouts)
+	contexts := make(chan context.Context, 1)
+	srv.ConnContext = func(conn context.Context, _ net.Conn) context.Context {
+		contexts <- conn
+		return conn
+	}
+	j := newJournal()
+	done := make(chan error, 1)
+	go func() { done <- gonsole.Serve(ctx, srv, timeouts, nil, j.logger()) }()
+	silent, err := net.Dial("tcp", <-j.listening)
+	if err != nil {
+		t.Fatalf("dialling: %v", err)
+	}
+	defer func() { _ = silent.Close() }()
+	conn := <-contexts
+
+	cancel()
+	<-conn.Done()
+	kept := j.sinceDown()
+	served := ended(t, done, timeouts)
+
+	if kept < grace || !errors.Is(context.Cause(conn), gonsole.ErrGraceRanOut) || served != nil {
+		t.Errorf("connection context ended %v after the shutdown began with %v, Serve() = %v, "+
+			"want it live through the grace of %v, then ended by the grace running out, and nil",
+			kept, context.Cause(conn), served, grace)
+	}
+}
+
 func TestServeStartsNoRequestThatArrivesOnceTheShutdownBegan(t *testing.T) {
 	t.Parallel()
 
