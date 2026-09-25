@@ -31,6 +31,40 @@ jobs:
       - run: go test -race -covermode=atomic -coverprofile=cover.out ./...
       - run: go vet ./...
 
+  test-postgres:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ["gonsole/auth"]
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: |
+            ${{ matrix.module }}/go.mod
+            ${{ matrix.module }}/go.sum
+      - run: go test -race -covermode=atomic -coverprofile=cover.out ./...
+      - run: go vet ./...
+
   gottext:
     runs-on: ubuntu-latest
     defaults:
@@ -61,7 +95,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: ["mailkit", "gonsole"]
+        module: ["mailkit", "gonsole", "gonsole/auth"]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -83,7 +117,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: ["mailkit", "gonsole"]
+        module: ["mailkit", "gonsole", "gonsole/auth"]
     defaults:
       run:
         working-directory: ${{ matrix.module }}
