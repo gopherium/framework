@@ -115,13 +115,26 @@ func serveOn(
 	return errors.Join(failed, still, stopWithin(ctx, t, stop))
 }
 
-// track points the requests of srv at a base context the end of ctx cannot cancel and counts them while they run.
+// track points the requests of srv at a base only Serve cancels, keeping its own base's values, and counts them.
 func track(ctx context.Context, srv *http.Server) *inflight {
 	base, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
 	requests := &inflight{cancel: cancel}
-	srv.BaseContext = func(net.Listener) context.Context { return base }
+	own := srv.BaseContext
+	srv.BaseContext = func(listener net.Listener) context.Context {
+		if own == nil {
+			return base
+		}
+		return within(own(listener), base)
+	}
 	srv.Handler = requests.wrap(cmp.Or[http.Handler](srv.Handler, http.DefaultServeMux))
 	return requests
+}
+
+// within returns a context holding the values of held that ends when base ends, with the same cause.
+func within(held, base context.Context) context.Context {
+	joined, cancel := context.WithCancelCause(context.WithoutCancel(held))
+	context.AfterFunc(base, func() { cancel(context.Cause(base)) })
+	return joined
 }
 
 // drain shuts srv down within the grace, cancels what still runs, and closes what outlives the cancel grace.

@@ -525,6 +525,50 @@ func TestServeClosesAConnectionThatNeverSentARequest(t *testing.T) {
 	}
 }
 
+func TestServeKeepsTheValuesOfTheServersOwnBaseContext(t *testing.T) {
+	t.Parallel()
+
+	type reportKey struct{}
+	arrived := make(chan struct{})
+	seen := make(chan any, 1)
+	causes := make(chan error, 1)
+	waiting := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen <- r.Context().Value(reportKey{})
+		close(arrived)
+		<-r.Context().Done()
+		causes <- context.Cause(r.Context())
+	})
+	timeouts := defaults
+	timeouts.Grace = 50 * time.Millisecond
+	ctx, cancel := context.WithCancel(t.Context())
+	srv := gonsole.NewServer("127.0.0.1:0", waiting, timeouts)
+	srv.BaseContext = func(net.Listener) context.Context {
+		return context.WithValue(ctx, reportKey{}, "quarterly")
+	}
+	j := newJournal()
+	done := make(chan error, 1)
+	go func() { done <- gonsole.Serve(ctx, srv, timeouts, nil, j.logger()) }()
+	address := <-j.listening
+	go func() { _, _ = status(address) }()
+	<-arrived
+
+	cancel()
+	err := ended(t, done, timeouts)
+
+	if value := <-seen; value != "quarterly" || err != nil {
+		t.Errorf("request value = %v, Serve() = %v, want the value the server's own base context holds and nil",
+			value, err)
+	}
+	select {
+	case cause := <-causes:
+		if !errors.Is(cause, gonsole.ErrGraceRanOut) {
+			t.Errorf("cause = %v, want the grace to have run out, not the end of the run", cause)
+		}
+	default:
+		t.Errorf("the request was still running when Serve returned")
+	}
+}
+
 func TestServeKeepsAConnectionsContextLiveThroughTheGrace(t *testing.T) {
 	t.Parallel()
 
