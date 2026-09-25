@@ -18,7 +18,7 @@ Releases of this module are tagged `gonsole/vX.Y.Z`.
 ### Changed
 
 - `Serve` cancels the requests still running when the shutdown grace ends and logs a warning with their count.
-- `Serve` closes the connections left when the cancel grace ends and returns `ErrStillServing`. A hijacked connection stays open.
+- `Serve` closes the connections left when the cancel grace ends, with a warning, and returns `ErrStillServing` if a request still runs. A hijacked connection stays open.
 - `Serve` wraps the `Handler` and the `BaseContext` of the server it runs, keeping the base's values but owning its cancellation.
 - `Serve` refuses a grace, cancel grace or stop grace that is not above zero, before it listens.
 - `Serve` no longer returns the deadline error of the server's own shutdown.

@@ -523,6 +523,9 @@ func TestServeClosesAConnectionThatNeverSentARequest(t *testing.T) {
 	if served != nil || !errors.Is(read, io.EOF) {
 		t.Errorf("Serve() = %v, read %v, want nil and the silent connection closed", served, read)
 	}
+	if !j.said(`level=WARN msg="closing the connections still open after the cancel grace"`) {
+		t.Errorf("log = %q, want a warning that the cancel grace closed connections still open", j.lines)
+	}
 }
 
 func TestServeKeepsTheValuesOfTheServersOwnBaseContext(t *testing.T) {

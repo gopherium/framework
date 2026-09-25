@@ -156,6 +156,9 @@ func drain(ctx context.Context, srv *http.Server, requests *inflight, t Timeouts
 	defer endCancelGrace()
 	await(cancelGrace, shut)
 	running := requests.settle(cancelGrace)
+	if !finished(shut) {
+		logger.Warn("closing the connections still open after the cancel grace")
+	}
 	stopShutting()
 	<-shut
 	_ = srv.Close()
@@ -163,6 +166,16 @@ func drain(ctx context.Context, srv *http.Server, requests *inflight, t Timeouts
 		return ErrStillServing
 	}
 	return nil
+}
+
+// finished reports whether shut is closed.
+func finished(shut <-chan struct{}) bool {
+	select {
+	case <-shut:
+		return true
+	default:
+		return false
+	}
 }
 
 // await waits until shut closes or ctx ends.

@@ -216,6 +216,48 @@ func TestServeDeliversACancelledResponseOverASlowConnection(t *testing.T) {
 	}
 }
 
+func TestServeWarnsWhenTheCancelGraceCutsAResponseStillBeingWritten(t *testing.T) {
+	t.Parallel()
+
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	arrived := make(chan struct{})
+	unavailable := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-r.Context().Done()
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	timeouts := Timeouts{ReadHeader: time.Second, Read: time.Second, Idle: time.Minute,
+		Grace: 10 * time.Millisecond, CancelGrace: 100 * time.Millisecond, StopGrace: 5 * time.Second}
+	srv := NewServer(inner.Addr().String(), unavailable, timeouts)
+	ctx, cancel := context.WithCancel(t.Context())
+	listener := slowWrites{Listener: inner, delay: time.Second}
+	var logged strings.Builder
+	done := make(chan error, 1)
+	go func() {
+		done <- serveOn(ctx, srv, listener, timeouts, nil, slog.New(slog.NewTextHandler(&logged, nil)))
+	}()
+	client := &http.Client{Transport: &http.Transport{}, Timeout: 10 * time.Second}
+	answered := make(chan error, 1)
+	go func() {
+		_, err := client.Get("http://" + inner.Addr().String() + "/")
+		answered <- err
+	}()
+	<-arrived
+
+	cancel()
+	served := <-done
+
+	if cut := <-answered; served != nil || !errors.Is(cut, io.EOF) {
+		t.Errorf("serveOn() = %v, client error %v, want nil and the response cut", served, cut)
+	}
+	if !strings.Contains(logged.String(), `level=WARN msg="closing the connections still open after the cancel grace"`) {
+		t.Errorf("log = %q, want a warning that the cancel grace closed connections still open", logged.String())
+	}
+}
+
 // watched is a context that says when its Done channel is first asked for.
 type watched struct {
 	context.Context
