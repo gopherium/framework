@@ -17,6 +17,9 @@ import (
 // ErrGraceRanOut is the cause context.Cause reports for a request Serve cancels after the shutdown grace.
 var ErrGraceRanOut = errors.New("gonsole: the shutdown grace ran out")
 
+// ErrStillServing reports requests still running when the cancel grace ended.
+var ErrStillServing = errors.New("gonsole: requests still running after the cancel grace")
+
 // Timeouts are the HTTP timeouts and the shutdown graces one server runs under.
 type Timeouts struct {
 	// ReadHeader bounds reading one request's headers, the HTTP_READ_HEADER_TIMEOUT setting.
@@ -87,11 +90,11 @@ func serveOn(
 	case <-ctx.Done():
 		logger.Info("shutting down")
 	}
-	drain(ctx, srv, requests, t, logger)
+	still := drain(ctx, srv, requests, t, logger)
 	if failed == nil {
 		<-served
 	}
-	return errors.Join(failed, stopWithin(ctx, t, stop))
+	return errors.Join(failed, still, stopWithin(ctx, t, stop))
 }
 
 // track points the requests of srv at a base context the end of ctx cannot cancel and counts them while they run.
@@ -103,8 +106,8 @@ func track(ctx context.Context, srv *http.Server) *inflight {
 	return requests
 }
 
-// drain shuts srv down within the grace, then cancels what still runs and waits for it within the cancel grace.
-func drain(ctx context.Context, srv *http.Server, requests *inflight, t Timeouts, logger *slog.Logger) {
+// drain shuts srv down within the grace, cancels what still runs, and closes what outlives the cancel grace.
+func drain(ctx context.Context, srv *http.Server, requests *inflight, t Timeouts, logger *slog.Logger) error {
 	grace, endGrace := context.WithTimeout(context.WithoutCancel(ctx), t.Grace)
 	defer endGrace()
 	_ = srv.Shutdown(grace)
@@ -114,7 +117,13 @@ func drain(ctx context.Context, srv *http.Server, requests *inflight, t Timeouts
 	requests.cancel(ErrGraceRanOut)
 	cancelGrace, endCancelGrace := context.WithTimeout(context.WithoutCancel(ctx), t.CancelGrace)
 	defer endCancelGrace()
-	requests.settle(cancelGrace)
+	_ = srv.Shutdown(cancelGrace)
+	running := requests.settle(cancelGrace)
+	_ = srv.Close()
+	if running > 0 {
+		return ErrStillServing
+	}
+	return nil
 }
 
 // inflight counts the requests one server is handling and cancels them together.

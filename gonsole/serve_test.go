@@ -202,9 +202,17 @@ func serving(
 	t *testing.T, handler http.Handler, grace time.Duration, stop func(context.Context) error, j *journal,
 ) (string, func() error) {
 	t.Helper()
-	ctx, cancel := context.WithCancel(t.Context())
 	timeouts := defaults
 	timeouts.Grace = grace
+	return servingUnder(t, handler, timeouts, stop, j)
+}
+
+// servingUnder is serving under the timeouts given.
+func servingUnder(
+	t *testing.T, handler http.Handler, timeouts gonsole.Timeouts, stop func(context.Context) error, j *journal,
+) (string, func() error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
 	srv := gonsole.NewServer("127.0.0.1:0", handler, timeouts)
 	done := make(chan error, 1)
 	go func() { done <- gonsole.Serve(ctx, srv, timeouts, stop, j.logger()) }()
@@ -396,7 +404,10 @@ func TestServeDeliversTheCancelledRequestsOwnResponse(t *testing.T) {
 		})
 		address, end := serving(t, unavailable, 10*time.Millisecond, nil, newJournal())
 		answered := make(chan int, 1)
-		go func() { answered <- status(address) }()
+		go func() {
+			code, _ := status(address)
+			answered <- code
+		}()
 		<-arrived
 
 		err := end()
@@ -413,14 +424,83 @@ const deliveries = 40
 // patient is the client the serve tests fetch with, giving up on an answer that never comes.
 var patient = &http.Client{Timeout: 10 * time.Second}
 
-// status fetches the root of the server at address and returns the answer's status code, zero when none came.
-func status(address string) int {
+// status fetches the root of the server at address and returns the answer's status code, or the error when none came.
+func status(address string) (int, error) {
 	response, err := patient.Get("http://" + address + "/")
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	_ = response.Body.Close()
-	return response.StatusCode
+	return response.StatusCode, nil
+}
+
+func TestServeClosesARequestThatIgnoresTheCancel(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	defer close(release)
+	arrived := make(chan struct{})
+	stubborn := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		close(arrived)
+		<-release
+	})
+	var s stopper
+	timeouts := defaults
+	timeouts.Grace, timeouts.CancelGrace = 50*time.Millisecond, 50*time.Millisecond
+	address, end := servingUnder(t, stubborn, timeouts, s.stop, newJournal())
+	answered := make(chan error, 1)
+	go func() {
+		_, err := status(address)
+		answered <- err
+	}()
+	<-arrived
+
+	err := end()
+
+	if !errors.Is(err, gonsole.ErrStillServing) {
+		t.Errorf("Serve() = %v, want the request still running after the cancel grace", err)
+	}
+	if closed := <-answered; !errors.Is(closed, io.EOF) {
+		t.Errorf("client error = %v, want its connection closed", closed)
+	}
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace",
+			s.calls, s.live, s.deadline)
+	}
+}
+
+func TestServeClosesAConnectionThatNeverSentARequest(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	timeouts := defaults
+	timeouts.Grace, timeouts.CancelGrace = 50*time.Millisecond, 50*time.Millisecond
+	srv := gonsole.NewServer("127.0.0.1:0", reportNames(), timeouts)
+	accepted := make(chan struct{})
+	var once sync.Once
+	srv.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			once.Do(func() { close(accepted) })
+		}
+	}
+	j := newJournal()
+	done := make(chan error, 1)
+	go func() { done <- gonsole.Serve(ctx, srv, timeouts, nil, j.logger()) }()
+	silent, err := net.Dial("tcp", <-j.listening)
+	if err != nil {
+		t.Fatalf("dialling: %v", err)
+	}
+	defer func() { _ = silent.Close() }()
+	<-accepted
+
+	cancel()
+	served := <-done
+
+	_ = silent.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, read := silent.Read(make([]byte, 1))
+	if served != nil || !errors.Is(read, io.EOF) {
+		t.Errorf("Serve() = %v, read %v, want nil and the silent connection closed", served, read)
+	}
 }
 
 func TestServeCountsDownARequestThatAborts(t *testing.T) {
@@ -429,7 +509,7 @@ func TestServeCountsDownARequestThatAborts(t *testing.T) {
 	aborting := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) })
 	j := newJournal()
 	address, end := serving(t, aborting, 50*time.Millisecond, nil, j)
-	if code := status(address); code != 0 {
+	if code, err := status(address); err == nil {
 		t.Errorf("GET answered %d, want the aborted request's connection closed", code)
 	}
 
@@ -445,7 +525,7 @@ func TestServeAnswersThroughTheDefaultMuxWhenTheServerHasNoHandler(t *testing.T)
 
 	address, end := serving(t, nil, time.Minute, nil, newJournal())
 
-	code := status(address)
+	code, _ := status(address)
 	err := end()
 
 	if code != http.StatusNotFound || err != nil {
