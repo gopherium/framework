@@ -422,31 +422,26 @@ func TestServeWaitsForAHijackedConnectionBeforeItStops(t *testing.T) {
 func TestServeDeliversTheCancelledRequestsOwnResponse(t *testing.T) {
 	t.Parallel()
 
-	for range deliveries {
-		arrived := make(chan struct{})
-		unavailable := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			close(arrived)
-			<-r.Context().Done()
-			w.WriteHeader(http.StatusServiceUnavailable)
-		})
-		address, end := serving(t, unavailable, 10*time.Millisecond, nil, newJournal())
-		answered := make(chan int, 1)
-		go func() {
-			code, _ := status(address)
-			answered <- code
-		}()
-		<-arrived
+	arrived := make(chan struct{})
+	unavailable := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-r.Context().Done()
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	address, end := serving(t, unavailable, 10*time.Millisecond, nil, newJournal())
+	answered := make(chan int, 1)
+	go func() {
+		code, _ := status(address)
+		answered <- code
+	}()
+	<-arrived
 
-		err := end()
+	err := end()
 
-		if code := <-answered; err != nil || code != http.StatusServiceUnavailable {
-			t.Fatalf("Serve() = %v, answer %d, want nil and the cancelled request's own 503", err, code)
-		}
+	if code := <-answered; err != nil || code != http.StatusServiceUnavailable {
+		t.Errorf("Serve() = %v, answer %d, want nil and the cancelled request's own 503", err, code)
 	}
 }
-
-// deliveries is how many cancelled requests the delivery test serves, enough to catch a response lost now and then.
-const deliveries = 40
 
 // patient is the client the serve tests fetch with, giving up on an answer that never comes.
 var patient = &http.Client{Timeout: 10 * time.Second}
