@@ -18,11 +18,13 @@ import (
 	"time"
 
 	"github.com/gopherium/framework/gonsole"
+	"github.com/gopherium/framework/gonsole/testkit"
 )
 
 // defaults are the timeouts a program falls back to when its settings are empty.
 var defaults = gonsole.Timeouts{
 	ReadHeader: 10 * time.Second, Read: 30 * time.Second, Idle: 120 * time.Second, Grace: 15 * time.Second,
+	CancelGrace: 5 * time.Second, StopGrace: 10 * time.Second,
 }
 
 func TestEnvReadsTheTimeouts(t *testing.T) {
@@ -37,16 +39,20 @@ func TestEnvReadsTheTimeouts(t *testing.T) {
 		{"no settings", nil, defaults, ""},
 		{"every setting", map[string]string{
 			"MYAPP_HTTP_READ_HEADER_TIMEOUT": "2s", "MYAPP_HTTP_READ_TIMEOUT": "5s",
-			"MYAPP_HTTP_IDLE_TIMEOUT": "1m", "MYAPP_SHUTDOWN_GRACE": "3s",
+			"MYAPP_HTTP_IDLE_TIMEOUT": "1m", "MYAPP_SHUTDOWN_GRACE": "3s", "MYAPP_SHUTDOWN_STOP_GRACE": "6s",
+			"MYAPP_SHUTDOWN_CANCEL_GRACE": "4s",
 		}, gonsole.Timeouts{ReadHeader: 2 * time.Second, Read: 5 * time.Second, Idle: time.Minute,
-			Grace: 3 * time.Second}, ""},
+			Grace: 3 * time.Second, CancelGrace: 4 * time.Second, StopGrace: 6 * time.Second}, ""},
 		{"settings that fail", map[string]string{
 			"MYAPP_HTTP_READ_HEADER_TIMEOUT": "soon", "MYAPP_HTTP_READ_TIMEOUT": "0s",
-			"MYAPP_HTTP_IDLE_TIMEOUT": "-1s", "MYAPP_SHUTDOWN_GRACE": "later",
+			"MYAPP_HTTP_IDLE_TIMEOUT": "-1s", "MYAPP_SHUTDOWN_GRACE": "later", "MYAPP_SHUTDOWN_STOP_GRACE": "never",
+			"MYAPP_SHUTDOWN_CANCEL_GRACE": "0s",
 		}, gonsole.Timeouts{}, `MYAPP_HTTP_READ_HEADER_TIMEOUT: must be a duration like 30s, got "soon"
 MYAPP_HTTP_READ_TIMEOUT: must stand above zero, got "0s"
 MYAPP_HTTP_IDLE_TIMEOUT: must stand above zero, got "-1s"
-MYAPP_SHUTDOWN_GRACE: must be a duration like 30s, got "later"`},
+MYAPP_SHUTDOWN_GRACE: must be a duration like 30s, got "later"
+MYAPP_SHUTDOWN_CANCEL_GRACE: must stand above zero, got "0s"
+MYAPP_SHUTDOWN_STOP_GRACE: must be a duration like 30s, got "never"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,19 +89,21 @@ func TestNewServerCarriesTheTimeouts(t *testing.T) {
 	}
 }
 
-// journal is a logger target that keeps every line and hands out the address the server listens on.
+// journal is a logger target that keeps every line and signals when the server listens and when it shuts down.
 type journal struct {
 	mu        sync.Mutex
 	lines     []string
 	listening chan string
+	down      chan struct{}
+	downAt    time.Time
 }
 
 // newJournal returns an empty journal.
 func newJournal() *journal {
-	return &journal{listening: make(chan string, 1)}
+	return &journal{listening: make(chan string, 1), down: make(chan struct{})}
 }
 
-// Write keeps one log line and hands out its address when it says the server listens.
+// Write keeps one log line, handing out its address when the server listens and closing down when it shuts down.
 func (j *journal) Write(line []byte) (int, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -105,7 +113,18 @@ func (j *journal) Write(line []byte) (int, error) {
 		_, address, _ := strings.Cut(text, "addr=")
 		j.listening <- address
 	}
+	if strings.Contains(text, `msg="shutting down"`) {
+		j.downAt = time.Now()
+		close(j.down)
+	}
 	return len(line), nil
+}
+
+// sinceDown returns how long ago the server said it shuts down.
+func (j *journal) sinceDown() time.Duration {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return time.Since(j.downAt)
 }
 
 // said reports whether any kept line holds text.
@@ -146,6 +165,13 @@ func (s *stopper) stop(ctx context.Context) error {
 	return s.fails
 }
 
+// ranOnceWithin reports whether stop ran once, under a live context whose deadline stood about grace away.
+func (s *stopper) ranOnceWithin(grace time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls == 1 && s.live && s.deadline > grace-time.Second && s.deadline <= grace
+}
+
 // reportNames answers every request with the report names.
 func reportNames() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -177,9 +203,17 @@ func serving(
 	t *testing.T, handler http.Handler, grace time.Duration, stop func(context.Context) error, j *journal,
 ) (string, func() error) {
 	t.Helper()
-	ctx, cancel := context.WithCancel(t.Context())
 	timeouts := defaults
 	timeouts.Grace = grace
+	return servingUnder(t, handler, timeouts, stop, j)
+}
+
+// servingUnder is serving under the timeouts given.
+func servingUnder(
+	t *testing.T, handler http.Handler, timeouts gonsole.Timeouts, stop func(context.Context) error, j *journal,
+) (string, func() error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
 	srv := gonsole.NewServer("127.0.0.1:0", handler, timeouts)
 	done := make(chan error, 1)
 	go func() { done <- gonsole.Serve(ctx, srv, timeouts, stop, j.logger()) }()
@@ -187,13 +221,32 @@ func serving(
 	case address := <-j.listening:
 		return address, func() error {
 			cancel()
-			return <-done
+			return ended(t, done, timeouts)
 		}
 	case err := <-done:
 		cancel()
 		t.Fatalf("Serve() returned %v before listening", err)
 	}
 	return "", nil
+}
+
+// slack is how much longer than its graces a Serve run may take before a test calls it stuck.
+const slack = 5 * time.Second
+
+// errStuck is what ended answers for a Serve run that outlived its graces.
+var errStuck = errors.New("the serve run outlived its graces")
+
+// ended waits for the answer of a Serve run under timeouts, failing t when the run outlives its graces.
+func ended(t *testing.T, done <-chan error, timeouts gonsole.Timeouts) error {
+	t.Helper()
+	bound := timeouts.Grace + timeouts.CancelGrace + timeouts.StopGrace + slack
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(bound):
+		t.Errorf("Serve() still running %v after the run ended, want it to end within its graces", bound)
+		return errStuck
+	}
 }
 
 func TestServeAnswersUntilTheRunEnds(t *testing.T) {
@@ -212,37 +265,419 @@ func TestServeAnswersUntilTheRunEnds(t *testing.T) {
 	if err != nil {
 		t.Errorf("Serve() = %v, want nil", err)
 	}
-	if !j.said("msg=\"shutting down\"") {
-		t.Errorf("log = %q, want a shutting down line", j.lines)
+	if !j.said("msg=\"shutting down\"") || j.said("level=WARN") {
+		t.Errorf("log = %q, want a shutting down line and no warning", j.lines)
 	}
-	if s.calls != 1 || !s.live || s.deadline <= 0 || s.deadline > time.Minute {
-		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the grace",
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace",
 			s.calls, s.live, s.deadline)
 	}
 }
 
-func TestServeGivesUpOnARequestThatOutlastsTheGrace(t *testing.T) {
+func TestServeGivesStopItsOwnGrace(t *testing.T) {
 	t.Parallel()
 
-	release := make(chan struct{})
-	defer close(release)
+	var s stopper
+	_, end := serving(t, reportNames(), time.Hour, s.stop, newJournal())
+
+	err := end()
+
+	if err != nil {
+		t.Errorf("Serve() = %v, want nil", err)
+	}
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace, not the grace",
+			s.calls, s.live, s.deadline)
+	}
+}
+
+func TestServeCancelsARequestThatOutlastsTheGrace(t *testing.T) {
+	t.Parallel()
+
+	grace := 50 * time.Millisecond
+	j := newJournal()
 	arrived := make(chan struct{})
-	slow := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	causes := make(chan error, 1)
+	var kept time.Duration
+	waiting := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		close(arrived)
-		<-release
+		<-r.Context().Done()
+		kept = j.sinceDown()
+		causes <- context.Cause(r.Context())
 	})
 	var s stopper
-	address, end := serving(t, slow, 50*time.Millisecond, s.stop, newJournal())
+	endedFirst := false
+	stop := func(ctx context.Context) error {
+		endedFirst = len(causes) == 1
+		return s.stop(ctx)
+	}
+	address, end := serving(t, waiting, grace, stop, j)
 	go func() { _, _ = http.Get("http://" + address + "/") }()
 	<-arrived
 
 	err := end()
 
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("Serve() = %v, want the grace to run out", err)
+	if err != nil {
+		t.Errorf("Serve() = %v, want nil once the cancelled request ended", err)
 	}
-	if s.calls != 1 {
-		t.Errorf("stop calls = %d, want 1", s.calls)
+	select {
+	case cause := <-causes:
+		if !errors.Is(cause, gonsole.ErrGraceRanOut) {
+			t.Errorf("cause = %v, want the grace to have run out", cause)
+		}
+		if kept < grace || kept >= defaults.CancelGrace {
+			t.Errorf("request cancelled %v after the shutdown began, want once the grace of %v ran out, well within %v",
+				kept, grace, defaults.CancelGrace)
+		}
+	default:
+		t.Errorf("the request was still running when Serve returned")
+	}
+	if !endedFirst || !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("request ended before stop %t, stop calls = %d, live %t, deadline in %v, want one live call after it",
+			endedFirst, s.calls, s.live, s.deadline)
+	}
+	if !j.said(`level=WARN msg="cancelling the requests still running after the shutdown grace" count=1`) {
+		t.Errorf("log = %q, want a warning counting one cancelled request", j.lines)
+	}
+}
+
+func TestServeKeepsARequestsContextLiveThroughTheGrace(t *testing.T) {
+	t.Parallel()
+
+	arrived := make(chan struct{})
+	proceed := make(chan struct{})
+	seen := make(chan error, 1)
+	pending := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-proceed
+		seen <- r.Context().Err()
+		_, _ = io.WriteString(w, "quarterly\n")
+	})
+	j := newJournal()
+	address, end := serving(t, pending, time.Minute, nil, j)
+	go func() { _, _ = http.Get("http://" + address + "/") }()
+	<-arrived
+	ended := make(chan error, 1)
+	go func() { ended <- end() }()
+	<-j.down
+
+	close(proceed)
+
+	if err := <-seen; err != nil {
+		t.Errorf("request context = %v once the run ended, want it live through the grace", err)
+	}
+	if err := <-ended; err != nil {
+		t.Errorf("Serve() = %v, want nil", err)
+	}
+}
+
+func TestServeWaitsForAHijackedConnectionBeforeItStops(t *testing.T) {
+	t.Parallel()
+
+	grace := 50 * time.Millisecond
+	j := newJournal()
+	arrived := make(chan struct{})
+	ended := make(chan struct{})
+	var kept time.Duration
+	hijacking := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, _, err := http.NewResponseController(w).Hijack()
+		close(arrived)
+		if err != nil {
+			t.Errorf("hijacking the connection: %v", err)
+			return
+		}
+		defer func() { _ = connection.Close() }()
+		<-r.Context().Done()
+		kept = j.sinceDown()
+		close(ended)
+	})
+	endedFirst := false
+	stop := func(context.Context) error {
+		select {
+		case <-ended:
+			endedFirst = true
+		default:
+		}
+		return nil
+	}
+	address, end := serving(t, hijacking, grace, stop, j)
+	client, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatalf("dialling %s: %v", address, err)
+	}
+	defer func() { _ = client.Close() }()
+	_, _ = io.WriteString(client, "GET / HTTP/1.1\r\nHost: reports\r\n\r\n")
+	<-arrived
+
+	err = end()
+
+	if err != nil || !endedFirst {
+		t.Errorf("Serve() = %v, hijacked request ended before stop %t, want nil after it ended", err, endedFirst)
+	}
+	if kept < grace {
+		t.Errorf("hijacked request cancelled %v after the shutdown began, want the whole grace of %v first", kept, grace)
+	}
+}
+
+func TestServeDeliversTheCancelledRequestsOwnResponse(t *testing.T) {
+	t.Parallel()
+
+	arrived := make(chan struct{})
+	unavailable := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-r.Context().Done()
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	address, end := serving(t, unavailable, 10*time.Millisecond, nil, newJournal())
+	answered := make(chan int, 1)
+	go func() {
+		code, _ := status(address)
+		answered <- code
+	}()
+	<-arrived
+
+	err := end()
+
+	if code := <-answered; err != nil || code != http.StatusServiceUnavailable {
+		t.Errorf("Serve() = %v, answer %d, want nil and the cancelled request's own 503", err, code)
+	}
+}
+
+// patient is the client the serve tests fetch with, giving up on an answer that never comes.
+var patient = &http.Client{Timeout: 10 * time.Second}
+
+// status fetches the root of the server at address and returns the answer's status code, or the error when none came.
+func status(address string) (int, error) {
+	response, err := patient.Get("http://" + address + "/")
+	if err != nil {
+		return 0, err
+	}
+	_ = response.Body.Close()
+	return response.StatusCode, nil
+}
+
+func TestServeClosesARequestThatIgnoresTheCancel(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	defer close(release)
+	arrived := make(chan struct{})
+	stubborn := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		close(arrived)
+		<-release
+	})
+	var s stopper
+	timeouts := defaults
+	timeouts.Grace, timeouts.CancelGrace = 50*time.Millisecond, 50*time.Millisecond
+	address, end := servingUnder(t, stubborn, timeouts, s.stop, newJournal())
+	answered := make(chan error, 1)
+	go func() {
+		_, err := status(address)
+		answered <- err
+	}()
+	<-arrived
+
+	err := end()
+
+	if !errors.Is(err, gonsole.ErrStillServing) {
+		t.Errorf("Serve() = %v, want the request still running after the cancel grace", err)
+	}
+	if closed := <-answered; !errors.Is(closed, io.EOF) {
+		t.Errorf("client error = %v, want its connection closed", closed)
+	}
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace",
+			s.calls, s.live, s.deadline)
+	}
+}
+
+func TestServeClosesAConnectionThatNeverSentARequest(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	timeouts := defaults
+	timeouts.Grace, timeouts.CancelGrace = 50*time.Millisecond, 50*time.Millisecond
+	srv := gonsole.NewServer("127.0.0.1:0", reportNames(), timeouts)
+	accepted := make(chan struct{})
+	var once sync.Once
+	srv.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			once.Do(func() { close(accepted) })
+		}
+	}
+	j := newJournal()
+	done := make(chan error, 1)
+	go func() { done <- gonsole.Serve(ctx, srv, timeouts, nil, j.logger()) }()
+	silent, err := net.Dial("tcp", <-j.listening)
+	if err != nil {
+		t.Fatalf("dialling: %v", err)
+	}
+	defer func() { _ = silent.Close() }()
+	<-accepted
+
+	cancel()
+	served := ended(t, done, timeouts)
+
+	_ = silent.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, read := silent.Read(make([]byte, 1))
+	if served != nil || !errors.Is(read, io.EOF) {
+		t.Errorf("Serve() = %v, read %v, want nil and the silent connection closed", served, read)
+	}
+	if !j.said(`level=WARN msg="closing the connections still open after the cancel grace"`) {
+		t.Errorf("log = %q, want a warning that the cancel grace closed connections still open", j.lines)
+	}
+}
+
+func TestServeKeepsTheValuesOfTheServersOwnBaseContext(t *testing.T) {
+	t.Parallel()
+
+	type reportKey struct{}
+	arrived := make(chan struct{})
+	seen := make(chan any, 1)
+	causes := make(chan error, 1)
+	waiting := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen <- r.Context().Value(reportKey{})
+		close(arrived)
+		<-r.Context().Done()
+		causes <- context.Cause(r.Context())
+	})
+	timeouts := defaults
+	timeouts.Grace = 50 * time.Millisecond
+	ctx, cancel := context.WithCancel(t.Context())
+	srv := gonsole.NewServer("127.0.0.1:0", waiting, timeouts)
+	srv.BaseContext = func(net.Listener) context.Context {
+		return context.WithValue(ctx, reportKey{}, "quarterly")
+	}
+	j := newJournal()
+	done := make(chan error, 1)
+	go func() { done <- gonsole.Serve(ctx, srv, timeouts, nil, j.logger()) }()
+	address := <-j.listening
+	go func() { _, _ = status(address) }()
+	<-arrived
+
+	cancel()
+	err := ended(t, done, timeouts)
+
+	if value := <-seen; value != "quarterly" || err != nil {
+		t.Errorf("request value = %v, Serve() = %v, want the value the server's own base context holds and nil",
+			value, err)
+	}
+	select {
+	case cause := <-causes:
+		if !errors.Is(cause, gonsole.ErrGraceRanOut) {
+			t.Errorf("cause = %v, want the grace to have run out, not the end of the run", cause)
+		}
+	default:
+		t.Errorf("the request was still running when Serve returned")
+	}
+}
+
+func TestServeKeepsAConnectionsContextLiveThroughTheGrace(t *testing.T) {
+	t.Parallel()
+
+	grace := 300 * time.Millisecond
+	timeouts := defaults
+	timeouts.Grace, timeouts.CancelGrace = grace, 50*time.Millisecond
+	ctx, cancel := context.WithCancel(t.Context())
+	srv := gonsole.NewServer("127.0.0.1:0", reportNames(), timeouts)
+	contexts := make(chan context.Context, 1)
+	srv.ConnContext = func(conn context.Context, _ net.Conn) context.Context {
+		contexts <- conn
+		return conn
+	}
+	j := newJournal()
+	done := make(chan error, 1)
+	go func() { done <- gonsole.Serve(ctx, srv, timeouts, nil, j.logger()) }()
+	silent, err := net.Dial("tcp", <-j.listening)
+	if err != nil {
+		t.Fatalf("dialling: %v", err)
+	}
+	defer func() { _ = silent.Close() }()
+	conn := <-contexts
+
+	cancel()
+	<-conn.Done()
+	kept := j.sinceDown()
+	served := ended(t, done, timeouts)
+
+	if kept < grace || !errors.Is(context.Cause(conn), gonsole.ErrGraceRanOut) || served != nil {
+		t.Errorf("connection context ended %v after the shutdown began with %v, Serve() = %v, "+
+			"want it live through the grace of %v, then ended by the grace running out, and nil",
+			kept, context.Cause(conn), served, grace)
+	}
+}
+
+func TestServeStartsNoRequestThatArrivesOnceTheShutdownBegan(t *testing.T) {
+	t.Parallel()
+
+	var handled atomic.Int32
+	counting := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handled.Add(1)
+		_, _ = io.WriteString(w, "quarterly\n")
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	srv := gonsole.NewServer("127.0.0.1:0", counting, defaults)
+	accepted := make(chan struct{})
+	var acceptedOnce sync.Once
+	srv.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			acceptedOnce.Do(func() { close(accepted) })
+		}
+	}
+	began := make(chan struct{})
+	var beganOnce sync.Once
+	srv.RegisterOnShutdown(func() { beganOnce.Do(func() { close(began) }) })
+	j := newJournal()
+	done := make(chan error, 1)
+	go func() { done <- gonsole.Serve(ctx, srv, defaults, nil, j.logger()) }()
+	early, err := net.Dial("tcp", <-j.listening)
+	if err != nil {
+		t.Fatalf("dialling: %v", err)
+	}
+	defer func() { _ = early.Close() }()
+	<-accepted
+	cancel()
+	<-began
+
+	_, _ = io.WriteString(early, "GET / HTTP/1.1\r\nHost: reports\r\n\r\n")
+	_ = early.SetReadDeadline(time.Now().Add(5 * time.Second))
+	reply, _ := io.ReadAll(early)
+
+	if handled.Load() != 0 || len(reply) != 0 {
+		t.Errorf("handled %d, reply %q, want no request started once the shutdown began", handled.Load(), reply)
+	}
+	if err := ended(t, done, defaults); err != nil {
+		t.Errorf("Serve() = %v, want nil", err)
+	}
+}
+
+func TestServeCountsDownARequestThatAborts(t *testing.T) {
+	t.Parallel()
+
+	aborting := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) })
+	j := newJournal()
+	address, end := serving(t, aborting, 50*time.Millisecond, nil, j)
+	if code, err := status(address); err == nil {
+		t.Errorf("GET answered %d, want the aborted request's connection closed", code)
+	}
+
+	err := end()
+
+	if err != nil || j.said("level=WARN") {
+		t.Errorf("Serve() = %v, log %q, want nil and no request left to cancel", err, j.lines)
+	}
+}
+
+func TestServeAnswersThroughTheDefaultMuxWhenTheServerHasNoHandler(t *testing.T) {
+	t.Parallel()
+
+	address, end := serving(t, nil, time.Minute, nil, newJournal())
+
+	code, _ := status(address)
+	err := end()
+
+	if code != http.StatusNotFound || err != nil {
+		t.Errorf("GET answered %d, Serve() = %v, want the default mux's 404 and nil", code, err)
 	}
 }
 
@@ -284,6 +719,51 @@ func TestServeStopsOnlyAfterTheServerHasDrained(t *testing.T) {
 	}
 	if sawStop.Load() {
 		t.Errorf("stop ran while a request was still being served")
+	}
+}
+
+func TestServeRefusesAGraceThatIsNotAboveZero(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		set  func(*gonsole.Timeouts)
+		err  string
+	}{
+		{"a zero grace", func(to *gonsole.Timeouts) { to.Grace = 0 },
+			"gonsole: Timeouts.Grace must stand above zero, got 0s"},
+		{"a zero cancel grace", func(to *gonsole.Timeouts) { to.CancelGrace = 0 },
+			"gonsole: Timeouts.CancelGrace must stand above zero, got 0s"},
+		{"a negative stop grace", func(to *gonsole.Timeouts) { to.StopGrace = -time.Second },
+			"gonsole: Timeouts.StopGrace must stand above zero, got -1s"},
+		{"no grace at all", func(to *gonsole.Timeouts) { to.Grace, to.CancelGrace, to.StopGrace = 0, 0, 0 },
+			"gonsole: Timeouts.Grace must stand above zero, got 0s\n" +
+				"gonsole: Timeouts.CancelGrace must stand above zero, got 0s\n" +
+				"gonsole: Timeouts.StopGrace must stand above zero, got 0s"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			timeouts := defaults
+			tc.set(&timeouts)
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			var s stopper
+			j := newJournal()
+			address := testkit.FreeAddr(t)
+
+			err := gonsole.Serve(ctx, gonsole.NewServer(address, reportNames(), timeouts), timeouts, s.stop, j.logger())
+
+			again, taken := net.Listen("tcp", address)
+			if taken == nil {
+				_ = again.Close()
+			}
+			if errorText(err) != tc.err || j.said("msg=listening") || taken != nil || s.calls != 0 {
+				t.Errorf("Serve() = %q, listened %t, port taken %v, stop calls %d, want %q with nothing bound or stopped",
+					errorText(err), j.said("msg=listening"), taken, s.calls, tc.err)
+			}
+		})
 	}
 }
 
@@ -341,7 +821,7 @@ func TestServeGivesThePortBackBeforeItReturns(t *testing.T) {
 	}
 }
 
-func TestServeStopsWithinTheGraceWhenTheRunEndedBeforeTheListenFailed(t *testing.T) {
+func TestServeStopsWithinTheStopGraceWhenTheRunEndedBeforeTheListenFailed(t *testing.T) {
 	t.Parallel()
 
 	taken, err := net.Listen("tcp", "127.0.0.1:0")
@@ -355,8 +835,8 @@ func TestServeStopsWithinTheGraceWhenTheRunEndedBeforeTheListenFailed(t *testing
 
 	_ = gonsole.Serve(ctx, gonsole.NewServer(taken.Addr().String(), reportNames(), defaults), defaults, s.stop, nil)
 
-	if s.calls != 1 || !s.live || s.deadline <= 0 || s.deadline > defaults.Grace {
-		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the grace",
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace",
 			s.calls, s.live, s.deadline)
 	}
 }
@@ -393,8 +873,8 @@ func TestServeReportsAnAddressItCannotTake(t *testing.T) {
 	if !strings.HasSuffix(errorText(err), "\nthe reports plugin did not stop") {
 		t.Errorf("Serve() = %v, want the stop error joined", err)
 	}
-	if s.calls != 1 || !s.live || s.deadline <= 0 || s.deadline > defaults.Grace {
-		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the grace",
+	if !s.ranOnceWithin(defaults.StopGrace) {
+		t.Errorf("stop calls = %d, live %t, deadline in %v, want one live call within the stop grace",
 			s.calls, s.live, s.deadline)
 	}
 }
@@ -411,7 +891,7 @@ func TestServeRunsWithoutAStop(t *testing.T) {
 
 	cancel()
 
-	if err := <-done; err != nil {
+	if err := ended(t, done, defaults); err != nil {
 		t.Errorf("Serve() = %v, want nil", err)
 	}
 }
@@ -464,7 +944,7 @@ func TestServeKeepsTheErrorLogTheServerAlreadyHas(t *testing.T) {
 	_, _ = bufio.NewReader(connection).ReadString('\n')
 	_ = connection.Close()
 	cancel()
-	<-done
+	_ = ended(t, done, defaults)
 
 	mu.Lock()
 	defer mu.Unlock()
