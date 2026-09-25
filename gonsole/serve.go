@@ -126,22 +126,37 @@ func track(ctx context.Context, srv *http.Server) *inflight {
 
 // drain shuts srv down within the grace, cancels what still runs, and closes what outlives the cancel grace.
 func drain(ctx context.Context, srv *http.Server, requests *inflight, t Timeouts, logger *slog.Logger) error {
+	shutting, stopShutting := context.WithCancel(context.WithoutCancel(ctx))
+	shut := make(chan struct{})
+	go func() {
+		_ = srv.Shutdown(shutting)
+		close(shut)
+	}()
 	grace, endGrace := context.WithTimeout(context.WithoutCancel(ctx), t.Grace)
 	defer endGrace()
-	_ = srv.Shutdown(grace)
 	if running := requests.settle(grace); running > 0 {
 		logger.Warn("cancelling the requests still running after the shutdown grace", "count", running)
 	}
 	requests.cancel(ErrGraceRanOut)
 	cancelGrace, endCancelGrace := context.WithTimeout(context.WithoutCancel(ctx), t.CancelGrace)
 	defer endCancelGrace()
-	_ = srv.Shutdown(cancelGrace)
+	await(cancelGrace, shut)
 	running := requests.settle(cancelGrace)
+	stopShutting()
+	<-shut
 	_ = srv.Close()
 	if running > 0 {
 		return ErrStillServing
 	}
 	return nil
+}
+
+// await waits until shut closes or ctx ends.
+func await(ctx context.Context, shut <-chan struct{}) {
+	select {
+	case <-shut:
+	case <-ctx.Done():
+	}
 }
 
 // inflight counts the requests one server is handling and cancels them together.

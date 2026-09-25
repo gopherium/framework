@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -123,6 +124,95 @@ func TestServeCancelsBeforeItStopsWhenServingFails(t *testing.T) {
 		}
 	default:
 		t.Errorf("the request was still running when serveOn returned")
+	}
+}
+
+func TestServeRunsTheShutdownHooksOnce(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		timeouts := Timeouts{ReadHeader: time.Second, Read: time.Second, Idle: time.Minute, Grace: time.Second,
+			CancelGrace: time.Second, StopGrace: time.Second}
+		srv := NewServer("127.0.0.1:0", http.NotFoundHandler(), timeouts)
+		srv.RegisterOnShutdown(func() { calls.Add(1) })
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		err := Serve(ctx, srv, timeouts, nil, nil)
+		synctest.Wait()
+
+		if err != nil || calls.Load() != 1 {
+			t.Errorf("Serve() = %v, shutdown hooks ran %d times, want nil and once", err, calls.Load())
+		}
+	})
+}
+
+// slowWrites is a listener whose connections wait before each write, as over a slow network.
+type slowWrites struct {
+	net.Listener
+	delay time.Duration
+}
+
+// Accept returns the next connection with its writes slowed.
+func (s slowWrites) Accept() (net.Conn, error) {
+	conn, err := s.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return slowConn{Conn: conn, delay: s.delay}, nil
+}
+
+// slowConn is a connection whose writes wait before they start.
+type slowConn struct {
+	net.Conn
+	delay time.Duration
+}
+
+// Write waits the delay, then writes p.
+func (c slowConn) Write(p []byte) (int, error) {
+	time.Sleep(c.delay)
+	return c.Conn.Write(p)
+}
+
+func TestServeDeliversACancelledResponseOverASlowConnection(t *testing.T) {
+	t.Parallel()
+
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	arrived := make(chan struct{})
+	unavailable := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-r.Context().Done()
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	timeouts := Timeouts{ReadHeader: time.Second, Read: time.Second, Idle: time.Minute,
+		Grace: 10 * time.Millisecond, CancelGrace: 5 * time.Second, StopGrace: 5 * time.Second}
+	srv := NewServer(inner.Addr().String(), unavailable, timeouts)
+	ctx, cancel := context.WithCancel(t.Context())
+	listener := slowWrites{Listener: inner, delay: 50 * time.Millisecond}
+	done := make(chan error, 1)
+	go func() { done <- serveOn(ctx, srv, listener, timeouts, nil, nil) }()
+	client := &http.Client{Transport: &http.Transport{}, Timeout: 10 * time.Second}
+	answered := make(chan int, 1)
+	go func() {
+		response, err := client.Get("http://" + inner.Addr().String() + "/")
+		if err != nil {
+			answered <- 0
+			return
+		}
+		_ = response.Body.Close()
+		answered <- response.StatusCode
+	}()
+	<-arrived
+
+	cancel()
+	served := <-done
+
+	if code := <-answered; served != nil || code != http.StatusServiceUnavailable {
+		t.Errorf("serveOn() = %v, answer %d, want nil and the cancelled request's own 503", served, code)
 	}
 }
 
