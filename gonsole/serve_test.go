@@ -504,6 +504,50 @@ func TestServeClosesAConnectionThatNeverSentARequest(t *testing.T) {
 	}
 }
 
+func TestServeStartsNoRequestThatArrivesOnceTheShutdownBegan(t *testing.T) {
+	t.Parallel()
+
+	var handled atomic.Int32
+	counting := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handled.Add(1)
+		_, _ = io.WriteString(w, "quarterly\n")
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	srv := gonsole.NewServer("127.0.0.1:0", counting, defaults)
+	accepted := make(chan struct{})
+	var acceptedOnce sync.Once
+	srv.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			acceptedOnce.Do(func() { close(accepted) })
+		}
+	}
+	began := make(chan struct{})
+	var beganOnce sync.Once
+	srv.RegisterOnShutdown(func() { beganOnce.Do(func() { close(began) }) })
+	j := newJournal()
+	done := make(chan error, 1)
+	go func() { done <- gonsole.Serve(ctx, srv, defaults, nil, j.logger()) }()
+	early, err := net.Dial("tcp", <-j.listening)
+	if err != nil {
+		t.Fatalf("dialling: %v", err)
+	}
+	defer func() { _ = early.Close() }()
+	<-accepted
+	cancel()
+	<-began
+
+	_, _ = io.WriteString(early, "GET / HTTP/1.1\r\nHost: reports\r\n\r\n")
+	_ = early.SetReadDeadline(time.Now().Add(5 * time.Second))
+	reply, _ := io.ReadAll(early)
+
+	if handled.Load() != 0 || len(reply) != 0 {
+		t.Errorf("handled %d, reply %q, want no request started once the shutdown began", handled.Load(), reply)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("Serve() = %v, want nil", err)
+	}
+}
+
 func TestServeCountsDownARequestThatAborts(t *testing.T) {
 	t.Parallel()
 
