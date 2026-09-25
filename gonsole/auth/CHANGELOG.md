@@ -8,7 +8,7 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
-## [Unreleased]
+## [0.1.0] - 2026-09-25
 
 ### Added
 
@@ -23,3 +23,5 @@ Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 - The last enabled account under a privileged role is never demoted or disabled.
 - Every command finds an account by its address trimmed and in lower case.
 - `Commands`, every account command in the order it is declared.
+
+[0.1.0]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fauth%2Fv0.1.0
