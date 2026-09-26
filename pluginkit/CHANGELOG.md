@@ -1,7 +1,7 @@
 # Changelog
 
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
-0.5.0 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
+0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
 ## 0.6.0 - 2026-09-26
 
