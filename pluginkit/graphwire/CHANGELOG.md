@@ -12,7 +12,7 @@ Releases up to 0.3.0 were tagged `graphwire/vX.Y.Z` in
 stdlib-only `pluginkit` module so its gqlparser dependency never enters
 `pluginkit` itself.
 
-## [Unreleased]
+## [0.4.0] - 2026-09-26
 
 ### Changed
 
