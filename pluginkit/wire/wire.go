@@ -175,7 +175,7 @@ func renderRegistration(cfg Config, manifests []manifest, pkg, doc, funcName str
 	if len(backends) > 0 {
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "\t%q\n)\n\n", cfg.SDKImport)
+	fmt.Fprintf(&b, "\tsdk %q\n)\n\n", cfg.SDKImport)
 	b.WriteString(doc)
 	if len(backends) == 0 {
 		fmt.Fprintf(&b, "func %s(_ sdk.Deps) ([]sdk.Plugin, error) {\n\treturn []sdk.Plugin{}, nil\n}\n", funcName)
