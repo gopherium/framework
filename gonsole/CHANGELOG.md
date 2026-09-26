@@ -8,7 +8,7 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/vX.Y.Z`.
 
-## [Unreleased]
+## [0.2.0] - 2026-09-26
 
 ### Added
 
@@ -46,4 +46,5 @@ Releases of this module are tagged `gonsole/vX.Y.Z`.
 - `Program.Plugins`, `Call.Plugins`, `Loaded`, `Provider` and `Walk`, for compiled plugins' commands.
 - `testkit`, running programs from tests in process and as built binaries.
 
+[0.2.0]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fv0.2.0
 [0.1.0]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fv0.1.0
