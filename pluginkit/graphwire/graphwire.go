@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"go/token"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -263,7 +265,7 @@ func coreContributor(root string, cfg Config) (contributor, error) {
 		return contributor{}, err
 	}
 	return contributor{
-		alias: goName(filepath.Base(cfg.CoreImport)),
+		alias: coreImportName(cfg),
 		path:  cfg.CoreImport,
 		field: "core",
 		param: "core",
@@ -271,12 +273,35 @@ func coreContributor(root string, cfg Config) (contributor, error) {
 	}, nil
 }
 
+// coreImportName returns the Go name the generated wiring imports the core package under.
+func coreImportName(cfg Config) string {
+	return goName(path.Base(cfg.CoreImport))
+}
+
+// reservedNames are the Go names the generated wiring owns, keyed by whether it writes a named package.
+var reservedNames = map[bool]map[string]bool{
+	false: {"core": true, "graph": true, "init": true, "main": true},
+	true:  {"core": true, "graph": true, "init": true, "sdk": true, "errors": true, "error": true, "nil": true},
+}
+
+// refuseCollision rejects a graphql plugin id whose Go name collides with a name of the generated wiring.
+func refuseCollision(cfg Config, id string) error {
+	name := goName(id)
+	if token.IsKeyword(name) || reservedNames[namingFor(cfg).packageMode][name] || name == coreImportName(cfg) {
+		return fmt.Errorf("graphwire: plugin %s: its Go name %s collides with the generated wiring", id, name)
+	}
+	return nil
+}
+
 // pluginContributors scans every graphql flagged plugin into contributor entries.
-func pluginContributors(root string, manifests []manifest) ([]contributor, error) {
+func pluginContributors(root string, cfg Config, manifests []manifest) ([]contributor, error) {
 	var contributors []contributor
 	for _, m := range manifests {
 		if !m.GraphQL {
 			continue
+		}
+		if err := refuseCollision(cfg, m.ID); err != nil {
+			return nil, err
 		}
 		scanned, err := scanPlugin(root, m)
 		if err != nil {
@@ -326,7 +351,7 @@ func Run(root string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	plugins, err := pluginContributors(root, manifests)
+	plugins, err := pluginContributors(root, cfg, manifests)
 	if err != nil {
 		return err
 	}

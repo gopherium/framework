@@ -14,6 +14,7 @@ import (
 type Plugin interface {
 	ID() string
 	Start(ctx context.Context) error
+	// Stop releases what the plugin holds, returning by the time ctx ends, whether or not Start ran.
 	Stop(ctx context.Context) error
 }
 

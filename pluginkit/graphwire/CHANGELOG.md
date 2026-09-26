@@ -19,6 +19,10 @@ stdlib-only `pluginkit` module so its gqlparser dependency never enters
 - The module moved to `github.com/gopherium/framework/pluginkit/graphwire`.
 - The module needs Go 1.27.1.
 
+### Fixed
+
+- `Run` refuses a graphql plugin whose Go name collides with a name of the generated wiring.
+
 ## [0.3.0] - 2026-08-14
 
 ### Added

@@ -5,6 +5,7 @@ package graphwire
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -547,6 +548,134 @@ func TestFlaggedPluginWithoutSchemaFails(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "graph/*.graphqls") {
 		t.Errorf("Run() error = %v, want the missing SDL reported", err)
+	}
+}
+
+func TestRunRefusesAPluginIDCollidingWithTheWiring(t *testing.T) {
+	t.Parallel()
+
+	modes := []struct {
+		name   string
+		cfg    Config
+		output string
+		ids    []string
+	}{
+		{"main mode", testConfig, filepath.Join("cmd", "myapp"),
+			[]string{"core", "graph", "graphres", "init", "main", "type"}},
+		{"package mode", packageConfig, filepath.Join("internal", "graphroot"),
+			[]string{"core", "graph", "graphres", "init", "sdk", "errors", "error", "nil", "type"}},
+	}
+	for _, mode := range modes {
+		for _, id := range mode.ids {
+			t.Run(mode.name+" "+id, func(t *testing.T) {
+				t.Parallel()
+
+				root := t.TempDir()
+				writeCore(t, root)
+				writePlugin(t, root, id,
+					`{"id": "`+id+`", "name": "Colliding", "backend": "example.com/myapp/plugins/`+id+`", "graphql": true}`,
+					betaSchema)
+				if err := os.MkdirAll(filepath.Join(root, mode.output), 0o755); err != nil {
+					t.Fatalf("creating the output directory: %v", err)
+				}
+				wiring := filepath.Join(root, filepath.FromSlash(mode.cfg.WiringPath))
+				if err := os.WriteFile(wiring, []byte("earlier wiring\n"), 0o644); err != nil {
+					t.Fatalf("writing the earlier wiring: %v", err)
+				}
+
+				err := Run(root, mode.cfg)
+
+				want := "graphwire: plugin " + id + ": its Go name " + id + " collides with the generated wiring"
+				if err == nil || err.Error() != want {
+					t.Errorf("Run() error = %v, want %q", err, want)
+				}
+				if kept, _ := os.ReadFile(wiring); string(kept) != "earlier wiring\n" {
+					t.Errorf("wiring after the refusal = %q, want the earlier file untouched", kept)
+				}
+			})
+		}
+	}
+}
+
+func TestRunAcceptsAnIDOnlyTheOtherModeOwns(t *testing.T) {
+	t.Parallel()
+
+	modes := []struct {
+		name   string
+		cfg    Config
+		output string
+		ids    []string
+	}{
+		{"main mode", testConfig, filepath.Join("cmd", "myapp"), []string{"sdk", "errors", "error", "nil"}},
+		{"package mode", packageConfig, filepath.Join("internal", "graphroot"), []string{"main"}},
+	}
+	for _, mode := range modes {
+		for _, id := range mode.ids {
+			t.Run(mode.name+" "+id, func(t *testing.T) {
+				t.Parallel()
+
+				root := t.TempDir()
+				writeCore(t, root)
+				writePlugin(t, root, id,
+					`{"id": "`+id+`", "name": "Usable", "backend": "example.com/myapp/plugins/`+id+`", "graphql": true}`,
+					betaSchema)
+				if err := os.MkdirAll(filepath.Join(root, mode.output), 0o755); err != nil {
+					t.Fatalf("creating the output directory: %v", err)
+				}
+
+				if err := Run(root, mode.cfg); err != nil {
+					t.Errorf("Run() error = %v, want nil", err)
+				}
+			})
+		}
+	}
+}
+
+func TestRunRefusesAHyphenatedIDWhoseGoNameIsTheCoreImport(t *testing.T) {
+	t.Parallel()
+
+	for _, core := range []string{"example.com/myapp/internal/graph_res", "example.com/myapp/internal/graph-res"} {
+		t.Run(core, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			writeCore(t, root)
+			writePlugin(t, root, "graph-res",
+				`{"id": "graph-res", "name": "Colliding", "backend": "example.com/myapp/plugins/graph-res", "graphql": true}`,
+				betaSchema)
+			cfg := packageConfig
+			cfg.CoreImport = core
+
+			err := Run(root, cfg)
+
+			want := "graphwire: plugin graph-res: its Go name graph_res collides with the generated wiring"
+			if err == nil || err.Error() != want {
+				t.Errorf("Run() error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
+func TestACoreImportWithATrailingSlashKeepsOneName(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeCore(t, root)
+	writePlugin(t, root, "graphres",
+		`{"id": "graphres", "name": "Colliding", "backend": "example.com/myapp/plugins/graphres", "graphql": true}`,
+		betaSchema)
+	cfg := packageConfig
+	cfg.CoreImport = "example.com/myapp/internal/graphres/"
+
+	err := Run(root, cfg)
+
+	want := "graphwire: plugin graphres: its Go name graphres collides with the generated wiring"
+	if err == nil || err.Error() != want {
+		t.Errorf("Run() error = %v, want %q", err, want)
+	}
+	imports := wiringImports(cfg, []contributor{{alias: "beta", path: "example.com/myapp/plugins/beta"}}, namingFor(cfg))
+	if !slices.Contains(imports, imported{"graphres", cfg.CoreImport}) {
+		t.Errorf("wiringImports() = %v, want the core imported as graphres", imports)
 	}
 }
 

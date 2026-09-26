@@ -7,6 +7,13 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 
 - The module moved to `github.com/gopherium/framework/pluginkit`.
 - The module needs Go 1.27.1.
+- `Host.Migrate` applies every `Migrator` in order without starting any plugin.
+- `Host.Start` takes a stop grace and refuses one that is not above zero, a breaking change.
+- A failed `Host.Start` stops the started plugins within the stop grace, even after its context ends.
+- The generated wiring registers every plugin it can and returns one error naming each failure.
+- The generated wiring imports the SDK as `sdk`, so an SDK package with another name compiles.
+- `wire.Config` gains an optional `Reserved` list of ids no plugin may take.
+- `wire.Run` refuses a plugin id the generated Go or TypeScript wiring cannot use as an import name.
 
 ## 0.5.0 - 2026-08-14
 

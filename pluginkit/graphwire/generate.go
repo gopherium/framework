@@ -77,7 +77,7 @@ type imported struct{ alias, path string }
 func wiringImports(cfg Config, plugins []contributor, n naming) []imported {
 	imports := []imported{{"graph", cfg.ExecImport}}
 	if len(plugins) > 0 {
-		imports = append(imports, imported{goName(pathBase(cfg.CoreImport)), cfg.CoreImport})
+		imports = append(imports, imported{coreImportName(cfg), cfg.CoreImport})
 	}
 	if n.packageMode {
 		imports = append(imports, imported{"sdk", cfg.SDKImport})
@@ -103,14 +103,6 @@ func writeImports(b *strings.Builder, cfg Config, plugins []contributor, n namin
 		fmt.Fprintf(b, "\t%s %q\n", entry.alias, entry.path)
 	}
 	b.WriteString(")\n\n")
-}
-
-// pathBase returns the last segment of an import path.
-func pathBase(path string) string {
-	if i := strings.LastIndex(path, "/"); i >= 0 {
-		return path[i+1:]
-	}
-	return path
 }
 
 // writePassthrough renders the zero plugin root.
