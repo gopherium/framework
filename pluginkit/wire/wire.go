@@ -143,12 +143,14 @@ func generatedHeader(license string) string {
 
 // generateGo renders the generated Go plugin-wiring file.
 func generateGo(cfg Config, manifests []manifest) []byte {
-	return renderRegistration(cfg, manifests, "main", "", "registerPlugins")
+	doc := "// registerPlugins registers every compiled plugin, answering the ones that registered and an error naming " +
+		"each failure.\n"
+	return renderRegistration(cfg, manifests, "main", doc, "registerPlugins")
 }
 
 // generateRegistry renders the generated importable plugin registry file.
 func generateRegistry(cfg Config, manifests []manifest) []byte {
-	doc := "// All registers every plugin and returns them in registration order.\n"
+	doc := "// All registers every plugin, answering the ones that registered and an error naming each failure.\n"
 	return renderRegistration(cfg, manifests, cfg.GoRegistryPackage, doc, "All")
 }
 
@@ -164,6 +166,9 @@ func renderRegistration(cfg Config, manifests []manifest, pkg, doc, funcName str
 	var b strings.Builder
 	b.WriteString(generatedHeader(cfg.License))
 	fmt.Fprintf(&b, "package %s\n\nimport (\n", pkg)
+	if len(backends) > 0 {
+		b.WriteString("\t\"errors\"\n\t\"fmt\"\n\n")
+	}
 	for _, m := range backends {
 		fmt.Fprintf(&b, "\t%s %q\n", goName(m.ID), m.Backend)
 	}
@@ -178,7 +183,7 @@ func renderRegistration(cfg Config, manifests []manifest, pkg, doc, funcName str
 	}
 	fmt.Fprintf(
 		&b,
-		"func %s(deps sdk.Deps) ([]sdk.Plugin, error) {\n\tplugins := make([]sdk.Plugin, 0, %d)\n",
+		"func %s(deps sdk.Deps) ([]sdk.Plugin, error) {\n\tplugins := make([]sdk.Plugin, 0, %d)\n\tvar failed []error\n",
 		funcName,
 		len(backends),
 	)
@@ -186,14 +191,16 @@ func renderRegistration(cfg Config, manifests []manifest, pkg, doc, funcName str
 		name := goName(m.ID)
 		fmt.Fprintf(
 			&b,
-			"\t%sPlugin, err := %s.Register(deps)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n"+
-				"\tplugins = append(plugins, %sPlugin)\n",
+			"\t%sPlugin, err := %s.Register(deps)\n\tif err != nil {\n"+
+				"\t\tfailed = append(failed, fmt.Errorf(\"plugin %s: %%w\", err))\n\t} else {\n"+
+				"\t\tplugins = append(plugins, %sPlugin)\n\t}\n",
 			name,
 			name,
+			m.ID,
 			name,
 		)
 	}
-	b.WriteString("\treturn plugins, nil\n}\n")
+	b.WriteString("\treturn plugins, errors.Join(failed...)\n}\n")
 	return []byte(b.String())
 }
 
