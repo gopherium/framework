@@ -30,6 +30,19 @@ func NewHost(plugins ...Plugin) *Host {
 // Start migrates every [Migrator] plugin, then starts every plugin in registration
 // order, stopping the already-started ones in reverse order when a start fails.
 func (h *Host) Start(ctx context.Context) error {
+	if err := h.Migrate(ctx); err != nil {
+		return err
+	}
+	for i, p := range h.plugins {
+		if err := safeCall(ctx, p.ID(), "start", p.Start); err != nil {
+			return errors.Join(err, h.stopDownFrom(ctx, i-1))
+		}
+	}
+	return nil
+}
+
+// Migrate applies the schema of every [Migrator] plugin in registration order, stopping at the first failure.
+func (h *Host) Migrate(ctx context.Context) error {
 	for _, p := range h.plugins {
 		migrator, ok := p.(Migrator)
 		if !ok {
@@ -37,11 +50,6 @@ func (h *Host) Start(ctx context.Context) error {
 		}
 		if err := safeCall(ctx, p.ID(), "migrate", migrator.Migrate); err != nil {
 			return err
-		}
-	}
-	for i, p := range h.plugins {
-		if err := safeCall(ctx, p.ID(), "start", p.Start); err != nil {
-			return errors.Join(err, h.stopDownFrom(ctx, i-1))
 		}
 	}
 	return nil

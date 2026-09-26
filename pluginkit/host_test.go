@@ -175,6 +175,101 @@ func TestHostMigratesBeforeStarting(t *testing.T) {
 	}
 }
 
+func TestHostMigrateRunsEveryMigratorWithoutStarting(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	host := pluginkit.NewHost(
+		&migratingPlugin{fakePlugin: fakePlugin{id: "alpha", calls: &calls}},
+		&fakePlugin{id: "beta", calls: &calls},
+		&migratingPlugin{fakePlugin: fakePlugin{id: "gamma", calls: &calls}},
+	)
+
+	if err := host.Migrate(t.Context()); err != nil {
+		t.Fatalf("Migrate() error = %v, want nil", err)
+	}
+
+	want := []string{"alpha migrate", "gamma migrate"}
+	if !slices.Equal(want, calls) {
+		t.Errorf("migrate calls = %v, want %v", calls, want)
+	}
+}
+
+// callerKey keys the context value a test hands the host.
+type callerKey struct{}
+
+// contextMigrator is a migrator that records the caller value its context carries.
+type contextMigrator struct {
+	fakePlugin
+	seen *[]any
+}
+
+// Migrate records the caller value of ctx.
+func (c *contextMigrator) Migrate(ctx context.Context) error {
+	*c.seen = append(*c.seen, ctx.Value(callerKey{}))
+	return nil
+}
+
+func TestHostMigrateHandsTheCallerContextToEveryMigrator(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	var seen []any
+	host := pluginkit.NewHost(&contextMigrator{fakePlugin: fakePlugin{id: "alpha", calls: &calls}, seen: &seen})
+	ctx := context.WithValue(t.Context(), callerKey{}, "caller")
+
+	if err := host.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate() error = %v, want nil", err)
+	}
+	if err := host.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v, want nil", err)
+	}
+
+	if want := []any{"caller", "caller"}; !slices.Equal(want, seen) {
+		t.Errorf("context values seen = %v, want %v from Migrate and from Start", seen, want)
+	}
+}
+
+func TestHostMigrateWithNoPluginsDoesNothing(t *testing.T) {
+	t.Parallel()
+
+	if err := pluginkit.NewHost().Migrate(t.Context()); err != nil {
+		t.Errorf("Migrate() error = %v, want nil", err)
+	}
+}
+
+func TestHostMigrateStopsAtTheFirstFailure(t *testing.T) {
+	t.Parallel()
+
+	errSchema := errors.New("schema exploded")
+	cases := []struct {
+		name string
+		lead *migratingPlugin
+		err  string
+	}{
+		{"a failing migration", &migratingPlugin{migrateErr: errSchema}, "pluginkit: alpha migrate: schema exploded"},
+		{"a panicking migration", &migratingPlugin{migratePanic: true}, "pluginkit: alpha migrate panicked: boom"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls []string
+			tc.lead.fakePlugin = fakePlugin{id: "alpha", calls: &calls}
+			host := pluginkit.NewHost(tc.lead, &migratingPlugin{fakePlugin: fakePlugin{id: "beta", calls: &calls}})
+
+			err := host.Migrate(t.Context())
+
+			if err == nil || err.Error() != tc.err {
+				t.Fatalf("Migrate() error = %v, want %q", err, tc.err)
+			}
+			if want := []string{"alpha migrate"}; !slices.Equal(want, calls) {
+				t.Errorf("migrate calls = %v, want %v", calls, want)
+			}
+		})
+	}
+}
+
 func TestHostAbortsWhenMigrationFails(t *testing.T) {
 	t.Parallel()
 
@@ -204,8 +299,10 @@ func TestHostRecoversMigrationPanic(t *testing.T) {
 		&migratingPlugin{fakePlugin: fakePlugin{id: "beta", calls: &calls}, migratePanic: true},
 	)
 
-	if err := host.Start(t.Context()); err == nil {
-		t.Fatal("Start() error = nil, want a recovered panic error")
+	err := host.Start(t.Context())
+
+	if want := "pluginkit: beta migrate panicked: boom"; err == nil || err.Error() != want {
+		t.Fatalf("Start() error = %v, want the migration's own %q", err, want)
 	}
 }
 
