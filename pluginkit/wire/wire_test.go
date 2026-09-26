@@ -622,6 +622,146 @@ func TestRunRejectsDuplicateIDAcrossRoots(t *testing.T) {
 	}
 }
 
+// earlierWiring is what the wiring files hold before a refused run.
+const earlierWiring = "earlier wiring\n"
+
+// runBeside writes an alpha plugin, the manifest of id and earlier wiring files, then runs the generator.
+func runBeside(t *testing.T, cfg Config, id, manifestJSON string) (string, error) {
+	t.Helper()
+	root := t.TempDir()
+	writePlugin(t, root, "alpha",
+		`{"id": "alpha", "name": "Alpha", "backend": "example.com/myapp/plugins/alpha", "frontend": "@myapp/plugin-alpha"}`)
+	writePlugin(t, root, id, manifestJSON)
+	for _, path := range []string{cfg.GoWiringPath, cfg.TSWiringPath} {
+		wiring := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(wiring), 0o755); err != nil {
+			t.Fatalf("creating the wiring directory: %v", err)
+		}
+		if err := os.WriteFile(wiring, []byte(earlierWiring), 0o644); err != nil {
+			t.Fatalf("writing the earlier wiring: %v", err)
+		}
+	}
+	return root, Run(root, cfg)
+}
+
+// assertRefused checks that err is the refusal of id under root and that no wiring file changed.
+func assertRefused(t *testing.T, cfg Config, root, id, reason string, err error) {
+	t.Helper()
+	want := "pluginwire: " + filepath.Join(root, "plugins", id, "plugin.json") + `: id "` + id + `" ` + reason
+	if err == nil || err.Error() != want {
+		t.Errorf("Run() error = %v, want %q", err, want)
+	}
+	for _, path := range []string{cfg.GoWiringPath, cfg.TSWiringPath} {
+		if kept, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(path))); string(kept) != earlierWiring {
+			t.Errorf("%s after the refusal = %q, want the earlier wiring untouched", path, kept)
+		}
+	}
+}
+
+func TestRunRefusesABackendIDTheGoWiringOwns(t *testing.T) {
+	t.Parallel()
+
+	ids := []string{"errors", "fmt", "sdk", "deps", "plugins", "failed", "err", "make", "append", "nil", "error",
+		"init", "main", "type", "func"}
+	for _, id := range ids {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+
+			root, err := runBeside(t, testConfig, id,
+				`{"id": "`+id+`", "name": "Colliding", "backend": "example.com/myapp/plugins/`+id+`"}`)
+
+			assertRefused(t, testConfig, root, id, "collides with the generated Go wiring", err)
+		})
+	}
+}
+
+func TestRunRefusesAFrontendIDTheTypeScriptWiringOwns(t *testing.T) {
+	t.Parallel()
+
+	ids := []string{"plugins", "class", "default", "let", "static", "await", "yield", "eval", "arguments"}
+	for _, id := range ids {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+
+			root, err := runBeside(t, testConfig, id,
+				`{"id": "`+id+`", "name": "Colliding", "frontend": "@myapp/plugin-`+id+`"}`)
+
+			assertRefused(t, testConfig, root, id, "collides with the generated TypeScript wiring", err)
+		})
+	}
+}
+
+func TestRunRefusesAnIDTheApplicationReserves(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig
+	cfg.Reserved = []string{"serve", "token"}
+	manifests := map[string]string{
+		"token": `{"id": "token", "name": "Token", "backend": "example.com/myapp/plugins/token"}`,
+		"serve": `{"id": "serve", "name": "Serve", "frontend": "@myapp/plugin-serve"}`,
+	}
+	for id, manifestJSON := range manifests {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+
+			root, err := runBeside(t, cfg, id, manifestJSON)
+
+			assertRefused(t, cfg, root, id, "is reserved", err)
+		})
+	}
+}
+
+func TestRefuseReservedCoversEveryNameAnAliasCannotTake(t *testing.T) {
+	t.Parallel()
+
+	goNames := []string{
+		"break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough", "for", "func",
+		"go", "goto", "if", "import", "interface", "map", "package", "range", "return", "select", "struct",
+		"switch", "type", "var",
+		"errors", "fmt", "sdk", "deps", "plugins", "failed", "err", "make", "append", "nil", "error", "init", "main",
+	}
+	tsNames := []string{
+		"await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
+		"else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in",
+		"instanceof", "new", "null", "return", "super", "switch", "this", "throw", "true", "try", "typeof", "var",
+		"void", "while", "with", "yield",
+		"implements", "interface", "let", "package", "private", "protected", "public", "static",
+		"eval", "arguments", "plugins",
+	}
+	for _, id := range goNames {
+		want := `id "` + id + `" collides with the generated Go wiring`
+		if err := refuseReserved(manifest{ID: id, Backend: "example.com/myapp/plugins/" + id}, nil); err == nil ||
+			err.Error() != want {
+			t.Errorf("refuseReserved(backend %s) = %v, want %q", id, err, want)
+		}
+	}
+	for _, id := range tsNames {
+		want := `id "` + id + `" collides with the generated TypeScript wiring`
+		if err := refuseReserved(manifest{ID: id, Frontend: "@myapp/plugin-" + id}, nil); err == nil ||
+			err.Error() != want {
+			t.Errorf("refuseReserved(frontend %s) = %v, want %q", id, err, want)
+		}
+	}
+}
+
+func TestRunAcceptsAnIDOnlyTheOtherWiringOwns(t *testing.T) {
+	t.Parallel()
+
+	manifests := map[string]string{
+		"err":   `{"id": "err", "name": "Err", "frontend": "@myapp/plugin-err"}`,
+		"class": `{"id": "class", "name": "Class", "backend": "example.com/myapp/plugins/class"}`,
+	}
+	for id, manifestJSON := range manifests {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := runBeside(t, testConfig, id, manifestJSON); err != nil {
+				t.Errorf("Run() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func TestRunRejectsIncompleteConfig(t *testing.T) {
 	t.Parallel()
 
