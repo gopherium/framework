@@ -550,6 +550,75 @@ func TestFlaggedPluginWithoutSchemaFails(t *testing.T) {
 	}
 }
 
+func TestRunRefusesAPluginIDCollidingWithTheWiring(t *testing.T) {
+	t.Parallel()
+
+	ids := []string{"core", "graph", "graphres", "sdk", "errors", "error", "nil", "init", "main", "type"}
+	modes := []struct {
+		name   string
+		cfg    Config
+		output string
+	}{
+		{"main mode", testConfig, filepath.Join("cmd", "myapp")},
+		{"package mode", packageConfig, filepath.Join("internal", "graphroot")},
+	}
+	for _, mode := range modes {
+		for _, id := range ids {
+			t.Run(mode.name+" "+id, func(t *testing.T) {
+				t.Parallel()
+
+				root := t.TempDir()
+				writeCore(t, root)
+				writePlugin(t, root, id,
+					`{"id": "`+id+`", "name": "Colliding", "backend": "example.com/myapp/plugins/`+id+`", "graphql": true}`,
+					betaSchema)
+				if err := os.MkdirAll(filepath.Join(root, mode.output), 0o755); err != nil {
+					t.Fatalf("creating the output directory: %v", err)
+				}
+				wiring := filepath.Join(root, filepath.FromSlash(mode.cfg.WiringPath))
+				if err := os.WriteFile(wiring, []byte("earlier wiring\n"), 0o644); err != nil {
+					t.Fatalf("writing the earlier wiring: %v", err)
+				}
+
+				err := Run(root, mode.cfg)
+
+				want := "graphwire: plugin " + id + ": its Go name " + id + " collides with the generated wiring"
+				if err == nil || err.Error() != want {
+					t.Errorf("Run() error = %v, want %q", err, want)
+				}
+				if kept, _ := os.ReadFile(wiring); string(kept) != "earlier wiring\n" {
+					t.Errorf("wiring after the refusal = %q, want the earlier file untouched", kept)
+				}
+			})
+		}
+	}
+}
+
+func TestRunRefusesAHyphenatedIDWhoseGoNameIsTheCoreImport(t *testing.T) {
+	t.Parallel()
+
+	for _, core := range []string{"example.com/myapp/internal/graph_res", "example.com/myapp/internal/graph-res"} {
+		t.Run(core, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			writeCore(t, root)
+			writePlugin(t, root, "graph-res",
+				`{"id": "graph-res", "name": "Colliding", "backend": "example.com/myapp/plugins/graph-res", "graphql": true}`,
+				betaSchema)
+			cfg := packageConfig
+			cfg.CoreImport = core
+
+			err := Run(root, cfg)
+
+			want := "graphwire: plugin graph-res: its Go name graph_res collides with the generated wiring"
+			if err == nil || err.Error() != want {
+				t.Errorf("Run() error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
 func TestGraphQLPluginsRequireABackend(t *testing.T) {
 	t.Parallel()
 

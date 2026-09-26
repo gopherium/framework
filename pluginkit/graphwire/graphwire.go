@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -271,12 +272,29 @@ func coreContributor(root string, cfg Config) (contributor, error) {
 	}, nil
 }
 
+// reservedNames are the Go names the generated wiring declares, imports or uses unqualified.
+var reservedNames = map[string]bool{
+	"core": true, "graph": true, "sdk": true, "errors": true, "error": true, "nil": true, "init": true, "main": true,
+}
+
+// refuseCollision rejects a graphql plugin id whose Go name collides with a name of the generated wiring.
+func refuseCollision(cfg Config, id string) error {
+	name := goName(id)
+	if token.IsKeyword(name) || reservedNames[name] || name == goName(pathBase(cfg.CoreImport)) {
+		return fmt.Errorf("graphwire: plugin %s: its Go name %s collides with the generated wiring", id, name)
+	}
+	return nil
+}
+
 // pluginContributors scans every graphql flagged plugin into contributor entries.
-func pluginContributors(root string, manifests []manifest) ([]contributor, error) {
+func pluginContributors(root string, cfg Config, manifests []manifest) ([]contributor, error) {
 	var contributors []contributor
 	for _, m := range manifests {
 		if !m.GraphQL {
 			continue
+		}
+		if err := refuseCollision(cfg, m.ID); err != nil {
+			return nil, err
 		}
 		scanned, err := scanPlugin(root, m)
 		if err != nil {
@@ -326,7 +344,7 @@ func Run(root string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	plugins, err := pluginContributors(root, manifests)
+	plugins, err := pluginContributors(root, cfg, manifests)
 	if err != nil {
 		return err
 	}
