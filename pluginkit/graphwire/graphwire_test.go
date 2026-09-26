@@ -554,17 +554,19 @@ func TestFlaggedPluginWithoutSchemaFails(t *testing.T) {
 func TestRunRefusesAPluginIDCollidingWithTheWiring(t *testing.T) {
 	t.Parallel()
 
-	ids := []string{"core", "graph", "graphres", "sdk", "errors", "error", "nil", "init", "main", "type"}
 	modes := []struct {
 		name   string
 		cfg    Config
 		output string
+		ids    []string
 	}{
-		{"main mode", testConfig, filepath.Join("cmd", "myapp")},
-		{"package mode", packageConfig, filepath.Join("internal", "graphroot")},
+		{"main mode", testConfig, filepath.Join("cmd", "myapp"),
+			[]string{"core", "graph", "graphres", "init", "main", "type"}},
+		{"package mode", packageConfig, filepath.Join("internal", "graphroot"),
+			[]string{"core", "graph", "graphres", "init", "sdk", "errors", "error", "nil", "type"}},
 	}
 	for _, mode := range modes {
-		for _, id := range ids {
+		for _, id := range mode.ids {
 			t.Run(mode.name+" "+id, func(t *testing.T) {
 				t.Parallel()
 
@@ -589,6 +591,40 @@ func TestRunRefusesAPluginIDCollidingWithTheWiring(t *testing.T) {
 				}
 				if kept, _ := os.ReadFile(wiring); string(kept) != "earlier wiring\n" {
 					t.Errorf("wiring after the refusal = %q, want the earlier file untouched", kept)
+				}
+			})
+		}
+	}
+}
+
+func TestRunAcceptsAnIDOnlyTheOtherModeOwns(t *testing.T) {
+	t.Parallel()
+
+	modes := []struct {
+		name   string
+		cfg    Config
+		output string
+		ids    []string
+	}{
+		{"main mode", testConfig, filepath.Join("cmd", "myapp"), []string{"sdk", "errors", "error", "nil"}},
+		{"package mode", packageConfig, filepath.Join("internal", "graphroot"), []string{"main"}},
+	}
+	for _, mode := range modes {
+		for _, id := range mode.ids {
+			t.Run(mode.name+" "+id, func(t *testing.T) {
+				t.Parallel()
+
+				root := t.TempDir()
+				writeCore(t, root)
+				writePlugin(t, root, id,
+					`{"id": "`+id+`", "name": "Usable", "backend": "example.com/myapp/plugins/`+id+`", "graphql": true}`,
+					betaSchema)
+				if err := os.MkdirAll(filepath.Join(root, mode.output), 0o755); err != nil {
+					t.Fatalf("creating the output directory: %v", err)
+				}
+
+				if err := Run(root, mode.cfg); err != nil {
+					t.Errorf("Run() error = %v, want nil", err)
 				}
 			})
 		}
