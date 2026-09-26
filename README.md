@@ -19,6 +19,11 @@ need and ignore the rest.
   TypeScript applications, published to npm as `@gopherium/gottext`.
 - [`mailkit`](mailkit/) renders mail from template files and sends it
   over SMTP.
+- [`pluginkit`](pluginkit/) migrates, starts and stops the compiled
+  plugins of an application, guards their routes, and generates their
+  wiring.
+- [`pluginkit/graphwire`](pluginkit/graphwire/) generates the GraphQL
+  resolver root of an application from the schemas of its plugins.
 
 ## Design
 
