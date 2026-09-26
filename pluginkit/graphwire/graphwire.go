@@ -11,6 +11,7 @@ import (
 	"go/format"
 	"go/token"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -264,12 +265,17 @@ func coreContributor(root string, cfg Config) (contributor, error) {
 		return contributor{}, err
 	}
 	return contributor{
-		alias: goName(filepath.Base(cfg.CoreImport)),
+		alias: coreImportName(cfg),
 		path:  cfg.CoreImport,
 		field: "core",
 		param: "core",
 		types: types,
 	}, nil
+}
+
+// coreImportName returns the Go name the generated wiring imports the core package under.
+func coreImportName(cfg Config) string {
+	return goName(path.Base(cfg.CoreImport))
 }
 
 // reservedNames are the Go names the generated wiring declares, imports or uses unqualified.
@@ -280,7 +286,7 @@ var reservedNames = map[string]bool{
 // refuseCollision rejects a graphql plugin id whose Go name collides with a name of the generated wiring.
 func refuseCollision(cfg Config, id string) error {
 	name := goName(id)
-	if token.IsKeyword(name) || reservedNames[name] || name == goName(pathBase(cfg.CoreImport)) {
+	if token.IsKeyword(name) || reservedNames[name] || name == coreImportName(cfg) {
 		return fmt.Errorf("graphwire: plugin %s: its Go name %s collides with the generated wiring", id, name)
 	}
 	return nil

@@ -5,6 +5,7 @@ package graphwire
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -616,6 +617,29 @@ func TestRunRefusesAHyphenatedIDWhoseGoNameIsTheCoreImport(t *testing.T) {
 				t.Errorf("Run() error = %v, want %q", err, want)
 			}
 		})
+	}
+}
+
+func TestACoreImportWithATrailingSlashKeepsOneName(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeCore(t, root)
+	writePlugin(t, root, "graphres",
+		`{"id": "graphres", "name": "Colliding", "backend": "example.com/myapp/plugins/graphres", "graphql": true}`,
+		betaSchema)
+	cfg := packageConfig
+	cfg.CoreImport = "example.com/myapp/internal/graphres/"
+
+	err := Run(root, cfg)
+
+	want := "graphwire: plugin graphres: its Go name graphres collides with the generated wiring"
+	if err == nil || err.Error() != want {
+		t.Errorf("Run() error = %v, want %q", err, want)
+	}
+	imports := wiringImports(cfg, []contributor{{alias: "beta", path: "example.com/myapp/plugins/beta"}}, namingFor(cfg))
+	if !slices.Contains(imports, imported{"graphres", cfg.CoreImport}) {
+		t.Errorf("wiringImports() = %v, want the core imported as graphres", imports)
 	}
 }
 
