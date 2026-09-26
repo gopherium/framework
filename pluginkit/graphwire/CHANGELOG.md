@@ -7,7 +7,7 @@ follows [Semantic Versioning](https://semver.org/). While at v0.x, minor
 releases may contain breaking changes.
 
 Releases of this module are tagged `pluginkit/graphwire/vX.Y.Z`.
-Releases up to 0.3.0 were tagged `graphwire/vX.Y.Z` in
+Releases up to 0.3.1 were tagged `graphwire/vX.Y.Z` in
 `github.com/gopherium/pluginkit`. The module lives beside the
 stdlib-only `pluginkit` module so its gqlparser dependency never enters
 `pluginkit` itself.
