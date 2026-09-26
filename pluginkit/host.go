@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // Host starts and stops a fixed set of plugins.
@@ -27,18 +28,27 @@ func NewHost(plugins ...Plugin) *Host {
 	return &Host{plugins: plugins}
 }
 
-// Start migrates every [Migrator] plugin, then starts every plugin in registration
-// order, stopping the already-started ones in reverse order when a start fails.
-func (h *Host) Start(ctx context.Context) error {
+// Start migrates and starts every plugin in order, stopping the started ones within stopGrace when one fails.
+func (h *Host) Start(ctx context.Context, stopGrace time.Duration) error {
+	if stopGrace <= 0 {
+		return fmt.Errorf("pluginkit: the stop grace must stand above zero, got %v", stopGrace)
+	}
 	if err := h.Migrate(ctx); err != nil {
 		return err
 	}
 	for i, p := range h.plugins {
 		if err := safeCall(ctx, p.ID(), "start", p.Start); err != nil {
-			return errors.Join(err, h.stopDownFrom(ctx, i-1))
+			return errors.Join(err, h.rollBack(ctx, stopGrace, i-1))
 		}
 	}
 	return nil
+}
+
+// rollBack stops the plugins from index down under a context stopGrace bounds and the end of ctx cannot cancel.
+func (h *Host) rollBack(ctx context.Context, stopGrace time.Duration, index int) error {
+	stopping, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopGrace)
+	defer cancel()
+	return h.stopDownFrom(stopping, index)
 }
 
 // Migrate applies the schema of every [Migrator] plugin in registration order, stopping at the first failure.
