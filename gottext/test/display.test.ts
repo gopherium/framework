@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 
 import { formatDate, rememberLocale } from '../src/index.js'
 
 const AT = '2026-07-30T10:00:00Z'
+
+const WEST_OF_UTC = 'America/Los_Angeles'
+
+afterEach(() => {
+	vi.unstubAllEnvs()
+})
 
 test('shows nothing for an absent timestamp', () => {
 	rememberLocale('en-US')
@@ -30,4 +36,24 @@ test('follows the options it is handed', () => {
 	rememberLocale('en-US')
 
 	expect(formatDate(AT, { year: 'numeric' })).toBe('2026')
+})
+
+test('shows a bare calendar day on the day it names for a reader west of UTC', () => {
+	vi.stubEnv('TZ', WEST_OF_UTC)
+	rememberLocale('en-US')
+
+	expect(formatDate('2026-09-01', { day: 'numeric' })).toBe('1')
+})
+
+test('shows a bare calendar day on the day it names whatever zone the options ask for', () => {
+	rememberLocale('en-US')
+
+	expect(formatDate('2026-09-01', { day: 'numeric', timeZone: WEST_OF_UTC })).toBe('1')
+})
+
+test('shows a full timestamp in the zone of a reader west of UTC', () => {
+	vi.stubEnv('TZ', WEST_OF_UTC)
+	rememberLocale('en-US')
+
+	expect(formatDate('2026-09-01T03:00:00Z', { day: 'numeric' })).toBe('31')
 })
