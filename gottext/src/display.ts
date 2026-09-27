@@ -32,5 +32,16 @@ export function formatDate(at: Date | string, options?: Intl.DateTimeFormatOptio
 		return ''
 	}
 	const day = typeof at === 'string' && CALENDAR_DAY.test(at)
-	return new Date(at).toLocaleDateString(settled, day ? { ...options, timeZone: 'UTC' } : options)
+	return new Date(at).toLocaleDateString(settled, day ? inUTC(options) : options)
+}
+
+/**
+ * Returns options showing UTC that read every other option from the ones a caller handed.
+ * @param options - The options the caller handed, if any.
+ * @returns The options a bare calendar day is shown with.
+ */
+function inUTC(options?: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
+	const zoned: Intl.DateTimeFormatOptions = Object.create(options ?? null)
+	zoned.timeZone = 'UTC'
+	return zoned
 }
