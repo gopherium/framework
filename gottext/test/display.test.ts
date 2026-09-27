@@ -64,6 +64,36 @@ test('follows the options a bare calendar day is handed through their prototype'
 	expect(formatDate('2026-09-01', Object.create({ year: 'numeric' }))).toBe('2026')
 })
 
+test('shows a bare calendar day handed frozen options naming another zone', () => {
+	rememberLocale('en-US')
+
+	expect(formatDate('2026-09-01', Object.freeze({ day: 'numeric', timeZone: WEST_OF_UTC }))).toBe('1')
+})
+
+test('reads each option of a bare calendar day from the object it was handed', () => {
+	rememberLocale('en-US')
+	class DayOnly {
+		readonly #day = 'numeric' as const
+
+		/**
+		 * Returns how the day shows, readable only on the object that holds it.
+		 * @returns The day style.
+		 */
+		get day() {
+			return this.#day
+		}
+	}
+
+	expect(formatDate('2026-09-01', new DayOnly())).toBe('1')
+})
+
+test('shows a bare calendar day in the date style it is handed for a reader west of UTC', () => {
+	vi.stubEnv('TZ', WEST_OF_UTC)
+	rememberLocale('en-US')
+
+	expect(formatDate('2026-09-01', { dateStyle: 'long' })).toBe('September 1, 2026')
+})
+
 test('shows a full timestamp in the zone of a reader west of UTC', () => {
 	vi.stubEnv('TZ', WEST_OF_UTC)
 	rememberLocale('en-US')

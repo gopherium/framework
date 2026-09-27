@@ -36,12 +36,11 @@ export function formatDate(at: Date | string, options?: Intl.DateTimeFormatOptio
 }
 
 /**
- * Returns options showing UTC that read every other option from the ones a caller handed.
+ * Returns the options a caller handed as a date format resolves them, showing UTC.
  * @param options - The options the caller handed, if any.
  * @returns The options a bare calendar day is shown with.
  */
 function inUTC(options?: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
-	const zoned: Intl.DateTimeFormatOptions = Object.create(options ?? null)
-	zoned.timeZone = 'UTC'
-	return zoned
+	const resolved = new Intl.DateTimeFormat(settled, options).resolvedOptions()
+	return { ...resolved, timeZone: 'UTC' } as Intl.DateTimeFormatOptions
 }
