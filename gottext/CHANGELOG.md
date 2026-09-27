@@ -5,7 +5,7 @@ versioning follows [Semantic Versioning](https://semver.org/). While at 0.x,
 minor releases may break. Releases are tagged `gottext/vX.Y.Z` and publish
 from CI.
 
-## [Unreleased]
+## [0.5.1] - 2026-09-27
 
 ### Fixed
 
