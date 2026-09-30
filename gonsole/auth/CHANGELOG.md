@@ -14,7 +14,7 @@ Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
 - `Authorize`, refusing an acting account that is unknown, disabled, never activated or whose role lacks the capability.
 - `Record`, storing each applied guarded command with its actor, arguments and flags.
-- `RecordMigration`, the schema step that applies the `gonsole.records` table.
+- `RecordMigration`, the schema step that applies the `gonsole.records` table under goose's migration lock.
 - `Records`, the command `account:records`, listing the latest records or one JSON document.
 - `Roles.Capabilities`, the capabilities each role carries.
 - `Config.RecordTimeout`, `Config.RecordsLimit` and `Config.Validate`, read with the `COMMAND_RECORD_TIMEOUT` and `COMMAND_RECORDS_LIMIT` settings.
