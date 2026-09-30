@@ -34,6 +34,8 @@ type Roles struct {
 	Known []string
 	// Privileged lists the roles one enabled account must always keep.
 	Privileged gouncer.Roles
+	// Capabilities maps each role onto the capabilities it carries, a role left out carrying none.
+	Capabilities map[string][]string
 }
 
 // known returns a misuse naming the roles of roles when role is not one of them.
