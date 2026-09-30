@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/gopherium/gouncer"
 	"github.com/gopherium/gouncer/authkit/postgres"
@@ -21,6 +22,10 @@ type Config struct {
 	Roles func(ctx context.Context, call gonsole.Call) (Roles, error)
 	// Capability names the capability every account write requires, empty for none.
 	Capability string
+	// RecordTimeout bounds storing one record when the COMMAND_RECORD_TIMEOUT setting is empty.
+	RecordTimeout time.Duration
+	// RecordsLimit is how many records account:records lists when the COMMAND_RECORDS_LIMIT setting is empty.
+	RecordsLimit int
 }
 
 // Roles is one program's role vocabulary.
@@ -69,6 +74,13 @@ func missing(command string, call gonsole.Call, flags ...needed) error {
 
 // withStore runs use over the account store of the program's database and closes its pool after.
 func withStore(ctx context.Context, call gonsole.Call, use func(store *postgres.UserStore) error) error {
+	return withPool(ctx, call, func(pool *pgxpool.Pool) error {
+		return use(postgres.NewUserStore(pool))
+	})
+}
+
+// withPool runs use over a pool of the program's database and closes the pool after.
+func withPool(ctx context.Context, call gonsole.Call, use func(pool *pgxpool.Pool) error) error {
 	address, err := call.DatabaseURL()
 	if err != nil {
 		return err
@@ -78,5 +90,5 @@ func withStore(ctx context.Context, call gonsole.Call, use func(store *postgres.
 		return fmt.Errorf("open the database: %w", err)
 	}
 	defer pool.Close()
-	return use(postgres.NewUserStore(pool))
+	return use(pool)
 }
