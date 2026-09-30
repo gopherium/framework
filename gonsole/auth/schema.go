@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
+	"github.com/pressly/goose/v3/lock"
 
 	"github.com/gopherium/framework/gonsole"
 )
@@ -57,7 +58,8 @@ func migrateRecords(ctx context.Context, databaseURL string) error {
 func recordsProvider(db *sql.DB) *goose.Provider {
 	store := must(database.NewStore(database.DialectPostgres, recordsVersionTable))
 	files := must(fs.Sub(migrationFiles, "migrations"))
-	return must(goose.NewProvider("", db, files, goose.WithStore(store)))
+	locker := must(lock.NewPostgresSessionLocker())
+	return must(goose.NewProvider("", db, files, goose.WithStore(store), goose.WithSessionLocker(locker)))
 }
 
 // must returns value, panicking with err, for a value whose build cannot fail at run time.
