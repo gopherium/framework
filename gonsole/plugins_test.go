@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gopherium/framework/gonsole"
@@ -835,5 +836,151 @@ func TestRegistrationReadsTheSettingsOfAProgramWithoutAReader(t *testing.T) {
 
 	if got.code != gonsole.ExitDone || owner != "" {
 		t.Errorf("code %d, owner %q, want 0 and empty, stderr %q", got.code, owner, got.stderr)
+	}
+}
+
+// host is a plugin host that notes each call and stops with the error it holds, or waits for its context to end.
+type host struct {
+	calls  *[]string
+	failed error
+	waits  bool
+}
+
+// Migrate notes the call.
+func (h host) Migrate(context.Context) error {
+	*h.calls = append(*h.calls, "migrate")
+	return nil
+}
+
+// Seed notes the call.
+func (h host) Seed(context.Context) error {
+	*h.calls = append(*h.calls, "seed")
+	return nil
+}
+
+// Stop notes the call, then answers the end of ctx when it waits or the error it holds.
+func (h host) Stop(ctx context.Context) error {
+	*h.calls = append(*h.calls, "stop")
+	if h.waits {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return h.failed
+}
+
+var _ gonsole.PluginHost = host{}
+
+func TestHostedStopsTheHostWithinTheGraceThenCallsDone(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		var calls []string
+		loaded := gonsole.Hosted[compiled](nil, host{calls: &calls, waits: true}, nil, time.Second, func() {
+			calls = append(calls, "done")
+		})
+		started := time.Now()
+
+		err := loaded.Release(context.Background())
+
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) != time.Second {
+			t.Errorf("Release() = %v after %v, want the deadline after 1s", err, time.Since(started))
+		}
+		if !slices.Equal(calls, []string{"stop", "done"}) {
+			t.Errorf("calls = %v, want stop then done", calls)
+		}
+	})
+}
+
+func TestHostedGathersTheGroupsAndJoinsTheFailures(t *testing.T) {
+	t.Parallel()
+
+	plugins := []compiled{
+		provider{id: "alpha", commands: []gonsole.Command{echo("alpha:one")}},
+		provider{id: "broken", panics: "boom"},
+	}
+	var calls []string
+
+	loaded := gonsole.Hosted(plugins, host{calls: &calls}, errors.New("plugin mail: no relay"), time.Second, nil)
+
+	if got := namespaces(loaded.Groups); !slices.Equal(got, []string{"alpha"}) {
+		t.Errorf("namespaces = %v, want alpha", got)
+	}
+	if want := "plugin mail: no relay\nplugin broken: commands panicked: boom"; errorText(loaded.Failed) != want {
+		t.Errorf("Failed = %q, want %q", errorText(loaded.Failed), want)
+	}
+}
+
+func TestHostedFailsNothingWhenEveryPluginLoaded(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	plugins := []compiled{provider{id: "alpha", commands: []gonsole.Command{echo("alpha:one")}}}
+
+	loaded := gonsole.Hosted(plugins, host{calls: &calls}, nil, time.Second, nil)
+
+	if loaded.Failed != nil {
+		t.Errorf("Failed = %v, want nil", loaded.Failed)
+	}
+}
+
+func TestHostedMigratesAndSeedsThroughTheHost(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	loaded := gonsole.Hosted[compiled](nil, host{calls: &calls}, nil, time.Second, nil)
+
+	migrated, seeded := loaded.Migrate(t.Context()), loaded.Seed(t.Context())
+
+	if migrated != nil || seeded != nil || !slices.Equal(calls, []string{"migrate", "seed"}) {
+		t.Errorf("Migrate() = %v, Seed() = %v, calls %v, want nil, nil, migrate then seed", migrated, seeded, calls)
+	}
+}
+
+func TestHostedCallsDoneAfterAFailedStop(t *testing.T) {
+	t.Parallel()
+
+	failed := errors.New("stop failed")
+	var calls []string
+	loaded := gonsole.Hosted[compiled](nil, host{calls: &calls, failed: failed}, nil, time.Second, func() {
+		calls = append(calls, "done")
+	})
+
+	err := loaded.Release(t.Context())
+
+	if !errors.Is(err, failed) || !slices.Equal(calls, []string{"stop", "done"}) {
+		t.Errorf("Release() = %v, calls %v, want the stop failure, then stop and done", err, calls)
+	}
+}
+
+func TestHostedRefusesAStopGraceThatIsNotAboveZero(t *testing.T) {
+	t.Parallel()
+
+	for _, grace := range []time.Duration{0, -time.Second} {
+		t.Run(grace.String(), func(t *testing.T) {
+			t.Parallel()
+
+			var calls []string
+			loaded := gonsole.Hosted[compiled](nil, host{calls: &calls}, nil, grace, func() {
+				calls = append(calls, "done")
+			})
+
+			err := loaded.Release(t.Context())
+
+			want := fmt.Sprintf("gonsole: the plugin stop grace must stand above zero, got %v", grace)
+			if errorText(err) != want || !slices.Equal(calls, []string{"done"}) {
+				t.Errorf("Release() = %q, calls %v, want %q and only done", errorText(err), calls, want)
+			}
+		})
+	}
+}
+
+func TestHostedReleasesWithoutADone(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	loaded := gonsole.Hosted[compiled](nil, host{calls: &calls}, nil, time.Second, nil)
+
+	if err := loaded.Release(t.Context()); err != nil || !slices.Equal(calls, []string{"stop"}) {
+		t.Errorf("Release() = %v, calls %v, want nil and only stop", err, calls)
 	}
 }
