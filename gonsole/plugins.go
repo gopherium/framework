@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Group is the commands one plugin offers under the namespace equal to its id.
@@ -66,6 +67,45 @@ type Loaded struct {
 	Failed error
 	// Release stops every registered plugin and closes what registering opened.
 	Release func(ctx context.Context) error
+}
+
+// PluginHost migrates, seeds and stops the plugins a program registered.
+type PluginHost interface {
+	// Migrate applies every plugin's schema.
+	Migrate(ctx context.Context) error
+	// Seed stores every plugin's demo data.
+	Seed(ctx context.Context) error
+	// Stop releases what every plugin holds.
+	Stop(ctx context.Context) error
+}
+
+// Hosted returns what registering answers for plugins host runs, its Release stopping host within grace, then done.
+func Hosted[P interface{ ID() string }](
+	plugins []P, host PluginHost, failed error, grace time.Duration, done func(),
+) Loaded {
+	groups, panicked := Walk(plugins)
+	return Loaded{
+		Groups:  groups,
+		Migrate: host.Migrate,
+		Seed:    host.Seed,
+		Failed:  errors.Join(failed, panicked),
+		Release: func(ctx context.Context) error {
+			if done != nil {
+				defer done()
+			}
+			return stopHost(ctx, host, grace)
+		},
+	}
+}
+
+// stopHost stops host under a context grace bounds, refusing a grace that is not above zero.
+func stopHost(ctx context.Context, host PluginHost, grace time.Duration) error {
+	if grace <= 0 {
+		return fmt.Errorf("gonsole: the plugin stop grace must stand above zero, got %v", grace)
+	}
+	bounded, cancel := context.WithTimeout(ctx, grace)
+	defer cancel()
+	return host.Stop(bounded)
 }
 
 // memo is the one registration of the plugins a run makes.

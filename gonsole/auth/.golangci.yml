@@ -36,6 +36,7 @@ linters:
             - github.com/jackc/pgx/v5
             - github.com/google/uuid
             - github.com/peterldowns/pgtestdb
+            - github.com/pressly/goose/v3
   exclusions:
     rules:
       - path: _test\.go
