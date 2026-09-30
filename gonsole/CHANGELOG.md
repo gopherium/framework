@@ -8,6 +8,12 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `PluginHost` and `Hosted`, building what registering answers from a plugin host, its release bounded by a stop grace.
+
 ## [0.2.0] - 2026-09-26
 
 ### Added
