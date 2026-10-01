@@ -8,6 +8,17 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
+## [Unreleased]
+
+### Fixed
+
+- `RecordMigration` no longer fails when two processes create the `gonsole` schema at once.
+- `Migration` applies gouncer's account schema under goose's migration lock.
+
+### Changed
+
+- Requires `authkit/postgres` 0.11.2.
+
 ## [0.2.0] - 2026-09-30
 
 ### Added
