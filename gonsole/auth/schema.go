@@ -45,9 +45,6 @@ func migrateRecords(ctx context.Context, databaseURL string) error {
 	}
 	db := stdlib.OpenDB(*config)
 	defer func() { _ = db.Close() }()
-	if _, err := db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS gonsole"); err != nil {
-		return fmt.Errorf("create the gonsole schema: %w", err)
-	}
 	if _, err := recordsProvider(db).Up(ctx); err != nil {
 		return fmt.Errorf("apply the records schema: %w", err)
 	}
@@ -56,10 +53,23 @@ func migrateRecords(ctx context.Context, databaseURL string) error {
 
 // recordsProvider returns the goose provider applying the records migrations over db.
 func recordsProvider(db *sql.DB) *goose.Provider {
-	store := must(database.NewStore(database.DialectPostgres, recordsVersionTable))
+	store := schemaStore{must(database.NewStore(database.DialectPostgres, recordsVersionTable)).(database.StoreExtender)}
 	files := must(fs.Sub(migrationFiles, "migrations"))
 	locker := must(lock.NewPostgresSessionLocker())
 	return must(goose.NewProvider("", db, files, goose.WithStore(store), goose.WithSessionLocker(locker)))
+}
+
+// schemaStore is goose's version store, creating the gonsole schema along with the version table.
+type schemaStore struct {
+	database.StoreExtender
+}
+
+// CreateVersionTable creates the gonsole schema, then the version table inside it.
+func (s schemaStore) CreateVersionTable(ctx context.Context, db database.DBTxConn) error {
+	if _, err := db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS gonsole"); err != nil {
+		return fmt.Errorf("create the gonsole schema: %w", err)
+	}
+	return s.StoreExtender.CreateVersionTable(ctx, db)
 }
 
 // must returns value, panicking with err, for a value whose build cannot fail at run time.

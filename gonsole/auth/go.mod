@@ -7,7 +7,7 @@ require (
 	github.com/gopherium/framework/gonsole v0.1.0
 	github.com/gopherium/gouncer v0.4.0
 	github.com/gopherium/gouncer/authkit v0.15.0
-	github.com/gopherium/gouncer/authkit/postgres v0.11.0
+	github.com/gopherium/gouncer/authkit/postgres v0.11.2
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/peterldowns/pgtestdb v0.1.1
 	github.com/pressly/goose/v3 v3.27.2
