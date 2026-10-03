@@ -47,7 +47,7 @@ func setStanding(ctx context.Context, call gonsole.Call, cfg Config, verb string
 		if err != nil {
 			return err
 		}
-		if err := within.changes(held); err != nil {
+		if err := within.sets(held, disabled); err != nil {
 			return err
 		}
 		if !call.Apply {

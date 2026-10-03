@@ -278,3 +278,40 @@ func TestAccountCommandsRefuseAnActingAccountWithoutARoleAnythingThatCarriesACap
 	refuses(t, p, "myapp: the role admin of admin@example.com carries manage_users, "+
 		"which the account manager@example.com lacks\n", "account:disable", "admin@example.com", "-as", "manager@example.com")
 }
+
+func TestDisableRefusesTheActingAccountDisablingItself(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		setup []string
+		args  []string
+	}{
+		{"a dry run beside a second admin", []string{holding("editor@example.com", "admin")},
+			[]string{"account:disable", "admin@example.com"}},
+		{"an applied run beside a second admin", []string{holding("editor@example.com", "admin")},
+			[]string{"account:disable", "admin@example.com", "-yes"}},
+		{"an address typed in capitals between spaces", []string{holding("editor@example.com", "admin")},
+			[]string{"account:disable", " Admin@Example.COM ", "-yes"}},
+		{"a dry run of the single admin", nil, []string{"account:disable", "admin@example.com"}},
+		{"an applied run of the single admin", nil, []string{"account:disable", "admin@example.com", "-yes"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			address := recorded(t)
+			run(t, address, tt.setup...)
+
+			refuses(t, overseen(address), "myapp: the account admin@example.com cannot disable itself\n",
+				slices.Concat(tt.args, []string{"-as", "admin@example.com"})...)
+
+			if held := records(t, address); len(held) != 0 {
+				t.Errorf("records = %v, want none", held)
+			}
+			if after := standingOf(t, address, "admin@example.com"); after != `role "admin", disabled false` {
+				t.Errorf("admin@example.com holds %s, want it kept enabled", after)
+			}
+		})
+	}
+}

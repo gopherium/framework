@@ -50,6 +50,14 @@ func (r reach) changes(held gouncer.User) error {
 	return r.lacking(fmt.Sprintf("the role %s of %s", held.Role, held.Email), held.Role)
 }
 
+// sets refuses the acting account disabling itself and a change to an account beyond its reach.
+func (r reach) sets(held gouncer.User, disabled bool) error {
+	if disabled && held.ID == r.actor.ID {
+		return fmt.Errorf("the account %s cannot disable itself", held.Email)
+	}
+	return r.changes(held)
+}
+
 // lacking returns the refusal naming the first capability of role the acting account's role lacks, nil for none.
 func (r reach) lacking(subject, role string) error {
 	for _, capability := range r.carried[role] {
