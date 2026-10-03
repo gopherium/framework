@@ -50,6 +50,17 @@ func (r reach) changes(held gouncer.User) error {
 	return r.lacking(fmt.Sprintf("the role %s of %s", held.Role, held.Email), held.Role)
 }
 
+// moves refuses a change to an account beyond its reach and the acting account changing its own role.
+func (r reach) moves(held gouncer.User) error {
+	if err := r.changes(held); err != nil {
+		return err
+	}
+	if held.ID == r.actor.ID {
+		return fmt.Errorf("the account %s cannot change its own role", held.Email)
+	}
+	return nil
+}
+
 // sets refuses the acting account disabling itself and a change to an account beyond its reach.
 func (r reach) sets(held gouncer.User, disabled bool) error {
 	if disabled && held.ID == r.actor.ID {

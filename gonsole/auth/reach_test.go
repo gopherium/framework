@@ -315,3 +315,41 @@ func TestDisableRefusesTheActingAccountDisablingItself(t *testing.T) {
 		})
 	}
 }
+
+func TestSetRoleRefusesTheActingAccountChangingItsOwnRole(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		setup []string
+		args  []string
+	}{
+		{"a dry run beside a second admin", []string{holding("editor@example.com", "admin")},
+			[]string{"account:role", "admin@example.com", "author"}},
+		{"an applied run beside a second admin", []string{holding("editor@example.com", "admin")},
+			[]string{"account:role", "admin@example.com", "author", "-yes"}},
+		{"an address typed in capitals between spaces", []string{holding("editor@example.com", "admin")},
+			[]string{"account:role", " Admin@Example.COM ", "author", "-yes"}},
+		{"the role it already holds", nil, []string{"account:role", "admin@example.com", "admin", "-yes"}},
+		{"a dry run of the single admin", nil, []string{"account:role", "admin@example.com", "editor"}},
+		{"an applied run of the single admin", nil, []string{"account:role", "admin@example.com", "editor", "-yes"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			address := recorded(t)
+			run(t, address, tt.setup...)
+
+			refuses(t, overseen(address), "myapp: the account admin@example.com cannot change its own role\n",
+				slices.Concat(tt.args, []string{"-as", "admin@example.com"})...)
+
+			if held := records(t, address); len(held) != 0 {
+				t.Errorf("records = %v, want none", held)
+			}
+			if after := standingOf(t, address, "admin@example.com"); after != `role "admin", disabled false` {
+				t.Errorf("admin@example.com holds %s, want its role kept", after)
+			}
+		})
+	}
+}

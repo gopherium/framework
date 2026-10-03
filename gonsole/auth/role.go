@@ -46,7 +46,7 @@ func setRole(ctx context.Context, call gonsole.Call, cfg Config) error {
 		if err != nil {
 			return err
 		}
-		if err := within.changes(held); err != nil {
+		if err := within.moves(held); err != nil {
 			return err
 		}
 		if !call.Apply {
