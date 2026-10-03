@@ -218,12 +218,12 @@ func TestGrantRoleAsksTheProgramForItsCapability(t *testing.T) {
 	}
 
 	missingActor := testkit.Run(t, p, "", "account:grant-role", "-role", "editor")
-	got := testkit.Run(t, p, "", "account:grant-role", "-role", "editor", "-as", "maria.perez@example.com")
+	got := testkit.Run(t, p, "", "account:grant-role", "-role", "editor", "-as", "admin@example.com")
 
 	if missingActor.Code != gonsole.ExitMisused {
 		t.Errorf("Run() without -as = %+v, want exit 2", missingActor)
 	}
-	if got.Code != gonsole.ExitDone || len(asked) != 1 || asked[0] != "maria.perez@example.com manage_accounts" {
+	if got.Code != gonsole.ExitDone || len(asked) != 1 || asked[0] != "admin@example.com manage_accounts" {
 		t.Errorf("Run() = %+v, Authorize asked %q, want exit 0 and one manage_accounts check", got, asked)
 	}
 }

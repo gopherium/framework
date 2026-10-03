@@ -984,3 +984,123 @@ func TestHostedReleasesWithoutADone(t *testing.T) {
 		t.Errorf("Release() = %v, calls %v, want nil and only stop", err, calls)
 	}
 }
+
+func TestHostedReleasesTheHostAfterItsContextEnded(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		var calls []string
+		loaded := gonsole.Hosted[compiled](nil, host{calls: &calls, waits: true}, nil, time.Second, nil)
+		ended, cancel := context.WithCancel(context.Background())
+		cancel()
+		started := time.Now()
+
+		err := loaded.Release(ended)
+
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) != time.Second {
+			t.Errorf("Release() = %v after %v, want the deadline after 1s", err, time.Since(started))
+		}
+	})
+}
+
+func TestStopHostStopsTheHostWithinTheGrace(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		var calls []string
+		started := time.Now()
+
+		err := gonsole.StopHost(context.Background(), host{calls: &calls, waits: true}, time.Second)
+
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) != time.Second {
+			t.Errorf("StopHost() = %v after %v, want the deadline after 1s", err, time.Since(started))
+		}
+	})
+}
+
+func TestStopHostStopsAHostWhoseRunHasEnded(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		var calls []string
+		ended, cancel := context.WithCancel(context.Background())
+		cancel()
+		started := time.Now()
+
+		err := gonsole.StopHost(ended, host{calls: &calls, waits: true}, time.Second)
+
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) != time.Second {
+			t.Errorf("StopHost() = %v after %v, want the deadline after 1s", err, time.Since(started))
+		}
+	})
+}
+
+// runValue is the key of a value the context of a run carries.
+type runValue struct{}
+
+// witness is a plugin host whose stop notes the value of the run its context carries.
+type witness struct {
+	seen *any
+}
+
+// Migrate does nothing.
+func (w witness) Migrate(context.Context) error {
+	return nil
+}
+
+// Seed does nothing.
+func (w witness) Seed(context.Context) error {
+	return nil
+}
+
+// Stop notes the value of the run ctx carries.
+func (w witness) Stop(ctx context.Context) error {
+	*w.seen = ctx.Value(runValue{})
+	return nil
+}
+
+func TestStopHostKeepsTheValuesOfARunThatHasEnded(t *testing.T) {
+	t.Parallel()
+
+	var seen any
+	ended, cancel := context.WithCancel(context.WithValue(t.Context(), runValue{}, "maria.perez@example.com"))
+	cancel()
+
+	err := gonsole.StopHost(ended, witness{seen: &seen}, time.Second)
+
+	if err != nil || seen != "maria.perez@example.com" {
+		t.Errorf("StopHost() = %v, the host saw %v, want nil and the value of the run", err, seen)
+	}
+}
+
+func TestStopHostRefusesAGraceThatIsNotAboveZero(t *testing.T) {
+	t.Parallel()
+
+	for _, grace := range []time.Duration{0, -time.Second} {
+		t.Run(grace.String(), func(t *testing.T) {
+			t.Parallel()
+
+			var calls []string
+
+			err := gonsole.StopHost(t.Context(), host{calls: &calls}, grace)
+
+			want := fmt.Sprintf("gonsole: the plugin stop grace must stand above zero, got %v", grace)
+			if errorText(err) != want || len(calls) != 0 {
+				t.Errorf("StopHost() = %q, calls %v, want %q and no call", errorText(err), calls, want)
+			}
+		})
+	}
+}
+
+func TestStopHostAnswersTheFailureOfTheStop(t *testing.T) {
+	t.Parallel()
+
+	failed := errors.New("stop failed")
+	var calls []string
+
+	err := gonsole.StopHost(t.Context(), host{calls: &calls, failed: failed}, time.Second)
+
+	if !errors.Is(err, failed) || !slices.Equal(calls, []string{"stop"}) {
+		t.Errorf("StopHost() = %v, calls %v, want the stop failure and one stop", err, calls)
+	}
+}

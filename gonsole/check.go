@@ -16,6 +16,11 @@ import (
 // baseCommands are the names the engine owns as commands and as namespaces in every program.
 var baseCommands = []string{"help", "list", "version", "serve", "check", "migrate", "seed"}
 
+// BaseCommands returns the names the engine owns as commands and as namespaces in every program.
+func BaseCommands() []string {
+	return slices.Clone(baseCommands)
+}
+
 // engineFlags are the names of the flags the engine owns.
 var engineFlags = []string{"h", "help", "yes", "json", "as"}
 

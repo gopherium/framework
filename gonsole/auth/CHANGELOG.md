@@ -8,6 +8,17 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
+## [Unreleased]
+
+### Changed
+
+- `account:role` and `account:grant-role` refuse a role that carries a capability the acting account's role lacks.
+- `account:role`, `account:disable` and `account:enable` refuse an account whose role carries a capability the acting account's role lacks.
+- `account:disable` refuses an acting account that disables itself.
+- `account:role` refuses an acting account that changes its own role.
+- A guarded account command fails when `-as` is blank or names no account, under any `Authorize`.
+- A guarded account command can no longer give or change a role that carries a capability no role holding `Config.Capability` carries.
+
 ## [0.2.1] - 2026-10-01
 
 ### Fixed

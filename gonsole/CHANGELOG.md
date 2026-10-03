@@ -8,6 +8,18 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `StopHost`, stopping a plugin host within a grace, whether or not the run has ended.
+- `BaseCommands`, the names of the commands the engine owns.
+
+### Changed
+
+- `Call.DatabaseURL` no longer fails a call that only describes commands, and answers an empty address when the setting is unset.
+- The `Release` of `Hosted` stops the host under a context the end of the run cannot cancel.
+
 ## [0.3.0] - 2026-09-30
 
 ### Added

@@ -28,7 +28,7 @@ func SetRole(cfg Config) gonsole.Command {
 	}
 }
 
-// setRole gives the account the call names the role it names, once the role is known.
+// setRole gives the account the call names the role it names, once the role is known and both are within reach.
 func setRole(ctx context.Context, call gonsole.Call, cfg Config) error {
 	email, role := address(call.Args[0]), call.Args[1]
 	roles, err := cfg.Roles(ctx, call)
@@ -38,9 +38,15 @@ func setRole(ctx context.Context, call gonsole.Call, cfg Config) error {
 	if err := known(roles, role); err != nil {
 		return err
 	}
-	return withStore(ctx, call, func(store *postgres.UserStore) error {
+	return withReach(ctx, call, cfg, roles, func(store *postgres.UserStore, within reach) error {
+		if err := within.gives(role); err != nil {
+			return err
+		}
 		held, err := store.UserByEmail(ctx, email)
 		if err != nil {
+			return err
+		}
+		if err := within.moves(held); err != nil {
 			return err
 		}
 		if !call.Apply {

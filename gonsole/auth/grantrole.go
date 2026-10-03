@@ -32,7 +32,7 @@ func GrantRole(cfg Config) gonsole.Command {
 	}
 }
 
-// grant gives the role the call names to every account holding none, once the role is known.
+// grant gives the role the call names to every account holding none, once the role is known and within reach.
 func grant(ctx context.Context, call gonsole.Call, cfg Config) error {
 	if err := missing(grantName, call, needed{"role", "role"}); err != nil {
 		return err
@@ -45,7 +45,10 @@ func grant(ctx context.Context, call gonsole.Call, cfg Config) error {
 	if err := known(roles, role); err != nil {
 		return err
 	}
-	return withStore(ctx, call, func(store *postgres.UserStore) error {
+	return withReach(ctx, call, cfg, roles, func(store *postgres.UserStore, within reach) error {
+		if err := within.gives(role); err != nil {
+			return err
+		}
 		return grantIn(ctx, call, store, role)
 	})
 }
