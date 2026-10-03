@@ -913,3 +913,47 @@ func TestDatabaseURLReadsTheProgramSetting(t *testing.T) {
 		t.Errorf("stdout = %q, want the database address, stderr %q", got.stdout, got.stderr)
 	}
 }
+
+func TestDatabaseURLAnswersADescribingCallWithoutAnError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		values  map[string]string
+		address string
+	}{
+		{"without the setting", nil, ""},
+		{"with the setting", map[string]string{"MYAPP_PRIMARY_URL": databaseAddress}, databaseAddress},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var s schema
+			p := keeper(&s)
+			p.Env = settings(tc.values)
+			p.Plugins = func(_ context.Context, call gonsole.Call) (gonsole.Loaded, error) {
+				address, err := call.DatabaseURL()
+				s.note("describe=%t address=%q error=%v", call.Describe, address, err)
+				return gonsole.Loaded{}, err
+			}
+
+			got := execute(t, p, "list")
+
+			want := []string{fmt.Sprintf("describe=true address=%q error=<nil>", tc.address)}
+			if got.code != gonsole.ExitDone || !slices.Equal(s.log, want) {
+				t.Errorf("code %d, calls = %q, want 0 and %q, stderr %q", got.code, s.log, want, got.stderr)
+			}
+		})
+	}
+}
+
+func TestDatabaseURLAnswersAnEmptyAddressToADescribingCallTheEngineDidNotBuild(t *testing.T) {
+	t.Parallel()
+
+	address, err := gonsole.Call{Describe: true}.DatabaseURL()
+
+	if address != "" || err != nil {
+		t.Errorf("DatabaseURL() = %q, %v, want empty and nil", address, err)
+	}
+}

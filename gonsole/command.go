@@ -60,8 +60,17 @@ type Call struct {
 	plugins *memo
 }
 
-// DatabaseURL returns the program's database address, an error naming the setting when it is empty.
+// DatabaseURL returns the program's database address, an error naming an empty setting unless the call describes.
 func (c Call) DatabaseURL() (string, error) {
+	address, err := c.address()
+	if c.Describe {
+		return address, nil
+	}
+	return address, err
+}
+
+// address returns the program's database address, an error naming the setting when it is empty.
+func (c Call) address() (string, error) {
 	if c.database == "" {
 		return "", errors.New("gonsole: no database setting in this call")
 	}

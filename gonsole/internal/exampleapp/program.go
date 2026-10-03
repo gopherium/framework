@@ -37,12 +37,10 @@ func Program(getenv func(string) string) gonsole.Program {
 	}
 }
 
-// plugins registers the demo plugin, reading the database setting unless the run only describes commands.
+// plugins reads the database address and registers the demo plugin.
 func plugins(_ context.Context, call gonsole.Call) (gonsole.Loaded, error) {
-	if !call.Describe {
-		if _, err := call.DatabaseURL(); err != nil {
-			return gonsole.Loaded{}, err
-		}
+	if _, err := call.DatabaseURL(); err != nil {
+		return gonsole.Loaded{}, err
 	}
 	groups, err := gonsole.Walk([]demo{{}})
 	return gonsole.Loaded{Groups: groups, Failed: err}, nil
