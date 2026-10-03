@@ -17,7 +17,7 @@ import (
 var capable = auth.Roles{
 	Known:        vocabulary.Known,
 	Privileged:   vocabulary.Privileged,
-	Capabilities: map[string][]string{"admin": {"manage_users"}, "editor": {"change_others_work"}},
+	Capabilities: map[string][]string{"admin": {"manage_users", "change_others_work"}, "editor": {"change_others_work"}},
 }
 
 // checked is a config over capable naming manage_users, recording within a second.
