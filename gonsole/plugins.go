@@ -93,17 +93,17 @@ func Hosted[P interface{ ID() string }](
 			if done != nil {
 				defer done()
 			}
-			return stopHost(ctx, host, grace)
+			return StopHost(ctx, host, grace)
 		},
 	}
 }
 
-// stopHost stops host under a context grace bounds, refusing a grace that is not above zero.
-func stopHost(ctx context.Context, host PluginHost, grace time.Duration) error {
+// StopHost stops host within grace, whether or not ctx has ended, refusing a grace that is not above zero.
+func StopHost(ctx context.Context, host PluginHost, grace time.Duration) error {
 	if grace <= 0 {
 		return fmt.Errorf("gonsole: the plugin stop grace must stand above zero, got %v", grace)
 	}
-	bounded, cancel := context.WithTimeout(ctx, grace)
+	bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
 	defer cancel()
 	return host.Stop(bounded)
 }
