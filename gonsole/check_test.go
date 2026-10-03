@@ -165,10 +165,37 @@ func TestCheckRefusesTheProgramsOwnOffences(t *testing.T) {
 	}
 }
 
+func TestBaseCommandsNamesEveryCommandTheEngineOwns(t *testing.T) {
+	t.Parallel()
+
+	want := []string{"help", "list", "version", "serve", "check", "migrate", "seed"}
+	if got := gonsole.BaseCommands(); !slices.Equal(got, want) {
+		t.Errorf("BaseCommands() = %q, want %q", got, want)
+	}
+}
+
+func TestBaseCommandsAnswersAListTheCallerMayChange(t *testing.T) {
+	t.Parallel()
+
+	changed := gonsole.BaseCommands()
+	changed[0] = "deploy"
+	p := sound()
+	p.Commands = append(p.Commands, echo("help"))
+
+	got := offences(p.Check(gonsole.Loaded{}))
+
+	if again := gonsole.BaseCommands(); again[0] != "help" {
+		t.Errorf("BaseCommands() after a change = %q, want help first", again)
+	}
+	if want := []string{`gonsole: command "help" is a base command`}; !slices.Equal(got, want) {
+		t.Errorf("Check() = %q, want %q", got, want)
+	}
+}
+
 func TestCheckRefusesEveryBaseCommandAsAProgramCommand(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"help", "list", "version", "serve", "check", "migrate", "seed"} {
+	for _, name := range gonsole.BaseCommands() {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
