@@ -18,9 +18,9 @@ import (
 // Authorize returns the check that refuses an acting account that may not run a command naming capability.
 func Authorize(cfg Config) func(ctx context.Context, call gonsole.Call, capability string) error {
 	return func(ctx context.Context, call gonsole.Call, capability string) error {
-		actor := address(call.Actor)
-		if actor == "" {
-			return gonsole.Misuse(errors.New("-as wants the address of an account"))
+		actor, err := actorOf(call)
+		if err != nil {
+			return err
 		}
 		if _, err := cfg.recordTimeout(call.Env); err != nil {
 			return err
@@ -38,12 +38,28 @@ func Authorize(cfg Config) func(ctx context.Context, call gonsole.Call, capabili
 	}
 }
 
+// actorOf returns the address the call acts as, a misuse when it is blank.
+func actorOf(call gonsole.Call) (string, error) {
+	actor := address(call.Actor)
+	if actor == "" {
+		return "", gonsole.Misuse(errors.New("-as wants the address of an account"))
+	}
+	return actor, nil
+}
+
+// acting returns the account at the address actor, an error naming the address when no account holds it.
+func acting(ctx context.Context, store *postgres.UserStore, actor string) (gouncer.User, error) {
+	user, err := store.UserByEmail(ctx, actor)
+	if errors.Is(err, gouncer.ErrUserNotFound) {
+		return gouncer.User{}, fmt.Errorf("no account answers to %s", actor)
+	}
+	return user, err
+}
+
 // may refuses actor unless an enabled account it activated holds a role carrying capability.
 func may(ctx context.Context, store *postgres.UserStore, roles Roles, actor, capability string) error {
-	user, err := store.UserByEmail(ctx, actor)
+	user, err := acting(ctx, store, actor)
 	switch {
-	case errors.Is(err, gouncer.ErrUserNotFound):
-		return fmt.Errorf("no account answers to %s", actor)
 	case err != nil:
 		return err
 	case user.Disabled:

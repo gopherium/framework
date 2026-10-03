@@ -35,16 +35,19 @@ func standing(cfg Config, name, summary, verb string, disabled bool) gonsole.Com
 	}
 }
 
-// setStanding sets whether the account the call names is disabled, never leaving no privileged account enabled.
+// setStanding sets whether the named account within reach is disabled, never leaving no privileged account enabled.
 func setStanding(ctx context.Context, call gonsole.Call, cfg Config, verb string, disabled bool) error {
 	email := address(call.Args[0])
 	roles, err := cfg.Roles(ctx, call)
 	if err != nil {
 		return err
 	}
-	return withStore(ctx, call, func(store *postgres.UserStore) error {
+	return withReach(ctx, call, cfg, roles, func(store *postgres.UserStore, within reach) error {
 		held, err := store.UserByEmail(ctx, email)
 		if err != nil {
+			return err
+		}
+		if err := within.changes(held); err != nil {
 			return err
 		}
 		if !call.Apply {
