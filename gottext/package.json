@@ -42,6 +42,10 @@
 			"types": "./dist/testing.d.ts",
 			"default": "./dist/testing.js"
 		},
+		"./react": {
+			"types": "./dist/react.d.ts",
+			"default": "./dist/react.js"
+		},
 		"./package.json": "./package.json"
 	},
 	"scripts": {
@@ -59,16 +63,22 @@
 	},
 	"peerDependencies": {
 		"@wordpress/i18n": ">=6.26.0 <7.0.0",
-		"gettext-extractor": ">=4.0.6 <5.0.0"
+		"gettext-extractor": ">=4.0.6 <5.0.0",
+		"react": ">=19.0.0 <20.0.0"
 	},
 	"peerDependenciesMeta": {
 		"gettext-extractor": {
+			"optional": true
+		},
+		"react": {
 			"optional": true
 		}
 	},
 	"devDependencies": {
 		"@types/gettext-parser": "^9.0.0",
 		"@types/node": "^26.1.2",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
 		"@vitest/coverage-v8": "^4.1.10",
 		"@wordpress/i18n": "6.26.0",
 		"eslint": "^10.7.0",
@@ -78,6 +88,8 @@
 		"gettext-extractor": "4.0.6",
 		"knip": "^6.31.0",
 		"oxlint": "^1.71.0",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0",
 		"typescript": "~6.0.2",
 		"typescript-eslint": "^8.65.0",
 		"vitest": "^4.1.10"
