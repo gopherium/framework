@@ -13,6 +13,7 @@ import {
 	orphaned,
 	pot,
 	serializeCatalog,
+	unformatted,
 	unreviewed,
 	untranslated,
 } from '../src/build.js'
@@ -321,6 +322,13 @@ test('names a translation dropping a named placeholder carrying width and precis
 	expect(mismatched(dropped, naming)).toEqual(['You hold %(held)05.2f.'])
 })
 
+test('names a translation dropping a placeholder carrying a length modifier', () => {
+	const naming = 'msgid "%ld posts"\nmsgstr ""\n'
+	const dropped = 'msgid "%ld posts"\nmsgstr "entradas"\n'
+
+	expect(mismatched(dropped, naming)).toEqual(['%ld posts'])
+})
+
 test('names a translation widening a padded placeholder', () => {
 	const naming = 'msgid "Post %02d"\nmsgstr ""\n'
 	const widened = 'msgid "Post %02d"\nmsgstr "Entrada %03d"\n'
@@ -470,6 +478,75 @@ test('leaves a translation keeping an escaped percent alone', () => {
 	const answered = 'msgid "Save %%s now"\nmsgstr "Guarda %%s ahora"\n'
 
 	expect(mismatched(answered, naming)).toEqual([])
+})
+
+test('names every message that writes a number through a placeholder', () => {
+	const naming = `msgid ""
+msgstr ""
+
+msgid "%d posts"
+msgstr ""
+
+msgid "%(count)d post"
+msgstr ""
+
+msgid "Page %1$d of %2$s"
+msgstr ""
+
+msgid "Held %.2f"
+msgstr ""
+
+msgid "Row %i"
+msgstr ""
+`
+
+	expect(unformatted(naming)).toEqual(['%d posts', '%(count)d post', 'Page %1$d of %2$s', 'Held %.2f', 'Row %i'])
+})
+
+test('names a message that writes a number through a placeholder carrying a length modifier', () => {
+	const naming = 'msgid "%ld posts"\nmsgstr ""\n\nmsgid "%(count)lld drafts"\nmsgstr ""\n\nmsgid "Held %Lf"\nmsgstr ""\n'
+
+	expect(unformatted(naming)).toEqual(['%ld posts', '%(count)lld drafts', 'Held %Lf'])
+})
+
+test('names a message that writes an unsigned number through a placeholder', () => {
+	const naming = 'msgid "%u posts"\nmsgstr ""\n\nmsgid "%(count)u drafts"\nmsgstr ""\n'
+
+	expect(unformatted(naming)).toEqual(['%u posts', '%(count)u drafts'])
+})
+
+test('names a message whose plural form writes a number through a placeholder', () => {
+	const naming = 'msgid "One post"\nmsgid_plural "%d posts"\nmsgstr[0] ""\nmsgstr[1] ""\n'
+
+	expect(unformatted(naming)).toEqual(['One post'])
+})
+
+test('names a message under its context', () => {
+	const naming = 'msgctxt "status"\nmsgid "%d drafts"\nmsgstr ""\n'
+
+	expect(unformatted(naming)).toEqual(['status\u0004%d drafts'])
+})
+
+test('passes a message that writes every number as text', () => {
+	const naming = `msgid "%(count)s post"
+msgid_plural "%(count)s posts"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Page %1$s of %2$s"
+msgstr ""
+
+msgid "Disable %s"
+msgstr ""
+`
+
+	expect(unformatted(naming)).toEqual([])
+})
+
+test('passes a message carrying a literal or an escaped percent', () => {
+	const naming = 'msgid "100% done"\nmsgstr ""\n\nmsgid "Save %%d now"\nmsgstr ""\n'
+
+	expect(unformatted(naming)).toEqual([])
 })
 
 test('reads a message under a context sharing a prototype member name', () => {
