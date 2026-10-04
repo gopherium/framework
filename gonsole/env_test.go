@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -120,6 +121,8 @@ func TestEnvReadsADuration(t *testing.T) {
 			`MYAPP_WINDOW: must stand at or below 1h0m0s, got "2h"`},
 		{"a value above the tighter of two bounds", "50m", []gonsole.Bound{gonsole.AtMost(int64(time.Minute)), hour}, 0,
 			`MYAPP_WINDOW: must stand at or below 1m0s, got "50m"`},
+		{"a value under a bound made for a list", "1500us", []gonsole.Bound{gonsole.Entries(2, 6)}, 1500 * time.Microsecond,
+			""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -174,6 +177,8 @@ func TestEnvReadsACount(t *testing.T) {
 			`MYAPP_BATCH: must stand at or below 100, got "99999999999999999999"`},
 		{"a value too small to hold", "-99999999999999999999", nil, 0,
 			`MYAPP_BATCH: must stand above zero, got "-99999999999999999999"`},
+		{"a value under a bound made for a duration", "5", []gonsole.Bound{gonsole.WholeMilliseconds()}, 5, ""},
+		{"a value under a bound made for a list", "5", []gonsole.Bound{gonsole.Entries(2, 6)}, 5, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -203,6 +208,136 @@ func TestEnvReadsACountBeyondThirtyTwoBits(t *testing.T) {
 
 	if int64(got) != beyond || err != nil {
 		t.Errorf("Count() = %d, %v, want %d, nil", got, err, beyond)
+	}
+}
+
+func TestEnvReadsADurationInWholeMilliseconds(t *testing.T) {
+	t.Parallel()
+
+	timer := []gonsole.Bound{gonsole.WholeMilliseconds(), gonsole.AtMost(int64(math.MaxInt32 * time.Millisecond))}
+	cases := []struct {
+		name  string
+		value string
+		want  time.Duration
+		err   string
+	}{
+		{"one millisecond", "1ms", time.Millisecond, ""},
+		{"a value in seconds", "6s", 6 * time.Second, ""},
+		{"a value in milliseconds", "1500ms", 1500 * time.Millisecond, ""},
+		{"a fraction of a second that holds whole milliseconds", "1.5s", 1500 * time.Millisecond, ""},
+		{"the longest value the bound holds", "2147483647ms", math.MaxInt32 * time.Millisecond, ""},
+		{"a value under a millisecond", "500us", 0,
+			`MYAPP_TOAST: must be a whole number of milliseconds, got "500us"`},
+		{"a value in part milliseconds", "1500us", 0,
+			`MYAPP_TOAST: must be a whole number of milliseconds, got "1500us"`},
+		{"a value past the bound", "2147483648ms", 0,
+			`MYAPP_TOAST: must stand at or below 596h31m23.647s, got "2147483648ms"`},
+		{"zero", "0s", 0, `MYAPP_TOAST: must stand above zero, got "0s"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := settings(map[string]string{"MYAPP_TOAST": tc.value})
+
+			got, err := env.Duration("TOAST", 6*time.Second, timer...)
+
+			if got != tc.want || errorText(err) != tc.err {
+				t.Errorf("Duration() = %v, %q, want %v, %q", got, errorText(err), tc.want, tc.err)
+			}
+		})
+	}
+}
+
+func TestEnvReadsCounts(t *testing.T) {
+	t.Parallel()
+
+	hundred := gonsole.AtMost(100)
+	fallback := []int{10, 20}
+	cases := []struct {
+		name   string
+		value  string
+		bounds []gonsole.Bound
+		want   []int
+		err    string
+	}{
+		{"an unset value", "", nil, fallback, ""},
+		{"a value of spaces", "   ", nil, fallback, ""},
+		{"one number", "7", nil, []int{7}, ""},
+		{"numbers from the smallest up", "10,20,50", nil, []int{10, 20, 50}, ""},
+		{"padded numbers", " 5, 15 ,30 ", nil, []int{5, 15, 30}, ""},
+		{"a word", "10,twenty", nil, nil, `MYAPP_SIZES: must be a whole number, got "twenty" in "10,twenty"`},
+		{"an empty entry", "10,,20", nil, nil, `MYAPP_SIZES: must be a whole number, got "" in "10,,20"`},
+		{"a trailing comma", "10,20,", nil, nil, `MYAPP_SIZES: must be a whole number, got "" in "10,20,"`},
+		{"a fraction", "10,2.5", nil, nil, `MYAPP_SIZES: must be a whole number, got "2.5" in "10,2.5"`},
+		{"zero", "0,10", nil, nil, `MYAPP_SIZES: must stand above zero, got "0" in "0,10"`},
+		{"a negative number", "-3,10", nil, nil, `MYAPP_SIZES: must stand above zero, got "-3" in "-3,10"`},
+		{"zero where zero is allowed", "0,10", []gonsole.Bound{gonsole.AllowZero()}, []int{0, 10}, ""},
+		{"a number at the bound", "10,100", []gonsole.Bound{hundred}, []int{10, 100}, ""},
+		{"a number above the bound", "10,300", []gonsole.Bound{hundred}, nil,
+			`MYAPP_SIZES: must stand at or below 100, got "300" in "10,300"`},
+		{"a number too large to hold", "10,99999999999999999999", nil, nil,
+			`MYAPP_SIZES: must stand at or below ` + strconv.Itoa(math.MaxInt) +
+				`, got "99999999999999999999" in "10,99999999999999999999"`},
+		{"a number listed twice", "10,20,20", nil, nil,
+			`MYAPP_SIZES: must list each number once from the smallest up, got "10,20,20"`},
+		{"numbers out of order", "20,10,50", nil, nil,
+			`MYAPP_SIZES: must list each number once from the smallest up, got "20,10,50"`},
+		{"numbers under a bound made for a duration", "5,10", []gonsole.Bound{gonsole.WholeMilliseconds()}, []int{5, 10}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := settings(map[string]string{"MYAPP_SIZES": tc.value})
+
+			got, err := env.Counts("SIZES", fallback, tc.bounds...)
+
+			if !slices.Equal(got, tc.want) || errorText(err) != tc.err {
+				t.Errorf("Counts() = %v, %q, want %v, %q", got, errorText(err), tc.want, tc.err)
+			}
+		})
+	}
+}
+
+func TestEnvBoundsHowManyCountsASettingLists(t *testing.T) {
+	t.Parallel()
+
+	two := gonsole.Entries(2, 6)
+	cases := []struct {
+		name   string
+		value  string
+		bounds []gonsole.Bound
+		want   []int
+		err    string
+	}{
+		{"the fewest numbers", "10,20", []gonsole.Bound{two}, []int{10, 20}, ""},
+		{"the most numbers", "1,2,3,4,5,6", []gonsole.Bound{two}, []int{1, 2, 3, 4, 5, 6}, ""},
+		{"too few numbers", "10", []gonsole.Bound{two}, nil, `MYAPP_SIZES: must list from 2 to 6 numbers, got "10"`},
+		{"too many numbers", "1,2,3,4,5,6,7", []gonsole.Bound{two}, nil,
+			`MYAPP_SIZES: must list from 2 to 6 numbers, got "1,2,3,4,5,6,7"`},
+		{"numbers outside the tighter of two bounds", "1,2,3,4,5", []gonsole.Bound{gonsole.Entries(3, 4), two}, nil,
+			`MYAPP_SIZES: must list from 3 to 4 numbers, got "1,2,3,4,5"`},
+		{"numbers outside the tighter of two bounds given last", "1,2,3,4,5", []gonsole.Bound{two, gonsole.Entries(3, 4)},
+			nil, `MYAPP_SIZES: must list from 3 to 4 numbers, got "1,2,3,4,5"`},
+		{"too few numbers under a bound with no top", "10", []gonsole.Bound{gonsole.Entries(2, math.MaxInt)}, nil,
+			`MYAPP_SIZES: must list at least 2 numbers, got "10"`},
+		{"many numbers under a bound with no top", "1,2,3,4,5,6,7", []gonsole.Bound{gonsole.Entries(2, math.MaxInt)},
+			[]int{1, 2, 3, 4, 5, 6, 7}, ""},
+		{"a fallback outside the bound", "", []gonsole.Bound{two}, []int{25}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := settings(map[string]string{"MYAPP_SIZES": tc.value})
+
+			got, err := env.Counts("SIZES", []int{25}, tc.bounds...)
+
+			if !slices.Equal(got, tc.want) || errorText(err) != tc.err {
+				t.Errorf("Counts() = %v, %q, want %v, %q", got, errorText(err), tc.want, tc.err)
+			}
+		})
 	}
 }
 
