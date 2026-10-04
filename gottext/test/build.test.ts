@@ -521,6 +521,12 @@ test('names a message that writes a number in exponent or general form through a
 	expect(unformatted(naming)).toEqual(['Rate %g', 'Mass %(mass)e', 'Wide %E and %G'])
 })
 
+test('names a message that writes a number through an upper case general placeholder alone', () => {
+	const naming = 'msgid "Wide %G"\nmsgstr ""\n\nmsgid "Mass %(mass)G"\nmsgstr ""\n'
+
+	expect(unformatted(naming)).toEqual(['Wide %G', 'Mass %(mass)G'])
+})
+
 test('names a message whose plural form writes a number through a placeholder', () => {
 	const naming = 'msgid "One post"\nmsgid_plural "%d posts"\nmsgstr[0] ""\nmsgstr[1] ""\n'
 
