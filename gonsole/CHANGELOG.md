@@ -8,6 +8,12 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `Command.Needs`, the flags a run must set, a blank one exiting 2 before any schema step.
+
 ## [0.5.0] - 2026-10-04
 
 ### Added
