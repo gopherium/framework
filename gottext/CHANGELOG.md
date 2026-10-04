@@ -5,6 +5,25 @@ versioning follows [Semantic Versioning](https://semver.org/). While at 0.x,
 minor releases may break. Releases are tagged `gottext/vX.Y.Z` and publish
 from CI.
 
+## [Unreleased]
+
+### Added
+
+- `rememberFormatLocale`, storing the locale dates, times, numbers and money are written in, apart from the interface language.
+- `formatTime`, `formatNumber` and `formatMoney`, writing in the format locale, numbers always grouped by thousands.
+- `formatWeekday` and `formatList`, writing in the interface language.
+- `unformatted`, the gate naming every message that writes a number through a `%d`, `%i`, `%u` or `%f` placeholder, a length such as `%ld` included.
+- A `./react` entry with `FormatLocaleGate`, opening the screens once the settings name the format locale, with `react` as an optional peer.
+
+### Changed
+
+- Breaking: `formatDate` writes in the format locale once one is remembered, and with no options writes a two digit day and month and a four digit year, so en-US shows 09/01/2026 where 0.5.1 showed 9/1/2026.
+- `resetLocale` forgets the format locale too.
+
+### Fixed
+
+- `mismatched` reads a placeholder carrying a length, such as `%ld`, so a translation dropping one is named.
+
 ## [0.5.1] - 2026-09-27
 
 ### Fixed
