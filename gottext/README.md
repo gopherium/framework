@@ -37,9 +37,9 @@ pnpm add react
 ```
 
 The build entry's `unformatted` gate names every message of a
-template that writes a number through `%d`, `%i`, `%u` or `%f`, a
-length such as `%ld` included, so each count reaches the reader
-through `formatNumber` and `%s`.
+template that writes a number through `%d`, `%i`, `%u`, `%e`, `%f` or
+`%g`, upper case `%E` and `%G` and a length such as `%ld` included, so
+each count reaches the reader through `formatNumber` and `%s`.
 
 ## License
 

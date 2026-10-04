@@ -12,7 +12,7 @@ from CI.
 - `rememberFormatLocale`, storing the locale dates, times, numbers and money are written in, apart from the interface language.
 - `formatTime`, `formatNumber` and `formatMoney`, writing in the format locale, numbers always grouped by thousands.
 - `formatWeekday` and `formatList`, writing in the interface language.
-- `unformatted`, the gate naming every message that writes a number through a `%d`, `%i`, `%u` or `%f` placeholder, a length such as `%ld` included.
+- `unformatted`, the gate naming every message that writes a number through a `%d`, `%i`, `%u`, `%e`, `%f` or `%g` placeholder, upper case `%E` and `%G` and a length such as `%ld` included.
 - A `./react` entry with `FormatLocaleGate`, opening the screens once the settings name the format locale, with `react` as an optional peer.
 
 ### Changed
