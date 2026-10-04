@@ -29,9 +29,18 @@ linters:
           list-mode: strict
           files:
             - "**/*.go"
+            - "!**/locale/*.go"
           allow:
             - $gostd
             - github.com/gopherium/framework/gonsole
+        locale-purity:
+          list-mode: strict
+          files:
+            - "**/locale/*.go"
+          allow:
+            - $gostd
+            - github.com/gopherium/framework/gonsole
+            - golang.org/x/text/language
   exclusions:
     rules:
       - path: _test\.go

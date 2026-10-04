@@ -77,11 +77,11 @@ export function unreviewed(source: string): string[] {
 	return waiting
 }
 
-/** NAMED is a placeholder naming what goes into it, with any flags, width, and precision it carries. */
-const NAMED = /%%|%\(([A-Za-z_][A-Za-z0-9_]*)\)[+0#-]*\d*(?:\.\d+)?[bcdieEfgGosuxX]/g
+/** NAMED is a placeholder naming what goes into it, with any flags, width, precision, and length it carries. */
+const NAMED = /%%|%\(([A-Za-z_][A-Za-z0-9_]*)\)[+0#-]*\d*(?:\.\d+)?(?:ll|[lhqL])?[bcdieEfgGosuxX]/g
 
-/** BARE is a placeholder naming nothing, with any flags, width, and precision it carries. */
-const BARE = /%%|%(?:\d+\$)?[+0#-]*\d*(?:\.\d+)?[bcdieEfgGosuxX]/g
+/** BARE is a placeholder naming nothing, with any flags, width, precision, and length it carries. */
+const BARE = /%%|%(?:\d+\$)?[+0#-]*\d*(?:\.\d+)?(?:ll|[lhqL])?[bcdieEfgGosuxX]/g
 
 /**
  * Returns the named placeholders a message carries, each once and whole.
@@ -122,6 +122,35 @@ function answersPlaceholders(form: string, message: string): boolean {
 		return true
 	}
 	return alike(placeholders(form), placeholders(message)) && alike(bare(form), bare(message))
+}
+
+/** NUMBER is the conversion a placeholder ends in when it writes a number rather than text. */
+const NUMBER = /[deEfgGiu]$/
+
+/**
+ * Returns whether a message writes a number through one of its placeholders.
+ * @param message - The message to read.
+ * @returns Whether a placeholder writes a number.
+ */
+function writesNumber(message: string): boolean {
+	return [...placeholders(message), ...bare(message)].some((found) => NUMBER.test(found))
+}
+
+/**
+ * Returns every message that writes a number through a placeholder rather than as text a number formatter wrote.
+ * @param template - The template naming every message.
+ * @returns The keys writing a bare number, in the order the template holds them.
+ */
+export function unformatted(template: string): string[] {
+	const found: string[] = []
+	for (const [context, entries] of Object.entries(po.parse(template).translations)) {
+		for (const [msgid, entry] of Object.entries(entries)) {
+			if (writesNumber(msgid) || writesNumber(entry.msgid_plural ?? '')) {
+				found.push(keyOf(context, msgid))
+			}
+		}
+	}
+	return found
 }
 
 /**

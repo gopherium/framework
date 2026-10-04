@@ -51,11 +51,11 @@ test('shows a bare calendar day on the day it names whatever zone the options as
 	expect(formatDate('2026-09-01', { day: 'numeric', timeZone: WEST_OF_UTC })).toBe('1')
 })
 
-test('shows a bare calendar day handed no options on the day it names for a reader west of UTC', () => {
+test('shows a bare calendar day handed no options in two digits on the day it names for a reader west of UTC', () => {
 	vi.stubEnv('TZ', WEST_OF_UTC)
 	rememberLocale('en-US')
 
-	expect(formatDate('2026-09-01')).toBe('9/1/2026')
+	expect(formatDate('2026-09-01')).toBe('09/01/2026')
 })
 
 test('follows the options a bare calendar day is handed through their prototype', () => {

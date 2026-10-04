@@ -3,7 +3,7 @@
 import { __, setLocaleData } from '@wordpress/i18n'
 import { expect, test } from 'vitest'
 
-import { displayLocale, rememberLocale } from '../src/index.js'
+import { displayLocale, formatNumber, rememberFormatLocale, rememberLocale } from '../src/index.js'
 import type { Catalog } from '../src/index.js'
 import { resetLocale } from '../src/testing.js'
 
@@ -38,4 +38,12 @@ test('settles back on en-US when handed no locale', () => {
 	resetLocale()
 
 	expect(displayLocale()).toBe('en-US')
+})
+
+test('forgets the format locale so numbers follow the locale it settles on', () => {
+	rememberFormatLocale('de-DE')
+
+	resetLocale()
+
+	expect(formatNumber(1234.5)).toBe('1,234.5')
 })

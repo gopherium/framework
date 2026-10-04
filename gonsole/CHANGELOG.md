@@ -8,6 +8,15 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `Env.Counts`, reading a setting as whole numbers split by commas, each above the one before.
+- `Entries`, a bound on how many numbers a `Counts` setting lists.
+- `WholeMilliseconds`, a bound refusing a `Duration` setting that is not a whole number of milliseconds.
+- The `locale` package, whose `Tag` reads a setting as a canonical BCP 47 language tag through `golang.org/x/text`.
+
 ## [0.4.0] - 2026-10-03
 
 ### Added

@@ -88,7 +88,7 @@ jobs:
       - run: pnpm run lint
       - run: pnpm exec knip
       - run: pnpm run build
-      - run: node -e "Promise.all(['@gopherium/gottext', '@gopherium/gottext/build', '@gopherium/gottext/sync', '@gopherium/gottext/testing'].map((entry) => import(entry))).then(() => console.log('every entry loads'))"
+      - run: node -e "Promise.all(['@gopherium/gottext', '@gopherium/gottext/build', '@gopherium/gottext/sync', '@gopherium/gottext/testing', '@gopherium/gottext/react'].map((entry) => import(entry))).then(() => console.log('every entry loads'))"
 
   lint:
     runs-on: ubuntu-latest
