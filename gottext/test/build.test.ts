@@ -515,6 +515,12 @@ test('names a message that writes an unsigned number through a placeholder', () 
 	expect(unformatted(naming)).toEqual(['%u posts', '%(count)u drafts'])
 })
 
+test('names a message that writes a number in exponent or general form through a placeholder', () => {
+	const naming = 'msgid "Rate %g"\nmsgstr ""\n\nmsgid "Mass %(mass)e"\nmsgstr ""\n\nmsgid "Wide %E and %G"\nmsgstr ""\n'
+
+	expect(unformatted(naming)).toEqual(['Rate %g', 'Mass %(mass)e', 'Wide %E and %G'])
+})
+
 test('names a message whose plural form writes a number through a placeholder', () => {
 	const naming = 'msgid "One post"\nmsgid_plural "%d posts"\nmsgstr[0] ""\nmsgstr[1] ""\n'
 

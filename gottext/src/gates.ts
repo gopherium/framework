@@ -125,7 +125,7 @@ function answersPlaceholders(form: string, message: string): boolean {
 }
 
 /** NUMBER is the conversion a placeholder ends in when it writes a number rather than text. */
-const NUMBER = /[dfiu]$/
+const NUMBER = /[deEfgGiu]$/
 
 /**
  * Returns whether a message writes a number through one of its placeholders.
