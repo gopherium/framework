@@ -114,10 +114,25 @@ func (r *runner) prepare(cmd Command, args []string) (Call, error) {
 	if cmd.Capability != "" && s.as == "" {
 		return Call{}, Misuse(fmt.Errorf("%s wants -as <email>", cmd.Name))
 	}
+	if err := needed(cmd, fs); err != nil {
+		return Call{}, err
+	}
 	return Call{
 		Args: positional, Flags: given(fs), Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr, Env: r.settings(),
 		JSON: s.json, Apply: s.yes || !cmd.Writes, Actor: s.as, database: r.program.Database, plugins: r.plugins,
 	}, nil
+}
+
+// needed refuses the first flag cmd needs that fs holds blank, naming the placeholder its usage shows.
+func needed(cmd Command, fs *flag.FlagSet) error {
+	for _, name := range cmd.Needs {
+		f := fs.Lookup(name)
+		if strings.TrimSpace(f.Value.String()) == "" {
+			placeholder, _ := flag.UnquoteUsage(f)
+			return Misuse(fmt.Errorf("%s wants -%s <%s>", cmd.Name, name, placeholder))
+		}
+	}
+	return nil
 }
 
 // given returns the value of each of the command's own flags the line set on fs, the engine flags left out.
@@ -171,8 +186,13 @@ func takesValue(fs *flag.FlagSet, token string) bool {
 	if strings.Contains(name, "=") {
 		return false
 	}
-	boolean, isBoolean := fs.Lookup(name).Value.(interface{ IsBoolFlag() bool })
-	return !isBoolean || !boolean.IsBoolFlag()
+	return !isSwitch(fs.Lookup(name))
+}
+
+// isSwitch reports whether f is a boolean flag, set by its name alone.
+func isSwitch(f *flag.Flag) bool {
+	boolean, isBoolean := f.Value.(interface{ IsBoolFlag() bool })
+	return isBoolean && boolean.IsBoolFlag()
 }
 
 // arity refuses positional arguments that do not match the names cmd declares.
