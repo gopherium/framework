@@ -53,3 +53,10 @@ test('opens the screens in the interface locale when the settings could not be r
 
 	expect(renderGate(undefined, true)).toBe('<p>09/30/2026</p>')
 })
+
+test('forgets a format locale an earlier answer named once reading the settings fails', () => {
+	rememberLocale('en-US')
+	renderGate('de-DE', false)
+
+	expect(renderGate(undefined, true)).toBe('<p>09/30/2026</p>')
+})

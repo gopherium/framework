@@ -19,5 +19,9 @@ export function FormatLocaleGate({ locale, failed, loading, children }: {
 		rememberFormatLocale(locale)
 		return children
 	}
-	return failed ? children : loading
+	if (!failed) {
+		return loading
+	}
+	rememberFormatLocale(undefined)
+	return children
 }
