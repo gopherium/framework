@@ -58,22 +58,6 @@ func alternatives(names []string) string {
 	return strings.Join(names[:last], ", ") + " or " + names[last]
 }
 
-// needed is one flag a command requires and the placeholder its help page shows.
-type needed struct {
-	flag  string
-	value string
-}
-
-// missing returns a misuse naming the first needed flag the call leaves blank.
-func missing(command string, call gonsole.Call, flags ...needed) error {
-	for _, want := range flags {
-		if strings.TrimSpace(call.Flags[want.flag]) == "" {
-			return gonsole.Misuse(fmt.Errorf("%s wants -%s <%s>", command, want.flag, want.value))
-		}
-	}
-	return nil
-}
-
 // withStore runs use over the account store of the program's database and closes its pool after.
 func withStore(ctx context.Context, call gonsole.Call, use func(store *postgres.UserStore) error) error {
 	return withPool(ctx, call, func(pool *pgxpool.Pool) error {

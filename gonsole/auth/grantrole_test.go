@@ -134,6 +134,67 @@ func TestGrantRoleRefusesALineItCannotRun(t *testing.T) {
 	}
 }
 
+func TestGrantRoleRefusesAMissingRoleBeforeAnySchemaStep(t *testing.T) {
+	t.Parallel()
+
+	lines := map[string][]string{
+		"no role with yes":      {"account:grant-role", "-yes"},
+		"a blank role with yes": {"account:grant-role", "-role", " ", "-yes"},
+	}
+	for condition, args := range lines {
+		t.Run(condition, func(t *testing.T) {
+			t.Parallel()
+
+			address := empty(t)
+			var reads rolesRead
+
+			got := testkit.Run(t, program(address, auth.GrantRole(config(&reads, ""))), "", args...)
+
+			want := testkit.Result{Code: gonsole.ExitMisused,
+				Stderr: "myapp: account:grant-role wants -role <role>\n\n" + grantPage}
+			if got != want {
+				t.Errorf("Run() = %+v, want %+v", got, want)
+			}
+			if reads.count != 0 {
+				t.Errorf("roles read %d times, want none", reads.count)
+			}
+			if found(t, address, schemaHeld, "auth") {
+				t.Error("the account schema exists, want a bare database")
+			}
+		})
+	}
+}
+
+func TestGrantRoleRefusesAMissingRoleBeforeItChecksTheActingAccount(t *testing.T) {
+	t.Parallel()
+
+	actors := map[string][]string{
+		"an address no account holds":            {"-as", "nobody@example.com"},
+		"a role lacking the capability with yes": {"-as", "editor@example.com", "-yes"},
+	}
+	for condition, acting := range actors {
+		t.Run(condition, func(t *testing.T) {
+			t.Parallel()
+
+			address := recorded(t)
+			cfg := checked()
+			p := authorizing(address, cfg, nil, auth.GrantRole(cfg))
+			page := testkit.Run(t, p, "", "account:grant-role", "-h").Stdout
+
+			got := testkit.Run(t, p, "", append([]string{"account:grant-role"}, acting...)...)
+
+			want := testkit.Result{Code: gonsole.ExitMisused,
+				Stderr: "myapp: account:grant-role wants -role <role>\n\n" + page}
+			if got != want {
+				t.Errorf("Run() = %+v, want %+v", got, want)
+			}
+			if held := records(t, address); len(held) != 0 {
+				t.Errorf("records = %v, want none", held)
+			}
+		})
+	}
+}
+
 func TestGrantRoleDryRunFailsOverADatabaseNeverMigrated(t *testing.T) {
 	t.Parallel()
 

@@ -8,6 +8,13 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
+## [Unreleased]
+
+### Changed
+
+- `account:create-admin` and `account:grant-role` refuse a missing or blank flag before a schema step or account check.
+- Requires `gonsole` 0.6.0.
+
 ## [0.3.0] - 2026-10-03
 
 ### Changed
