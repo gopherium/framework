@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/gopherium/framework/gonsole v0.1.0
+	github.com/gopherium/framework/gonsole v0.6.0
 	github.com/gopherium/gouncer v0.4.0
 	github.com/gopherium/gouncer/authkit v0.15.0
 	github.com/gopherium/gouncer/authkit/postgres v0.11.2
@@ -23,5 +23,5 @@ require (
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 )
