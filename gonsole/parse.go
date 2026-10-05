@@ -114,21 +114,21 @@ func (r *runner) prepare(cmd Command, args []string) (Call, error) {
 	if cmd.Capability != "" && s.as == "" {
 		return Call{}, Misuse(fmt.Errorf("%s wants -as <email>", cmd.Name))
 	}
-	if err := needed(cmd, fs); err != nil {
+	set := given(fs)
+	if err := needed(cmd, fs, set); err != nil {
 		return Call{}, err
 	}
 	return Call{
-		Args: positional, Flags: given(fs), Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr, Env: r.settings(),
+		Args: positional, Flags: set, Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr, Env: r.settings(),
 		JSON: s.json, Apply: s.yes || !cmd.Writes, Actor: s.as, database: r.program.Database, plugins: r.plugins,
 	}, nil
 }
 
-// needed refuses the first flag cmd needs that fs holds blank, naming the placeholder its usage shows.
-func needed(cmd Command, fs *flag.FlagSet) error {
+// needed refuses the first flag cmd needs that the line left out of set or blank, naming the placeholder fs shows.
+func needed(cmd Command, fs *flag.FlagSet, set map[string]string) error {
 	for _, name := range cmd.Needs {
-		f := fs.Lookup(name)
-		if strings.TrimSpace(f.Value.String()) == "" {
-			placeholder, _ := flag.UnquoteUsage(f)
+		if strings.TrimSpace(set[name]) == "" {
+			placeholder, _ := flag.UnquoteUsage(fs.Lookup(name))
 			return Misuse(fmt.Errorf("%s wants -%s <%s>", cmd.Name, name, placeholder))
 		}
 	}

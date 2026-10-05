@@ -36,6 +36,12 @@ func issuing(h *hooks) gonsole.Program {
 			{Name: "report:assign", Summary: "assign one report", Capability: "manage_reports",
 				Flags: func(fs *flag.FlagSet) { fs.String("owner", "", "`email` address of the new owner") },
 				Needs: []string{"owner"}, Run: run},
+			{Name: "report:schedule", Summary: "schedule one report",
+				Flags: func(fs *flag.FlagSet) {
+					fs.String("owner", "nobody@example.com", "`email` address of the owner")
+					fs.Duration("every", 0, "`interval` between two runs")
+				},
+				Needs: []string{"owner", "every"}, Run: run},
 		},
 		Authorize: func(_ context.Context, call gonsole.Call, capability string) error {
 			h.note("authorize %s for %s", call.Actor, capability)
@@ -63,6 +69,10 @@ func TestRunRefusesARunThatLeavesANeededFlagBlank(t *testing.T) {
 		{"no owner on a run applied with -yes", []string{"report:file", "-yes", "-title", "Q3"}, owner},
 		{"neither flag", []string{"report:file"}, owner},
 		{"no title", []string{"report:file", "-owner", actingAccount}, "myapp: report:file wants -title <string>\n"},
+		{"no owner where the flag has a default", []string{"report:schedule", "-every", "1h"},
+			"myapp: report:schedule wants -owner <email>\n"},
+		{"no interval where the zero value is not blank", []string{"report:schedule", "-owner", actingAccount},
+			"myapp: report:schedule wants -every <interval>\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,6 +104,21 @@ func TestRunRunsACommandWhoseNeededFlagsAreSet(t *testing.T) {
 		t.Fatalf("code = %d with stderr %q, want %d", got.code, got.stderr, gonsole.ExitDone)
 	}
 	want := []string{"step reports", "run owner=" + actingAccount + " title=Q3 apply=true"}
+	if !slices.Equal(h.log, want) {
+		t.Errorf("calls = %q, want %q", h.log, want)
+	}
+}
+
+func TestRunHandsTheCommandEveryNeededFlagTheLineSet(t *testing.T) {
+	t.Parallel()
+
+	var h hooks
+	got := execute(t, issuing(&h), "report:schedule", "-owner", actingAccount, "-every", "1h")
+
+	if got.code != gonsole.ExitDone {
+		t.Fatalf("code = %d with stderr %q, want %d", got.code, got.stderr, gonsole.ExitDone)
+	}
+	want := []string{"run owner=" + actingAccount + " title= apply=true"}
 	if !slices.Equal(h.log, want) {
 		t.Errorf("calls = %q, want %q", h.log, want)
 	}
