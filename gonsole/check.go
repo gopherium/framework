@@ -159,20 +159,33 @@ func wellFormed(name string) bool {
 	return namePart.MatchString(namespace) && namePart.MatchString(command)
 }
 
-// flags refuses a command whose Flags panics or declares a flag the engine owns.
+// flags refuses a command whose Flags panics, declares a flag the engine owns, or needs a flag it cannot need.
 func (a *audit) flags(cmd Command) {
-	if cmd.Flags == nil {
-		return
-	}
 	fs := flag.NewFlagSet(cmd.Name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	if value, panicked := declare(cmd, fs); panicked {
-		a.refuse(flagsPanicked, cmd.Name, value)
-		return
+	if cmd.Flags != nil {
+		if value, panicked := declare(cmd, fs); panicked {
+			a.refuse(flagsPanicked, cmd.Name, value)
+			return
+		}
 	}
 	for _, name := range engineFlags {
 		if fs.Lookup(name) != nil {
 			a.refuse("command %q declares the engine flag -%s", cmd.Name, name)
+		}
+	}
+	a.needs(cmd, fs)
+}
+
+// needs refuses a flag cmd needs that fs does not declare or that is a switch.
+func (a *audit) needs(cmd Command, fs *flag.FlagSet) {
+	for _, name := range cmd.Needs {
+		f := fs.Lookup(name)
+		switch {
+		case f == nil:
+			a.refuse("command %q needs -%s, which it does not declare", cmd.Name, name)
+		case isSwitch(f):
+			a.refuse("command %q needs -%s, which is a switch", cmd.Name, name)
 		}
 	}
 }
