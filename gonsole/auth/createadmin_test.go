@@ -31,6 +31,9 @@ Flags:
 // migratedLine is the line the account schema step writes before a command that asks for it.
 const migratedLine = "migrated accounts\n"
 
+// schemaHeld reports whether the database holds the schema its one argument names.
+const schemaHeld = "SELECT EXISTS (SELECT FROM pg_namespace WHERE nspname = $1)"
+
 // creating returns the arguments that create maria.perez@example.com under role.
 func creating(role string) []string {
 	return []string{"account:create-admin", "-email", "maria.perez@example.com", "-name", "Maria Perez", "-role", role}
@@ -67,14 +70,6 @@ func TestCreateAdminRefusesALineItCannotRun(t *testing.T) {
 		stderr string
 		reads  int
 	}{
-		{"no address", []string{"account:create-admin", "-name", "Maria Perez", "-role", "admin"}, "",
-			gonsole.ExitMisused, "", migratedLine + "myapp: account:create-admin wants -email <address>\n\n" + createPage, 0},
-		{"no name", []string{"account:create-admin", "-email", "maria.perez@example.com", "-role", "admin"}, "",
-			gonsole.ExitMisused, "", migratedLine + "myapp: account:create-admin wants -name <name>\n\n" + createPage, 0},
-		{"a blank name", append(creating("admin")[:3], "-name", "  ", "-role", "admin"), "", gonsole.ExitMisused, "",
-			migratedLine + "myapp: account:create-admin wants -name <name>\n\n" + createPage, 0},
-		{"no role", creating("admin")[:5], "", gonsole.ExitMisused, "",
-			migratedLine + "myapp: account:create-admin wants -role <role>\n\n" + createPage, 0},
 		{"an unknown role", creating("owner"), "", gonsole.ExitMisused, "",
 			migratedLine + "myapp: unknown role \"owner\", want admin, editor or author\n\n" + createPage, 1},
 		{"a padded role", creating(" admin"), "", gonsole.ExitMisused, "",
@@ -100,6 +95,47 @@ func TestCreateAdminRefusesALineItCannotRun(t *testing.T) {
 			}
 			if reads.count != tc.reads {
 				t.Errorf("roles read %d times, want %d", reads.count, tc.reads)
+			}
+		})
+	}
+}
+
+func TestCreateAdminRefusesAMissingFlagBeforeAnySchemaStep(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		args   []string
+		stderr string
+	}{
+		{"no address", []string{"account:create-admin", "-name", "Maria Perez", "-role", "admin"},
+			"myapp: account:create-admin wants -email <address>\n\n" + createPage},
+		{"a blank address", []string{"account:create-admin", "-email", " ", "-name", "Maria Perez", "-role", "admin"},
+			"myapp: account:create-admin wants -email <address>\n\n" + createPage},
+		{"no name", []string{"account:create-admin", "-email", "maria.perez@example.com", "-role", "admin"},
+			"myapp: account:create-admin wants -name <name>\n\n" + createPage},
+		{"a blank name", append(creating("admin")[:3], "-name", "  ", "-role", "admin"),
+			"myapp: account:create-admin wants -name <name>\n\n" + createPage},
+		{"no role", creating("admin")[:5], "myapp: account:create-admin wants -role <role>\n\n" + createPage},
+		{"a blank role", creating(" "), "myapp: account:create-admin wants -role <role>\n\n" + createPage},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			address := empty(t)
+			var reads rolesRead
+
+			got := testkit.Run(t, program(address, auth.CreateAdmin(config(&reads, ""))), "", tc.args...)
+
+			if want := (testkit.Result{Code: gonsole.ExitMisused, Stderr: tc.stderr}); got != want {
+				t.Errorf("Run() = %+v, want %+v", got, want)
+			}
+			if reads.count != 0 {
+				t.Errorf("roles read %d times, want none", reads.count)
+			}
+			if found(t, address, schemaHeld, "auth") {
+				t.Error("the account schema exists, want a bare database")
 			}
 		})
 	}

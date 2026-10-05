@@ -26,6 +26,7 @@ func GrantRole(cfg Config) gonsole.Command {
 		Flags: func(fs *flag.FlagSet) {
 			fs.String("role", "", "`role` to give every account holding none")
 		},
+		Needs: []string{"role"},
 		Run: func(ctx context.Context, call gonsole.Call) error {
 			return grant(ctx, call, cfg)
 		},
@@ -34,9 +35,6 @@ func GrantRole(cfg Config) gonsole.Command {
 
 // grant gives the role the call names to every account holding none, once the role is known and within reach.
 func grant(ctx context.Context, call gonsole.Call, cfg Config) error {
-	if err := missing(grantName, call, needed{"role", "role"}); err != nil {
-		return err
-	}
 	role := call.Flags["role"]
 	roles, err := cfg.Roles(ctx, call)
 	if err != nil {

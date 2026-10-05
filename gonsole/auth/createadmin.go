@@ -26,6 +26,7 @@ func CreateAdmin(cfg Config) gonsole.Command {
 			fs.String("name", "", "display `name` of the new account")
 			fs.String("role", "", "`role` the new account starts under")
 		},
+		Needs: []string{"email", "name", "role"},
 		Run: func(ctx context.Context, call gonsole.Call) error {
 			return create(ctx, call, cfg)
 		},
@@ -34,10 +35,6 @@ func CreateAdmin(cfg Config) gonsole.Command {
 
 // create creates the account the call names under its role, once the role is known.
 func create(ctx context.Context, call gonsole.Call, cfg Config) error {
-	err := missing(createName, call, needed{"email", "address"}, needed{"name", "name"}, needed{"role", "role"})
-	if err != nil {
-		return err
-	}
 	roles, err := cfg.Roles(ctx, call)
 	if err != nil {
 		return err
