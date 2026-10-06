@@ -68,12 +68,13 @@ func TestNewFunctionListKeepsItsFunctions(t *testing.T) {
 func TestNewFunctionListKeepsNamesThatFoldApart(t *testing.T) {
 	t.Parallel()
 
-	list, err := dbkit.NewFunctionList(basicFunction("i"), basicFunction("İ"))
+	names := []dbkit.Function{basicFunction("i"), basicFunction("İ"), basicFunction("ñandú"), basicFunction("ÑANDÚ")}
+	list, err := dbkit.NewFunctionList(names...)
 	if err != nil {
 		t.Fatalf("NewFunctionList gave %v, want no error", err)
 	}
 
-	if got, want := basicNames(list.All()), []string{"i", "İ"}; !reflect.DeepEqual(got, want) {
+	if got, want := basicNames(list.All()), []string{"i", "İ", "ñandú", "ÑANDÚ"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("All() names = %v, want %v", got, want)
 	}
 }
@@ -156,9 +157,9 @@ func TestNewFunctionListRefusesABadFunction(t *testing.T) {
 			`dbkit: function "FOLD" repeats the name of function "fold"`,
 		},
 		{
-			"name in another Unicode case",
-			[]dbkit.Function{basicFunction("ñandú"), basicFunction("ÑANDÚ")},
-			`dbkit: function "ÑANDÚ" repeats the name of function "ñandú"`,
+			"name with its ASCII letters in another case",
+			[]dbkit.Function{basicFunction("ñandú"), basicFunction("ñANDú")},
+			`dbkit: function "ñANDú" repeats the name of function "ñandú"`,
 		},
 	}
 	for _, c := range cases {

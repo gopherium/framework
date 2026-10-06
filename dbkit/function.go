@@ -23,7 +23,7 @@ type Function struct {
 	Call func(args []driver.Value) (driver.Value, error)
 }
 
-// FunctionList is a checked list of functions with no name repeated in any case.
+// FunctionList is a checked list of functions with no name repeated, its ASCII letters in any case.
 type FunctionList struct {
 	// fns holds the functions in the order given.
 	fns []Function
@@ -36,7 +36,7 @@ func NewFunctionList(fns ...Function) (*FunctionList, error) {
 		if err := checkFunction(i, fn); err != nil {
 			return nil, err
 		}
-		key := foldString(fn.Name)
+		key := asciiLower(fn.Name)
 		if first, ok := seen[key]; ok {
 			return nil, fmt.Errorf("dbkit: function %q repeats the name of function %q", fn.Name, first)
 		}
@@ -56,6 +56,16 @@ func checkFunction(i int, fn Function) error {
 		return fmt.Errorf("dbkit: function %q has a nil Call", fn.Name)
 	}
 	return nil
+}
+
+// asciiLower returns s with its ASCII upper case letters in lower case.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
 }
 
 // All returns a copy of the functions in the list, or nil for a nil list.
