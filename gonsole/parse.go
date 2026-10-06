@@ -111,7 +111,7 @@ func (r *runner) prepare(cmd Command, args []string) (Call, error) {
 	if err := arity(cmd, positional); err != nil {
 		return Call{}, err
 	}
-	if cmd.Capability != "" && s.as == "" {
+	if cmd.Capability != "" && strings.TrimSpace(s.as) == "" {
 		return Call{}, Misuse(fmt.Errorf("%s wants -as <email>", cmd.Name))
 	}
 	if err := needed(cmd, fs, texts); err != nil {
