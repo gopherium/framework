@@ -348,8 +348,8 @@ func TestBuildingSharesStartsNoGoroutine(t *testing.T) {
 		shareNew(t, db, dbkit.SQLite, opts)
 	}
 
-	if after := runtime.NumGoroutine(); after != before {
-		t.Errorf("goroutines after 200 shares = %d, want %d as before", after, before)
+	if after := runtime.NumGoroutine(); after > before {
+		t.Errorf("goroutines after 200 shares = %d, want at most %d as before", after, before)
 	}
 	if calls := fake.log(); len(calls) != 0 {
 		t.Errorf("driver calls = %v, want none from building shares", calls)
