@@ -247,15 +247,28 @@ func (s *Share) acquire(ctx context.Context) error {
 	}
 	select {
 	case s.slots <- struct{}{}:
-		return nil
+		return s.inTime(ctx)
 	default:
 	}
 	select {
 	case s.slots <- struct{}{}:
-		return nil
+		return s.inTime(ctx)
 	case <-ctx.Done():
 		return fmt.Errorf("%w: %w", ErrShareFull, ctx.Err())
 	}
+}
+
+// inTime gives a slot just taken back when ctx ended or reached its deadline while it was taken.
+func (s *Share) inTime(ctx context.Context) error {
+	err := ctx.Err()
+	if end, ok := ctx.Deadline(); err == nil && ok && !time.Now().Before(end) {
+		err = context.DeadlineExceeded
+	}
+	if err != nil {
+		s.release()
+		return fmt.Errorf("%w: %w", ErrShareFull, err)
+	}
+	return nil
 }
 
 // release gives one slot back.

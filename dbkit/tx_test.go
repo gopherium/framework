@@ -265,6 +265,33 @@ func TestAStatementInsideATransactionEndsWithIt(t *testing.T) {
 	}
 }
 
+func TestASlotFreedAtTheDeadlineNeverStartsALateTransaction(t *testing.T) {
+	t.Parallel()
+
+	for range 50 {
+		synctest.Test(t, func(t *testing.T) {
+			share, fake := shareOpen(t, dbkit.Postgres, shareOptions(1))
+			holder := shareMustBegin(t, share)
+			time.AfterFunc(shareStatementTimeout, func() { _ = holder.Rollback() })
+
+			tx, err := share.Begin(t.Context())
+
+			if tx != nil || !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("Begin() at its deadline = %v, %v, want nil and an error matching the deadline", tx, err)
+			}
+			begins := 0
+			for _, line := range fake.log() {
+				if line == "begin" {
+					begins++
+				}
+			}
+			if begins != 1 {
+				t.Fatalf("driver calls = %v, want only the holder's begin", fake.log())
+			}
+		})
+	}
+}
+
 func TestBeginWaitsForAConnectionWithinTheTransactionTimeout(t *testing.T) {
 	t.Parallel()
 
