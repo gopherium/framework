@@ -19,7 +19,7 @@ type Function struct {
 	Args int
 	// Deterministic reports that the same arguments always give the same result.
 	Deterministic bool
-	// Call computes the result from the arguments.
+	// Call computes the result from the arguments, which stay valid only until it returns.
 	Call func(args []driver.Value) (driver.Value, error)
 }
 
