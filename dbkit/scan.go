@@ -184,6 +184,7 @@ func (s *scanner) quoted(delim byte) {
 			s.unclosed()
 			return
 		}
+		s.backslash(delim, s.query[i:i+end])
 		i += end + 1
 		if i >= len(s.query) || s.query[i] != delim {
 			s.pos = i
@@ -191,6 +192,13 @@ func (s *scanner) quoted(delim byte) {
 			return
 		}
 		i++
+	}
+}
+
+// backslash marks a PostgreSQL string whose text holds a backslash as one that writes.
+func (s *scanner) backslash(delim byte, text string) {
+	if !s.sqlite && delim == '\'' && strings.IndexByte(text, '\\') >= 0 {
+		s.writes = true
 	}
 }
 
