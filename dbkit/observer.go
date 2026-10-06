@@ -46,7 +46,7 @@ type Statement struct {
 	Kind Kind
 	// Query is the text as the caller wrote it, before any rewrite, and empty for Begin.
 	Query string
-	// Writes reports whether the statement may write, always true for Begin.
+	// Writes reports whether the text of the statement shows a write, always true for Begin.
 	Writes bool
 	// InTransaction reports whether the statement runs inside a transaction of the share.
 	InTransaction bool
