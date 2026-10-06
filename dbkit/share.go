@@ -106,12 +106,7 @@ func (s *Share) QueryRow(ctx context.Context, query string, args ...any) *Row {
 
 // Begin starts a transaction that ends at the transaction timeout at the latest.
 func (s *Share) Begin(ctx context.Context) (*Tx, error) {
-	total, past := currentCount(ctx)
-	begin := Statement{ID: s.id, Kind: KindBegin, Writes: true, Count: total, PastBudget: past}
-	if err := s.observe(ctx, begin); err != nil {
-		return nil, err
-	}
-	if err := s.wait(ctx); err != nil {
+	if err := s.admitBegin(ctx); err != nil {
 		return nil, err
 	}
 	txCtx, cancel := context.WithTimeout(ctx, s.transactionTimeout)
@@ -122,6 +117,18 @@ func (s *Share) Begin(ctx context.Context) (*Tx, error) {
 		return nil, err
 	}
 	return tx, nil
+}
+
+// admitBegin shows a transaction start to the observer and takes its slot, both within one statement timeout.
+func (s *Share) admitBegin(ctx context.Context) error {
+	waitCtx, cancel := context.WithTimeout(ctx, s.statementTimeout)
+	defer cancel()
+	total, past := currentCount(ctx)
+	begin := Statement{ID: s.id, Kind: KindBegin, Writes: true, Count: total, PastBudget: past}
+	if err := s.observe(waitCtx, begin); err != nil {
+		return err
+	}
+	return s.acquire(waitCtx)
 }
 
 // runner is a handle or a transaction a statement runs on.
@@ -156,12 +163,12 @@ func (s *Share) admit(ctx context.Context, kind Kind, inTx bool, query string) (
 
 // exec runs a statement that returns no rows on the handle, or inside tx when tx is not nil.
 func (s *Share) exec(ctx context.Context, tx *Tx, query string, args []any) (sql.Result, error) {
-	text, err := s.admit(ctx, KindExec, tx != nil, query)
+	stmtCtx, cancel := s.statementContext(ctx, tx)
+	defer cancel()
+	text, err := s.admit(stmtCtx, KindExec, tx != nil, query)
 	if err != nil {
 		return nil, err
 	}
-	stmtCtx, cancel := s.statementContext(ctx, tx)
-	defer cancel()
 	give, err := s.take(stmtCtx, tx != nil)
 	if err != nil {
 		return nil, err
@@ -173,11 +180,12 @@ func (s *Share) exec(ctx context.Context, tx *Tx, query string, args []any) (sql
 
 // query runs a query on the handle, or inside tx when tx is not nil, and wraps its rows.
 func (s *Share) query(ctx context.Context, tx *Tx, kind Kind, query string, args []any) (*Rows, error) {
-	text, err := s.admit(ctx, kind, tx != nil, query)
+	stmtCtx, cancel := s.statementContext(ctx, tx)
+	text, err := s.admit(stmtCtx, kind, tx != nil, query)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
-	stmtCtx, cancel := s.statementContext(ctx, tx)
 	give, err := s.take(stmtCtx, tx != nil)
 	if err != nil {
 		cancel()
@@ -232,15 +240,11 @@ func (s *Share) take(ctx context.Context, inTx bool) (func(), error) {
 	return s.release, nil
 }
 
-// wait takes a slot within one statement timeout of ctx.
-func (s *Share) wait(ctx context.Context) error {
-	waitCtx, cancel := context.WithTimeout(ctx, s.statementTimeout)
-	defer cancel()
-	return s.acquire(waitCtx)
-}
-
-// acquire takes a slot at once when one is free, or waits for one until ctx ends.
+// acquire takes a slot at once when one is free, or waits for one until ctx ends, and none once ctx has ended.
 func (s *Share) acquire(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrShareFull, err)
+	}
 	select {
 	case s.slots <- struct{}{}:
 		return nil

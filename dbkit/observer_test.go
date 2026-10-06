@@ -245,6 +245,58 @@ func TestBeginAtTheBudgetIsNotPastIt(t *testing.T) {
 	}
 }
 
+// shareSlowKey marks a context whose statements the slow observer holds until the context ends.
+type shareSlowKey struct{}
+
+func TestTheStatementTimeoutCoversASlowObserver(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		db, fake := shareHandle(t)
+		opts := shareOptions(1)
+		opts.Observer = func(ctx context.Context, _ dbkit.Statement) error {
+			if ctx.Value(shareSlowKey{}) != nil {
+				<-ctx.Done()
+			}
+			return nil
+		}
+		share := shareNew(t, db, dbkit.Postgres, opts)
+		slow := context.WithValue(t.Context(), shareSlowKey{}, true)
+		tx := shareMustBegin(t, share)
+
+		for _, kind := range shareKinds {
+			if err := kind.run(slow, tx, shareWrite, 1); !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("Tx.%s() behind a slow observer error = %v, want it to match the deadline", kind.name, err)
+			}
+		}
+		if err := tx.Rollback(); err != nil {
+			t.Fatalf("Rollback() error = %v, want nil", err)
+		}
+		for _, kind := range shareKinds {
+			if err := kind.run(slow, share, shareWrite, 1); !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("%s() behind a slow observer error = %v, want it to match the deadline", kind.name, err)
+			}
+		}
+		if _, err := share.Begin(slow); !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Begin() behind a slow observer error = %v, want it to match the deadline", err)
+		}
+
+		begins := 0
+		for _, line := range fake.log() {
+			if line == "begin" {
+				begins++
+			}
+			if line == "exec "+shareWrite || line == "query "+shareWrite {
+				t.Errorf("driver received %q past a slow observer", line)
+			}
+		}
+		if begins != 1 {
+			t.Errorf("driver calls = %v, want only the first begin", fake.log())
+		}
+		shareFree(t, share, fake)
+	})
+}
+
 func TestKindNamesItself(t *testing.T) {
 	t.Parallel()
 
