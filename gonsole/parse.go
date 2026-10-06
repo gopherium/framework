@@ -104,7 +104,7 @@ func (r *runner) prepare(cmd Command, args []string) (Call, error) {
 		return Call{}, err
 	}
 	r.reached, r.flags = cmd, fs
-	positional, err := parse(fs, args)
+	positional, texts, err := readTexts(fs, cmd.Needs, args)
 	if err != nil {
 		return Call{}, Misuse(fmt.Errorf("%s: %w", cmd.Name, err))
 	}
@@ -114,25 +114,57 @@ func (r *runner) prepare(cmd Command, args []string) (Call, error) {
 	if cmd.Capability != "" && s.as == "" {
 		return Call{}, Misuse(fmt.Errorf("%s wants -as <email>", cmd.Name))
 	}
-	set := given(fs)
-	if err := needed(cmd, fs, set); err != nil {
+	if err := needed(cmd, fs, texts); err != nil {
 		return Call{}, err
 	}
 	return Call{
-		Args: positional, Flags: set, Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr, Env: r.settings(),
+		Args: positional, Flags: given(fs), Stdin: r.stdin, Stdout: r.stdout, Stderr: r.stderr, Env: r.settings(),
 		JSON: s.json, Apply: s.yes || !cmd.Writes, Actor: s.as, database: r.program.Database, plugins: r.plugins,
 	}, nil
 }
 
-// needed refuses the first flag cmd needs that the line left out of set or blank, naming the placeholder fs shows.
-func needed(cmd Command, fs *flag.FlagSet, set map[string]string) error {
+// needed refuses the first flag cmd needs whose text the line left out or blank, naming the placeholder fs shows.
+func needed(cmd Command, fs *flag.FlagSet, texts map[string]string) error {
 	for _, name := range cmd.Needs {
-		if strings.TrimSpace(set[name]) == "" {
+		if strings.TrimSpace(texts[name]) == "" {
 			placeholder, _ := flag.UnquoteUsage(fs.Lookup(name))
 			return Misuse(fmt.Errorf("%s wants -%s <%s>", cmd.Name, name, placeholder))
 		}
 	}
 	return nil
+}
+
+// typed wraps a flag value and keeps the text the line gives it in texts under name.
+type typed struct {
+	flag.Value
+	name  string
+	texts map[string]string
+}
+
+// Set keeps text under the flag's name and sets the wrapped value to it.
+func (t typed) Set(text string) error {
+	t.texts[t.name] = text
+	return t.Value.Set(text)
+}
+
+// readTexts parses args on fs and returns the positional arguments and the text the line gives each flag in needs.
+func readTexts(fs *flag.FlagSet, needs, args []string) ([]string, map[string]string, error) {
+	texts := map[string]string{}
+	for _, name := range needs {
+		f := fs.Lookup(name)
+		f.Value = typed{Value: f.Value, name: name, texts: texts}
+	}
+	defer unwrap(fs, needs)
+	positional, err := parse(fs, args)
+	return positional, texts, err
+}
+
+// unwrap gives each flag in needs on fs back the value readTexts wrapped.
+func unwrap(fs *flag.FlagSet, needs []string) {
+	for _, name := range needs {
+		f := fs.Lookup(name)
+		f.Value = f.Value.(typed).Value
+	}
 }
 
 // given returns the value of each of the command's own flags the line set on fs, the engine flags left out.

@@ -20,7 +20,7 @@ type Command struct {
 	Args []string
 	// Flags declares the command's own flags, nil for none.
 	Flags func(fs *flag.FlagSet)
-	// Needs names the command's own flags a run must set to a value that is not blank, nil for none.
+	// Needs names the command's own flags the line must set to a text that is not blank, nil for none.
 	Needs []string
 	// Writes marks a command that writes to the database.
 	Writes bool

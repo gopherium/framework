@@ -12,12 +12,26 @@ import (
 	"github.com/gopherium/framework/gonsole"
 )
 
-// issuing returns a program called myapp whose two report commands need flags, every step and call noted in h.
+// masked is a flag value that reads as a mask whatever text the line gives it.
+type masked struct{}
+
+// String returns the mask.
+func (masked) String() string {
+	return "****"
+}
+
+// Set accepts any text.
+func (masked) Set(string) error {
+	return nil
+}
+
+// issuing returns a program called myapp whose report commands need flags, every step and call noted in h.
 func issuing(h *hooks) gonsole.Program {
 	run := func(_ context.Context, call gonsole.Call) error {
 		h.note("run owner=%s title=%s apply=%t", call.Flags["owner"], call.Flags["title"], call.Apply)
 		return nil
 	}
+	var at string
 	return gonsole.Program{
 		Name:     "myapp",
 		Env:      settings(map[string]string{"MYAPP_PRIMARY_URL": databaseAddress}),
@@ -42,6 +56,20 @@ func issuing(h *hooks) gonsole.Program {
 					fs.Duration("every", 0, "`interval` between two runs")
 				},
 				Needs: []string{"owner", "every"}, Run: run},
+			{Name: "report:remind", Summary: "remind the owner of one report",
+				Flags: func(fs *flag.FlagSet) {
+					fs.Func("at", "`time` of the reminder", func(text string) error {
+						at = text
+						return nil
+					})
+				},
+				Needs: []string{"at"}, Run: func(context.Context, gonsole.Call) error {
+					h.note("remind at %s", at)
+					return nil
+				}},
+			{Name: "report:seal", Summary: "seal one report",
+				Flags: func(fs *flag.FlagSet) { fs.Var(masked{}, "key", "`token` the report is sealed with") },
+				Needs: []string{"key"}, Run: run},
 		},
 		Authorize: func(_ context.Context, call gonsole.Call, capability string) error {
 			h.note("authorize %s for %s", call.Actor, capability)
@@ -73,6 +101,16 @@ func TestRunRefusesARunThatLeavesANeededFlagBlank(t *testing.T) {
 			"myapp: report:schedule wants -owner <email>\n"},
 		{"no interval where the zero value is not blank", []string{"report:schedule", "-owner", actingAccount},
 			"myapp: report:schedule wants -every <interval>\n"},
+		{"no time on a flag that reads empty", []string{"report:remind"}, "myapp: report:remind wants -at <time>\n"},
+		{"a time of spaces on a flag that reads empty", []string{"report:remind", "-at", "  "},
+			"myapp: report:remind wants -at <time>\n"},
+		{"no key on a flag that reads a mask", []string{"report:seal"}, "myapp: report:seal wants -key <token>\n"},
+		{"an empty key on a flag that reads a mask", []string{"report:seal", "-key="},
+			"myapp: report:seal wants -key <token>\n"},
+		{"a key of spaces on a flag that reads a mask", []string{"report:seal", "-key", "  "},
+			"myapp: report:seal wants -key <token>\n"},
+		{"a time given twice, the last one empty", []string{"report:remind", "-at", "09:00", "-at="},
+			"myapp: report:remind wants -at <time>\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,6 +159,106 @@ func TestRunHandsTheCommandEveryNeededFlagTheLineSet(t *testing.T) {
 	want := []string{"run owner=" + actingAccount + " title= apply=true"}
 	if !slices.Equal(h.log, want) {
 		t.Errorf("calls = %q, want %q", h.log, want)
+	}
+}
+
+func TestRunReadsANeededFlagByTheTextTheLineGivesIt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"a flag that reads empty", []string{"report:remind", "-at", "09:00"}, []string{"remind at 09:00"}},
+		{"a flag that reads empty, set with an equals sign", []string{"report:remind", "-at=09:00"},
+			[]string{"remind at 09:00"}},
+		{"a flag that reads a mask", []string{"report:seal", "-key", "Q3-7"}, []string{"run owner= title= apply=true"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var h hooks
+			got := execute(t, issuing(&h), tc.args...)
+
+			if got.code != gonsole.ExitDone {
+				t.Fatalf("code = %d with stderr %q, want %d", got.code, got.stderr, gonsole.ExitDone)
+			}
+			if !slices.Equal(h.log, tc.want) {
+				t.Errorf("calls = %q, want %q", h.log, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunRefusesANeededFlagWhoseTextItCannotRead(t *testing.T) {
+	t.Parallel()
+
+	var h hooks
+	got := execute(t, issuing(&h), "report:schedule", "-owner", actingAccount, "-every", "soon")
+
+	if got.code != gonsole.ExitMisused {
+		t.Errorf("code = %d, want %d", got.code, gonsole.ExitMisused)
+	}
+	want := "myapp: report:schedule: invalid value \"soon\" for flag -every: parse error\n"
+	if firstLine(got.stderr) != want {
+		t.Errorf("stderr opens with %q, want %q", firstLine(got.stderr), want)
+	}
+	if len(h.log) != 0 {
+		t.Errorf("calls = %q, want no run", h.log)
+	}
+}
+
+// remindPage is the help page of the report:remind command issuing declares.
+const remindPage = `remind the owner of one report
+
+Usage:
+  myapp report:remind [flags]
+
+Flags:
+  -at time
+    	time of the reminder
+`
+
+func TestRunPrintsTheHelpPageOfANeededFlagAsDeclared(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		args   []string
+		code   int
+		stdout string
+		stderr string
+	}{
+		{"a help flag", []string{"report:remind", "-h"}, gonsole.ExitDone, remindPage, ""},
+		{"a help flag the flag package reads", []string{"report:remind", "-at", "09:00", "-h=true"},
+			gonsole.ExitDone, remindPage, ""},
+		{"a run that leaves the flag out", []string{"report:remind"}, gonsole.ExitMisused, "",
+			"myapp: report:remind wants -at <time>\n\n" + remindPage},
+		{"a run with a flag the command does not declare", []string{"report:remind", "-at", "09:00", "-late"},
+			gonsole.ExitMisused, "", "myapp: report:remind: flag provided but not defined: -late\n\n" + remindPage},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var h hooks
+			got := execute(t, issuing(&h), tc.args...)
+
+			if got.code != tc.code {
+				t.Errorf("code = %d, want %d", got.code, tc.code)
+			}
+			if got.stdout != tc.stdout {
+				t.Errorf("stdout = %q, want %q", got.stdout, tc.stdout)
+			}
+			if got.stderr != tc.stderr {
+				t.Errorf("stderr = %q, want %q", got.stderr, tc.stderr)
+			}
+			if len(h.log) != 0 {
+				t.Errorf("calls = %q, want none", h.log)
+			}
+		})
 	}
 }
 
