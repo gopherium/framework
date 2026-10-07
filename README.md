@@ -14,6 +14,9 @@ need and ignore the rest.
 - [`dbkit`](dbkit/) names the database engines, their error classes and
   shared types, and lends capped shares of a program's one database
   handle.
+- [`dbkit/sqlite`](dbkit/sqlite/) opens a program's one SQLite handle
+  with every connection rule on, classifies its errors and ships test
+  helpers.
 - [`gonsole`](gonsole/) runs the command line of a Go program built from
   core commands, settings and compiled plugins.
 - [`gonsole/auth`](gonsole/auth/) offers the account commands of a program
