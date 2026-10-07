@@ -72,11 +72,11 @@ func standingOf(t *testing.T, address, email string) string {
 	return fmt.Sprintf("role %q, disabled %t", held.Role, held.Disabled)
 }
 
-// refuses runs line on p and fails the test unless the run exits 1 with refusal alone on stderr.
-func refuses(t *testing.T, p gonsole.Program, refusal string, line ...string) {
+// refuses runs line on p and fails the test unless the run exits 1 with message alone on stderr.
+func refuses(t *testing.T, p gonsole.Program, message string, line ...string) {
 	t.Helper()
 	got := testkit.Run(t, p, "", line...)
-	if want := (testkit.Result{Code: gonsole.ExitFailed, Stderr: refusal}); got != want {
+	if want := (testkit.Result{Code: gonsole.ExitFailed, Stderr: message}); got != want {
 		t.Errorf("%q: Run() = %+v, want %+v", line, got, want)
 	}
 }

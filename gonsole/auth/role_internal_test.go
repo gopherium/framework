@@ -10,7 +10,7 @@ import (
 	"github.com/gopherium/gouncer"
 )
 
-func TestUncoveredWordsOnlyTheLastPrivilegedRefusal(t *testing.T) {
+func TestUncoveredWordsOnlyTheLastPrivilegedError(t *testing.T) {
 	t.Parallel()
 
 	failed := errors.New("postgres: set user role: connection reset")

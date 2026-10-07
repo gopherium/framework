@@ -93,13 +93,13 @@ func TestEnsureAccountsStopsAtAnAccountItCannotCreate(t *testing.T) {
 
 	want := "account weak@example.com: gouncer: password shorter than 12 characters"
 	if !errors.Is(err, gouncer.ErrWeakPassword) || errorText(err) != want {
-		t.Errorf("EnsureAccounts() = %v, want the weak password refusal %q", err, want)
+		t.Errorf("EnsureAccounts() = %v, want the weak password error %q", err, want)
 	}
 	if want := "created admin@example.com\n"; out.String() != want {
 		t.Errorf("wrote %q, want %q", out.String(), want)
 	}
 	if _, err := store.UserByEmail(t.Context(), "editor@example.com"); !errors.Is(err, gouncer.ErrUserNotFound) {
-		t.Errorf("the account after the refusal = %v, want it never created", err)
+		t.Errorf("the account after the error = %v, want it never created", err)
 	}
 }
 
