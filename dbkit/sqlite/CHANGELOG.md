@@ -23,6 +23,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - A panic in one of `Options.Functions` fails its statement with an error naming the function.
 - Each new connection runs `PRAGMA optimize` and notes a busy answer to `Options.Logger`.
 - `Open` switches SQLite to OFD locks where Linux allows it.
+- `Open` runs on Linux and macOS, and refuses every database on other systems.
 - `Classify`, which wraps a SQLite error in its `dbkit` error class.
 - `LibcVersion`, the pinned `modernc.org/libc` version.
 - `sqlitetest.Open`, a test handle on a fresh file with every rule on, closed when the test ends.
