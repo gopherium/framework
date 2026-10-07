@@ -18,10 +18,6 @@ import (
 // Authorize returns the check that refuses an acting account that may not run a command naming capability.
 func Authorize(cfg Config) func(ctx context.Context, call gonsole.Call, capability string) error {
 	return func(ctx context.Context, call gonsole.Call, capability string) error {
-		actor, err := actorOf(call)
-		if err != nil {
-			return err
-		}
 		if _, err := cfg.recordTimeout(call.Env); err != nil {
 			return err
 		}
@@ -33,18 +29,9 @@ func Authorize(cfg Config) func(ctx context.Context, call gonsole.Call, capabili
 			if err := recordsHeld(ctx, pool); err != nil {
 				return err
 			}
-			return may(ctx, postgres.NewUserStore(pool), roles, actor, capability)
+			return may(ctx, postgres.NewUserStore(pool), roles, address(call.Actor), capability)
 		})
 	}
-}
-
-// actorOf returns the address the call acts as, a misuse when it is blank.
-func actorOf(call gonsole.Call) (string, error) {
-	actor := address(call.Actor)
-	if actor == "" {
-		return "", gonsole.Misuse(errors.New("-as wants the address of an account"))
-	}
-	return actor, nil
 }
 
 // acting returns the account at the address actor, an error naming the address when no account holds it.

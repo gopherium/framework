@@ -27,12 +27,8 @@ func withReach(ctx context.Context, call gonsole.Call, cfg Config, roles Roles,
 			return use(store, reach{})
 		})
 	}
-	actor, err := actorOf(call)
-	if err != nil {
-		return err
-	}
 	return withStore(ctx, call, func(store *postgres.UserStore) error {
-		user, err := acting(ctx, store, actor)
+		user, err := acting(ctx, store, address(call.Actor))
 		if err != nil {
 			return err
 		}
