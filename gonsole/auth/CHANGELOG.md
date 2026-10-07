@@ -8,6 +8,14 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
+## [Unreleased]
+
+### Changed
+
+- A blank `-as` now gets the `gonsole` message, `<command> wants -as <email>`.
+- `Authorize` no longer checks for a blank actor itself.
+- Requires `gonsole` 0.6.1.
+
 ## [0.4.0] - 2026-10-05
 
 ### Changed

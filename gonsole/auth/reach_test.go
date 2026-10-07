@@ -72,11 +72,11 @@ func standingOf(t *testing.T, address, email string) string {
 	return fmt.Sprintf("role %q, disabled %t", held.Role, held.Disabled)
 }
 
-// refuses runs line on p and fails the test unless the run exits 1 with refusal alone on stderr.
-func refuses(t *testing.T, p gonsole.Program, refusal string, line ...string) {
+// refuses runs line on p and fails the test unless the run exits 1 with message alone on stderr.
+func refuses(t *testing.T, p gonsole.Program, message string, line ...string) {
 	t.Helper()
 	got := testkit.Run(t, p, "", line...)
-	if want := (testkit.Result{Code: gonsole.ExitFailed, Stderr: refusal}); got != want {
+	if want := (testkit.Result{Code: gonsole.ExitFailed, Stderr: message}); got != want {
 		t.Errorf("%q: Run() = %+v, want %+v", line, got, want)
 	}
 }
@@ -258,7 +258,7 @@ func TestAccountCommandsTreatABlankActingAddressAsAMisuse(t *testing.T) {
 
 			got := testkit.Run(t, p, "", slices.Concat(line, []string{"-as", "   "})...)
 
-			if want := "myapp: -as wants the address of an account\n"; got.Code != gonsole.ExitMisused ||
+			if want := "myapp: " + line[0] + " wants -as <email>\n"; got.Code != gonsole.ExitMisused ||
 				!strings.HasPrefix(got.Stderr, want) {
 				t.Errorf("Run() = %+v, want exit 2 opening with %q", got, want)
 			}

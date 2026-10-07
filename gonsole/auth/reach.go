@@ -27,12 +27,8 @@ func withReach(ctx context.Context, call gonsole.Call, cfg Config, roles Roles,
 			return use(store, reach{})
 		})
 	}
-	actor, err := actorOf(call)
-	if err != nil {
-		return err
-	}
 	return withStore(ctx, call, func(store *postgres.UserStore) error {
-		user, err := acting(ctx, store, actor)
+		user, err := acting(ctx, store, address(call.Actor))
 		if err != nil {
 			return err
 		}
@@ -69,7 +65,7 @@ func (r reach) sets(held gouncer.User, disabled bool) error {
 	return r.changes(held)
 }
 
-// lacking returns the refusal naming the first capability of role the acting account's role lacks, nil for none.
+// lacking returns the error naming the first capability of role the acting account's role lacks, nil for none.
 func (r reach) lacking(subject, role string) error {
 	for _, capability := range r.carried[role] {
 		if !slices.Contains(r.carried[r.actor.Role], capability) {
