@@ -196,6 +196,8 @@ func TestRunRefusesACommandThatNeedsAnActingAccountWithoutOne(t *testing.T) {
 	}{
 		{"no -as", []string{"report:revoke", "-yes", "Q3"}},
 		{"an empty -as", []string{"report:revoke", "-as=", "-yes", "Q3"}},
+		{"an -as of spaces", []string{"report:revoke", "-as", "  ", "-yes", "Q3"}},
+		{"an -as of a tab and spaces", []string{"report:revoke", "-as= \t ", "-yes", "Q3"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -214,6 +216,26 @@ func TestRunRefusesACommandThatNeedsAnActingAccountWithoutOne(t *testing.T) {
 				t.Errorf("calls = %q, want none", h.log)
 			}
 		})
+	}
+}
+
+func TestRunHandsOverTheActingAccountAsTyped(t *testing.T) {
+	t.Parallel()
+
+	const address = " Maria.Perez@Example.com "
+	var h hooks
+	got := execute(t, guarded(&h), "report:export", "-as", address)
+
+	if got.code != gonsole.ExitDone {
+		t.Fatalf("code = %d with stderr %q, want %d", got.code, got.stderr, gonsole.ExitDone)
+	}
+	want := []string{
+		"authorize " + address + " for export_reports [] apply=true",
+		"run [] as " + address + " apply=true",
+		"record " + address + " ran report:export [] apply=true",
+	}
+	if !slices.Equal(h.log, want) {
+		t.Errorf("calls = %q, want %q", h.log, want)
 	}
 }
 

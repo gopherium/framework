@@ -8,6 +8,13 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/vX.Y.Z`.
 
+## [Unreleased]
+
+### Fixed
+
+- `Command.Needs` reads the text the line gives a needed flag, so a needed `fs.Func` flag the line sets no longer exits 2.
+- A blank `-as` exits 2 before `Authorize`, like a missing one.
+
 ## [0.6.0] - 2026-10-05
 
 ### Added
