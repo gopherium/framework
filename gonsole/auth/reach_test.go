@@ -258,7 +258,7 @@ func TestAccountCommandsTreatABlankActingAddressAsAMisuse(t *testing.T) {
 
 			got := testkit.Run(t, p, "", slices.Concat(line, []string{"-as", "   "})...)
 
-			if want := "myapp: -as wants the address of an account\n"; got.Code != gonsole.ExitMisused ||
+			if want := "myapp: " + line[0] + " wants -as <email>\n"; got.Code != gonsole.ExitMisused ||
 				!strings.HasPrefix(got.Stderr, want) {
 				t.Errorf("Run() = %+v, want exit 2 opening with %q", got, want)
 			}

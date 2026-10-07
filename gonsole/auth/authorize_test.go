@@ -102,15 +102,14 @@ func TestAuthorizeChecksADryRunToo(t *testing.T) {
 	}
 }
 
-func TestAuthorizeTreatsABlankActorAsAMisuse(t *testing.T) {
+func TestAuthorizeNeverRunsForABlankActor(t *testing.T) {
 	t.Parallel()
 
-	address := recorded(t)
-	p := authorizing(address, checked(), nil, command("report:purge"))
+	p := authorizing("postgres://postgres@127.0.0.1:1/none?connect_timeout=1", checked(), nil, command("report:purge"))
 
 	got := testkit.Run(t, p, "", "report:purge", "-as", "   ")
 
-	if got.Code != gonsole.ExitMisused || !strings.HasPrefix(got.Stderr, "myapp: -as wants the address of an account\n") {
+	if got.Code != gonsole.ExitMisused || !strings.HasPrefix(got.Stderr, "myapp: report:purge wants -as <email>\n") {
 		t.Errorf("code %d, stderr %q, want 2 and the misuse", got.Code, got.Stderr)
 	}
 }
