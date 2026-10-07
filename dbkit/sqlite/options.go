@@ -46,7 +46,7 @@ type Options struct {
 	Synchronous Synchronous
 	// JournalSizeLimit is the size in bytes the write-ahead log keeps after a checkpoint, and nil sets no limit.
 	JournalSizeLimit *int64
-	// Functions are the Go functions SQL may call, and nil means none.
+	// Functions are the Go functions SQL may call, one list built once per process, and nil means none.
 	Functions *dbkit.FunctionList
 	// BaseFolder is the absolute folder a relative path resolves against, and empty refuses a relative path.
 	BaseFolder string
