@@ -91,9 +91,12 @@ func (s *snapshotter) copyLocked(ctx context.Context, target string) (err error)
 	return nil
 }
 
-// prepare checks target, takes the snapshot lock of its folder and starts its copy, and returns the copy's path.
+// prepare checks target and its folders, takes the snapshot lock and starts the copy, and returns the copy's path.
 func (s *snapshotter) prepare(ctx context.Context, target string) (string, *fileLocker, error) {
 	if err := checkTarget(target); err != nil {
+		return "", nil, err
+	}
+	if err := checkRootFolder(filepath.Dir(target)); err != nil {
 		return "", nil, err
 	}
 	path, live, err := s.liveFile(ctx)

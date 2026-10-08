@@ -44,6 +44,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - After its context ends, `Rebuild` rolls back before foreign keys go back on, and its connection returns to the pool.
 - `NewSnapshotter`, a copy through `VACUUM INTO`, checked and moved into place, then a `PRAGMA wal_checkpoint(TRUNCATE)` it reports.
 - `Snapshot` refuses a target that exists, is relative, differs from its `filepath.Clean` form, starts with `file:`, holds `?` or ends with `.dbkit-snapshot.partial` or `.dbkit-snapshot.partial-journal`.
+- A `Snapshot` as root refuses a target folder that a user other than root owns or may write in, and any such folder above it through every link unless it is sticky.
 - `Snapshot` removes only the regular `.dbkit-snapshot.partial` and `.dbkit-snapshot.partial-journal` files left in its folder, never the live database file.
 - `Snapshot` holds a `.dbkit-snapshot.lock` file in its folder and fails with `ErrSnapshotRunning` while another snapshot holds it.
 - Both locks fail on a lock path that holds a hard link, a FIFO, a device or anything but a regular file with one link.

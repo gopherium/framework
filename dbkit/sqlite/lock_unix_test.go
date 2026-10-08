@@ -10,9 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,6 +49,15 @@ const (
 	lockRootUID = 0
 	// lockServiceUID is the user id of a service user that is not root.
 	lockServiceUID = 1000
+)
+
+const (
+	// lockGroupWritableMode is the mode of a folder its group may write in.
+	lockGroupWritableMode fs.FileMode = 0o770
+	// lockOthersWritableMode is the mode of a folder others may write in.
+	lockOthersWritableMode fs.FileMode = 0o707
+	// lockStickyOthersWritableMode is the mode of a folder others may write in, with the sticky bit.
+	lockStickyOthersWritableMode = fs.ModeSticky | 0o777
 )
 
 // lockOutput is the output of a lock holder, which reports when the holder prints lockHeld.
@@ -674,6 +685,7 @@ func TestAHardLinkAtTheSnapshotLockIsRefused(t *testing.T) {
 			}
 			lockRegroup(t, path)
 			folder := internalFolder(t)
+			lockRootChain(t, folder)
 			lock := filepath.Join(folder, snapshotLockFile)
 			linked := lockLinked(t, lock)
 			uid, gid := lockOwner(t, linked)
@@ -721,6 +733,7 @@ func TestTheSnapshotLockOfARunAsRootBelongsToTheDatabaseOwner(t *testing.T) {
 	lockRegroup(t, path)
 	lockAs(t, lockRootUID)
 	folder := internalFolder(t)
+	lockRootChain(t, folder)
 
 	if _, err := NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db")); err != nil {
 		t.Fatalf("Snapshot() error = %v, want nil", err)
@@ -762,6 +775,7 @@ func TestARunAsRootKeepsTheOwnerOfALockFileThatExists(t *testing.T) {
 	})
 	t.Run("the snapshot lock", func(t *testing.T) {
 		db, folder := internalSnapshotOpen(t)
+		lockRootChain(t, folder)
 		lock := filepath.Join(folder, snapshotLockFile)
 		uid, gid := lockExisting(t, lock)
 		lockAs(t, lockRootUID)
@@ -834,4 +848,324 @@ func TestALockFileRemovedBetweenTheOpensFailsTheLock(t *testing.T) {
 	if _, err := os.Lstat(lock); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("Lstat(%s) error = %v, want the removed lock file never made again", lock, err)
 	}
+}
+
+// lockAbove returns every folder above path, up to and holding /.
+func lockAbove(path string) []string {
+	var above []string
+	for path != "/" {
+		path = filepath.Dir(path)
+		above = append(above, path)
+	}
+	return above
+}
+
+// lockRootOwns puts in place of lstat one that answers root as the owner of each path in owned, and counts its calls.
+func lockRootOwns(t *testing.T, owned ...string) *atomic.Int32 {
+	t.Helper()
+	calls := &atomic.Int32{}
+	kept := lstat
+	lstat = func(path string, st *unix.Stat_t) error {
+		calls.Add(1)
+		err := kept(path, st)
+		if slices.Contains(owned, path) {
+			st.Uid = lockRootUID
+		}
+		return err
+	}
+	t.Cleanup(func() { lstat = kept })
+	return calls
+}
+
+// lockRootChain puts in place of lstat one that answers root as the owner of folder and of every folder above it.
+func lockRootChain(t *testing.T, folder string) {
+	t.Helper()
+	lockRootOwns(t, append(lockAbove(folder), folder)...)
+}
+
+// lockSymlink makes a link at path that holds text.
+func lockSymlink(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.Symlink(text, path); err != nil {
+		t.Fatalf("Symlink(%s, %s) error = %v, want nil", text, path, err)
+	}
+}
+
+// lockChmod gives the folder at path the mode.
+func lockChmod(t *testing.T, path string, mode fs.FileMode) {
+	t.Helper()
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatalf("Chmod(%s, %v) error = %v, want nil", path, mode, err)
+	}
+}
+
+// lockOwnedByTheTestUser returns the error of a snapshot as root whose first failing folder is path.
+func lockOwnedByTheTestUser(path string) string {
+	return fmt.Sprintf("dbkit: a snapshot as root needs a folder only root can change, and %s belongs to user %d",
+		path, os.Geteuid())
+}
+
+// lockWritableByOthers returns the error of a snapshot as root whose first failing folder is path, with mode.
+func lockWritableByOthers(path string, mode fs.FileMode) string {
+	return fmt.Sprintf("dbkit: a snapshot as root needs a folder only root can change, and %s, mode %04o, "+
+		"is writable by its group or others without the sticky bit", path, lockUnixMode(mode))
+}
+
+// lockTargetWritableByOthers returns the error of a root snapshot whose target folder at path, with mode, is writable.
+func lockTargetWritableByOthers(path string, mode fs.FileMode) string {
+	return fmt.Sprintf("dbkit: a snapshot as root needs a folder only root can change, and the target folder %s, "+
+		"mode %04o, is writable by its group or others", path, lockUnixMode(mode))
+}
+
+// lockUnixMode returns the unix mode bits of the folder mode, the sticky bit included.
+func lockUnixMode(mode fs.FileMode) uint32 {
+	bits := uint32(mode.Perm())
+	if mode&fs.ModeSticky != 0 {
+		bits |= unix.S_ISVTX
+	}
+	return bits
+}
+
+// lockMustRefuseAsRoot fails the test unless a snapshot of db to target answers no snapshot and want, with no lock try.
+func lockMustRefuseAsRoot(t *testing.T, db *sql.DB, target, want string) {
+	t.Helper()
+	tries := lockTries(t)
+	got, err := NewSnapshotter(db).Snapshot(t.Context(), target)
+	if err == nil || err.Error() != want || got.Path != "" {
+		t.Errorf("Snapshot(%q) = %+v, %v, want no snapshot and %q", target, got, err, want)
+	}
+	lockNeverTried(t, tries)
+}
+
+// lockMustTakeAsRoot fails the test unless a snapshot of db to target answers the path target.
+func lockMustTakeAsRoot(t *testing.T, db *sql.DB, target string) {
+	t.Helper()
+	if got, err := NewSnapshotter(db).Snapshot(t.Context(), target); err != nil || got.Path != target {
+		t.Fatalf("Snapshot(%q) = %+v, %v, want the path %s", target, got, err, target)
+	}
+}
+
+func TestASnapshotAsRootRefusesAFolderAnotherUserCanChange(t *testing.T) {
+	t.Run("a target folder the test user owns", func(t *testing.T) {
+		db, folder := internalSnapshotOpen(t)
+		lockRootOwns(t, lockAbove(folder)...)
+		lockAs(t, lockRootUID)
+
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "copy.db"), lockOwnedByTheTestUser(folder))
+
+		internalMustHoldOnly(t, folder)
+	})
+	t.Run("a root folder whose parent the test user owns", func(t *testing.T) {
+		db, folder := internalSnapshotOpen(t)
+		parent := filepath.Dir(folder)
+		lockRootOwns(t, append(lockAbove(parent), folder)...)
+		lockAs(t, lockRootUID)
+
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "copy.db"), lockOwnedByTheTestUser(parent))
+
+		internalMustHoldOnly(t, folder)
+	})
+	for _, tc := range []struct {
+		// name names the folder.
+		name string
+		// mode is the mode of the target folder.
+		mode fs.FileMode
+	}{
+		{name: "a root folder its group can write in", mode: lockGroupWritableMode},
+		{name: "a root folder others can write in", mode: lockOthersWritableMode},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, folder := internalSnapshotOpen(t)
+			lockRootChain(t, folder)
+			lockChmod(t, folder, tc.mode)
+			lockAs(t, lockRootUID)
+
+			lockMustRefuseAsRoot(t, db, filepath.Join(folder, "copy.db"), lockTargetWritableByOthers(folder, tc.mode))
+
+			internalMustHoldOnly(t, folder)
+		})
+	}
+	t.Run("a root target folder others can write in with the sticky bit", func(t *testing.T) {
+		db, folder := internalSnapshotOpen(t)
+		lockRootChain(t, folder)
+		lockChmod(t, folder, lockStickyOthersWritableMode)
+		lockAs(t, lockRootUID)
+
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "copy.db"),
+			lockTargetWritableByOthers(folder, lockStickyOthersWritableMode))
+
+		internalMustHoldOnly(t, folder)
+	})
+	t.Run("a root folder above the target its group can write in", func(t *testing.T) {
+		db, parent := internalSnapshotOpen(t)
+		folder := filepath.Join(parent, "inner")
+		if err := os.Mkdir(folder, 0o700); err != nil {
+			t.Fatalf("Mkdir() error = %v, want nil", err)
+		}
+		lockRootChain(t, folder)
+		lockChmod(t, parent, lockGroupWritableMode)
+		lockAs(t, lockRootUID)
+
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "copy.db"), lockWritableByOthers(parent, lockGroupWritableMode))
+
+		internalMustHoldOnly(t, folder)
+	})
+}
+
+func TestTheRootFolderCheckStopsAtALinkLoop(t *testing.T) {
+	folder := internalFolder(t)
+	lockSymlink(t, filepath.Join(folder, "loop"), "loop")
+	lockRootChain(t, folder)
+	lockAs(t, lockRootUID)
+	path := filepath.Join(folder, "loop", "inner")
+
+	err := checkRootFolder(path)
+
+	want := "dbkit: check the snapshot folder " + path + ": " + unix.ELOOP.Error()
+	if !errors.Is(err, unix.ELOOP) || err.Error() != want {
+		t.Errorf("checkRootFolder(%s) error = %v, want %q marked ELOOP", path, err, want)
+	}
+}
+
+func TestASnapshotAsRootChecksEveryFolderALinkLeadsThrough(t *testing.T) {
+	t.Run("a link to a folder the test user owns", func(t *testing.T) {
+		db, folder := internalSnapshotOpen(t)
+		linked := internalFolder(t)
+		lockSymlink(t, filepath.Join(folder, "link"), linked)
+		lockRootChain(t, folder)
+		lockAs(t, lockRootUID)
+
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "link", "copy.db"), lockOwnedByTheTestUser(linked))
+
+		internalMustHoldOnly(t, folder, "link")
+		internalMustHoldOnly(t, linked)
+	})
+	t.Run("a link to a root folder, in a folder the test user owns", func(t *testing.T) {
+		db, folder := internalSnapshotOpen(t)
+		linked := internalFolder(t)
+		lockSymlink(t, filepath.Join(folder, "link"), linked)
+		lockRootOwns(t, lockAbove(folder)...)
+		lockRootChain(t, linked)
+		lockAs(t, lockRootUID)
+
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "link", "copy.db"), lockOwnedByTheTestUser(folder))
+
+		internalMustHoldOnly(t, folder, "link")
+		internalMustHoldOnly(t, linked)
+	})
+	t.Run("a link inside the target of a link, in a folder the test user owns", func(t *testing.T) {
+		db, folder := internalSnapshotOpen(t)
+		between, linked := internalFolder(t), internalFolder(t)
+		lockSymlink(t, filepath.Join(between, "inner"), linked)
+		lockSymlink(t, filepath.Join(folder, "link"), filepath.Join(between, "inner"))
+		lockRootChain(t, folder)
+		lockRootChain(t, linked)
+		lockAs(t, lockRootUID)
+
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "link", "copy.db"), lockOwnedByTheTestUser(between))
+
+		internalMustHoldOnly(t, folder, "link")
+		internalMustHoldOnly(t, between, "inner")
+		internalMustHoldOnly(t, linked)
+	})
+}
+
+func TestASnapshotAsRootTakesAFolderOnlyRootCanChange(t *testing.T) {
+	t.Run("a root folder below a root folder others can write in with the sticky bit", func(t *testing.T) {
+		db, parent := internalSnapshotOpen(t)
+		folder := filepath.Join(parent, "inner")
+		if err := os.Mkdir(folder, 0o700); err != nil {
+			t.Fatalf("Mkdir() error = %v, want nil", err)
+		}
+		lockRootChain(t, folder)
+		lockChmod(t, parent, lockStickyOthersWritableMode)
+		lockAs(t, lockRootUID)
+
+		lockMustTakeAsRoot(t, db, filepath.Join(folder, "copy.db"))
+
+		internalMustHoldOnly(t, folder, snapshotLockFile, "copy.db")
+	})
+	for _, tc := range []struct {
+		// name names the link.
+		name string
+		// text is what the link holds, given the folder it leads to.
+		text func(linked string) string
+	}{
+		{name: "an absolute link to a root folder", text: func(linked string) string { return linked }},
+		{name: "a relative link through .. and . to a root folder",
+			text: func(linked string) string { return "../" + filepath.Base(linked) + "/." }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, folder := internalSnapshotOpen(t)
+			linked := internalFolder(t)
+			lockSymlink(t, filepath.Join(folder, "link"), tc.text(linked))
+			lockRootChain(t, folder)
+			lockRootChain(t, linked)
+			lockAs(t, lockRootUID)
+
+			lockMustTakeAsRoot(t, db, filepath.Join(folder, "link", "copy.db"))
+
+			internalMustHoldOnly(t, folder, "link")
+			internalMustHoldOnly(t, linked, snapshotLockFile, "copy.db")
+		})
+	}
+}
+
+func TestASnapshotAsRootIntoAMissingFolderFailsTheCheck(t *testing.T) {
+	db, folder := internalSnapshotOpen(t)
+	lockRootChain(t, folder)
+	lockAs(t, lockRootUID)
+	missing := filepath.Join(folder, "missing")
+
+	lockMustRefuseAsRoot(t, db, filepath.Join(missing, "copy.db"),
+		"dbkit: check the snapshot folder "+missing+": "+unix.ENOENT.Error())
+
+	internalMustHoldOnly(t, folder)
+}
+
+func TestALinkRemovedBeforeItIsReadStopsASnapshotAsRoot(t *testing.T) {
+	db, folder := internalSnapshotOpen(t)
+	linked := internalFolder(t)
+	link := filepath.Join(folder, "link")
+	lockSymlink(t, link, linked)
+	lockRootChain(t, folder)
+	lockRootChain(t, linked)
+	kept := lstat
+	lstat = func(path string, st *unix.Stat_t) error {
+		err := kept(path, st)
+		if path == link {
+			return errors.Join(err, os.Remove(link))
+		}
+		return err
+	}
+	t.Cleanup(func() { lstat = kept })
+	lockAs(t, lockRootUID)
+	tries := lockTries(t)
+
+	got, err := NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(link, "copy.db"))
+
+	want := "dbkit: read the link " + link + ": "
+	if !errors.Is(err, fs.ErrNotExist) || !strings.HasPrefix(err.Error(), want) || got.Path != "" {
+		t.Errorf("Snapshot() = %+v, %v, want no snapshot and an error marked ErrNotExist starting %q", got, err, want)
+	}
+	lockNeverTried(t, tries)
+	internalMustHoldOnly(t, folder)
+	internalMustHoldOnly(t, linked)
+}
+
+func TestASnapshotAsAnotherUserReadsNoFolder(t *testing.T) {
+	db, folder := internalSnapshotOpen(t)
+	calls := lockRootOwns(t)
+	lockAs(t, lockServiceUID)
+	target := filepath.Join(folder, "copy.db")
+
+	got, err := NewSnapshotter(db).Snapshot(t.Context(), target)
+
+	if err != nil || got.Path != target {
+		t.Fatalf("Snapshot() = %+v, %v, want the path %s", got, err, target)
+	}
+	if n := calls.Load(); n != 0 {
+		t.Errorf("the snapshot read %d folders, want none for a run that is not root", n)
+	}
+	internalMustHoldOnly(t, folder, snapshotLockFile, "copy.db")
 }

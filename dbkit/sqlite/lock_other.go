@@ -20,6 +20,11 @@ func (l *fileLocker) tryLock(error) error {
 	return l.refuse()
 }
 
+// checkRootFolder checks nothing outside linux and darwin, where the snapshot lock refuses every run.
+func checkRootFolder(string) error {
+	return nil
+}
+
 // refuse returns the error of a lock outside linux and darwin.
 func (l *fileLocker) refuse() error {
 	return fmt.Errorf("dbkit: the %s works on linux and darwin only, and refuses %s", l.name, runtime.GOOS)

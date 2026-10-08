@@ -9,9 +9,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
+)
+
+const (
+	// rootOnlyNeed starts the error of a snapshot as root into a folder another user can change.
+	rootOnlyNeed = "dbkit: a snapshot as root needs a folder only root can change, "
+	// maxRootLinks is the most links a walk to a snapshot folder follows, the limit of the linux kernel.
+	maxRootLinks = 40
 )
 
 var (
@@ -21,6 +30,8 @@ var (
 	fstat = unix.Fstat
 	// geteuid returns the effective user id of the process.
 	geteuid = os.Geteuid
+	// lstat reads the facts of the file at path, never through a link at its end.
+	lstat = unix.Lstat
 	// openFile opens the named file with the given flags and, for a file it creates, the given mode.
 	openFile = os.OpenFile
 )
@@ -90,6 +101,75 @@ func (l *fileLocker) own(file *os.File) error {
 	}
 	if err != nil {
 		return fmt.Errorf("dbkit: give the %s %s the owner of %s: %w", l.name, l.path, l.database, err)
+	}
+	return nil
+}
+
+// checkRootFolder returns, as root, the error for the first folder on the way from / to folder another user can change.
+func checkRootFolder(folder string) error {
+	if geteuid() != 0 {
+		return nil
+	}
+	walk := &rootWalk{folder: folder, at: "/", names: strings.Split(folder, "/")}
+	for len(walk.names) > 0 {
+		if err := walk.step(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rootWalk is a walk from / to a snapshot folder that follows every link on the way.
+type rootWalk struct {
+	// folder is the snapshot folder the walk ends on.
+	folder string
+	// at is the folder the walk has reached, with no link in it.
+	at string
+	// names are the names left between at and the end of the walk.
+	names []string
+	// links counts the links the walk followed.
+	links int
+}
+
+// step checks the first name left in the folder the walk has reached, and moves the walk past it.
+func (w *rootWalk) step() error {
+	next := filepath.Join(w.at, w.names[0])
+	var st unix.Stat_t
+	if err := lstat(next, &st); err != nil {
+		return fmt.Errorf("dbkit: check the snapshot folder %s: %w", next, err)
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFLNK {
+		last := len(w.names) == 1
+		w.at, w.names = next, w.names[1:]
+		return rootOnly(next, &st, last)
+	}
+	w.links++
+	if w.links > maxRootLinks {
+		return fmt.Errorf("dbkit: check the snapshot folder %s: %w", w.folder, unix.ELOOP)
+	}
+	text, err := os.Readlink(next)
+	if err != nil {
+		return fmt.Errorf("dbkit: read the link %s: %w", next, err)
+	}
+	if filepath.IsAbs(text) {
+		w.at = "/"
+	}
+	w.names = append(strings.Split(text, "/"), w.names[1:]...)
+	return nil
+}
+
+// rootOnly returns the error for the folder at path with the facts st when a user other than root can change it.
+func rootOnly(path string, st *unix.Stat_t, target bool) error {
+	writable := st.Mode&(unix.S_IWGRP|unix.S_IWOTH) != 0
+	switch {
+	case st.Uid != 0:
+		return fmt.Errorf(rootOnlyNeed+"and %s belongs to user %d", path, st.Uid)
+	case writable && target:
+		return fmt.Errorf(rootOnlyNeed+"and the target folder %s, mode %04o, is writable by its group or others",
+			path, st.Mode&^unix.S_IFMT)
+	case writable && st.Mode&unix.S_ISVTX == 0:
+		return fmt.Errorf(rootOnlyNeed+"and %s, mode %04o, is writable by its group or others without the sticky bit",
+			path, st.Mode&^unix.S_IFMT)
 	}
 	return nil
 }
