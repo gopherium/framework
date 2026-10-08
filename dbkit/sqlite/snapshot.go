@@ -179,6 +179,8 @@ func checkTarget(target string) error {
 		return fmt.Errorf("dbkit: the snapshot target must be a plain path, not a file: URI, got %q", target)
 	case !filepath.IsAbs(target):
 		return fmt.Errorf("dbkit: the snapshot target must be an absolute path, got %q", target)
+	case target != filepath.Clean(target):
+		return fmt.Errorf("dbkit: the snapshot target must be a clean path, got %q", target)
 	case strings.Contains(target, "?"):
 		return fmt.Errorf("dbkit: the snapshot target must hold no ?, got %q", target)
 	case strings.HasSuffix(target, partialSuffix):

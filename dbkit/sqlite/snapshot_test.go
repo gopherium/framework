@@ -128,6 +128,20 @@ func snapshotFolder(t *testing.T) string {
 	return folder
 }
 
+// snapshotLinkFolder links name in folder to the empty folder linked in a fresh folder and returns the fresh folder.
+func snapshotLinkFolder(t *testing.T, folder, name string) string {
+	t.Helper()
+	parent := snapshotFolder(t)
+	linked := filepath.Join(parent, "linked")
+	if err := os.Mkdir(linked, 0o700); err != nil {
+		t.Fatalf("Mkdir() error = %v, want nil", err)
+	}
+	if err := os.Symlink(linked, filepath.Join(folder, name)); err != nil {
+		t.Fatalf("Symlink() error = %v, want nil", err)
+	}
+	return parent
+}
+
 // snapshotOpen returns a handle with opts on a fresh file, and the file's path.
 func snapshotOpen(t *testing.T, opts sqlite.Options) (*sql.DB, string) {
 	t.Helper()
@@ -874,6 +888,56 @@ func TestSnapshotRefusesARelativeTarget(t *testing.T) {
 		strconv.Quote(target))
 
 	snapshotMustBeEmpty(t, folder)
+}
+
+func TestSnapshotRefusesATargetThatIsNotClean(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		// name names the target.
+		name string
+		// rest follows the folder in the target.
+		rest string
+	}{
+		{name: "a target holding /../ after a link", rest: "/link/../copy.db"},
+		{name: "a target holding /./", rest: "/./copy.db"},
+		{name: "a target holding a doubled slash", rest: "//copy.db"},
+		{name: "a target ending with a slash", rest: "/copy.db/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db, _ := snapshotOpen(t, testOptions())
+			rulesExec(t, db, "CREATE TABLE snapshot_rows (a INTEGER NOT NULL)")
+			folder := snapshotFolder(t)
+			parent := snapshotLinkFolder(t, folder, "link")
+			target := folder + tc.rest
+
+			snapshotMustRefuse(t, db, target, "dbkit: the snapshot target must be a clean path, got "+
+				strconv.Quote(target))
+
+			snapshotMustHoldOnly(t, folder, "link")
+			snapshotMustHoldOnly(t, parent, "linked")
+			snapshotMustBeEmpty(t, filepath.Join(parent, "linked"))
+		})
+	}
+}
+
+func TestSnapshotTakesACleanTargetBehindALink(t *testing.T) {
+	t.Parallel()
+
+	db, _ := snapshotOpen(t, testOptions())
+	rulesExec(t, db, "CREATE TABLE snapshot_rows (a INTEGER NOT NULL)")
+	folder := snapshotFolder(t)
+	parent := snapshotLinkFolder(t, folder, "link")
+	target := filepath.Join(folder, "link", "copy.db")
+
+	got, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), target)
+
+	if err != nil || got.Path != target {
+		t.Fatalf("Snapshot() = %+v, %v, want the path %s", got, err, target)
+	}
+	snapshotMustHoldOnly(t, folder, "link")
+	snapshotMustHoldOnly(t, filepath.Join(parent, "linked"), snapshotLock, "copy.db")
 }
 
 func TestSnapshotRefusesATargetUnderAFile(t *testing.T) {
