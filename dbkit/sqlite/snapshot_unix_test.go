@@ -90,6 +90,51 @@ func TestSnapshotNeverFollowsALinkAtTheLockPath(t *testing.T) {
 	snapshotMustHoldOnly(t, folder, snapshotLock)
 }
 
+func TestSnapshotRefusesAFIFOAtTheLockPath(t *testing.T) {
+	t.Parallel()
+
+	db, folder := snapshotLockOpen(t)
+	lock := filepath.Join(folder, snapshotLock)
+	if err := syscall.Mkfifo(lock, 0o600); err != nil {
+		t.Fatalf("Mkfifo() error = %v, want nil", err)
+	}
+	var got dbkit.Snapshot
+
+	err := migrateAtOnce(t, func() error {
+		var err error
+		got, err = sqlite.NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
+		return err
+	})
+
+	want := "dbkit: the snapshot lock " + lock + " must be a regular file with one link"
+	if err == nil || err.Error() != want || got != (dbkit.Snapshot{}) {
+		t.Errorf("Snapshot() = %+v, %v, want no snapshot and %q", got, err, want)
+	}
+	snapshotMustHoldOnly(t, folder, snapshotLock)
+}
+
+func TestSnapshotTakesALockFileThatAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	db, folder := snapshotLockOpen(t)
+	lock := filepath.Join(folder, snapshotLock)
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v, want nil", err)
+	}
+	before := migrateLockInfo(t, lock)
+	target := filepath.Join(folder, "copy.db")
+
+	got, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), target)
+
+	if err != nil || got.Path != target {
+		t.Fatalf("Snapshot() = %+v, %v, want the path %s", got, err, target)
+	}
+	if !os.SameFile(before, migrateLockInfo(t, lock)) {
+		t.Errorf("the snapshot lock changed, want the existing regular file kept as the lock")
+	}
+	snapshotMustHoldOnly(t, folder, snapshotLock, "copy.db")
+}
+
 func TestSnapshotRefusesAFolderItCannotList(t *testing.T) {
 	t.Parallel()
 

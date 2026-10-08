@@ -38,7 +38,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - The migration lock waits up to `LockWait`, ends with the context, and is gone when its holder dies. Its file has mode 0600 and is never deleted.
 - `Migrate` takes the migration lock before goose uses the handle, so a waiting run holds no connection and a first run waits for the lock.
 - `Migrate` refuses a `Table` that is a SQLite keyword or starts with `sqlite_`, in any case.
-- A run as root gives the migration lock file the owner and group of the database file.
+- A run as root gives the owner and group of the database file only to a migration or snapshot lock file it creates.
 - `Rebuild`, a table rebuild with foreign keys off from a goose `RunDB` migration, skipped when `done` finds the new shape in place.
 - `Rebuild` fails on any row `PRAGMA foreign_key_check` reports, and never returns a connection with foreign keys off to the pool.
 - After its context ends, `Rebuild` rolls back before foreign keys go back on, and its connection returns to the pool.
@@ -46,6 +46,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - `Snapshot` refuses a target that exists, is relative, differs from its `filepath.Clean` form, starts with `file:`, holds `?` or ends with `.dbkit-snapshot.partial` or `.dbkit-snapshot.partial-journal`.
 - `Snapshot` removes only the regular `.dbkit-snapshot.partial` and `.dbkit-snapshot.partial-journal` files left in its folder, never the live database file.
 - `Snapshot` holds a `.dbkit-snapshot.lock` file in its folder and fails with `ErrSnapshotRunning` while another snapshot holds it.
+- Both locks fail on a lock path that holds a hard link, a FIFO, a device or anything but a regular file with one link.
 - A snapshot is never readable more widely than the live database file.
 - The final move of a snapshot never replaces a file that appeared at the target during the copy.
 - `sqlitetest.NewTemplate`, a file migrated once, with `Template.Open`, `Template.OpenWithFaults` and `Template.Close`.

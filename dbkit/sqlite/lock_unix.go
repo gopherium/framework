@@ -17,8 +17,12 @@ import (
 var (
 	// flock applies or removes an advisory lock on the open file fd.
 	flock = unix.Flock
+	// fstat reads the facts of the open file fd.
+	fstat = unix.Fstat
 	// geteuid returns the effective user id of the process.
 	geteuid = os.Geteuid
+	// openFile opens the named file with the given flags and, for a file it creates, the given mode.
+	openFile = os.OpenFile
 )
 
 // lock holds an exclusive lock on the lock file, waiting while another holds it.
@@ -31,19 +35,46 @@ func (l *fileLocker) tryLock(held error) error {
 	return l.hold(func(fd int) error { return l.try(fd, held) })
 }
 
-// hold opens the lock file, never through a link, gives it its owner and locks it through take.
+// hold opens the lock file, never through a link, checks it, gives a new one its owner and locks it through take.
 func (l *fileLocker) hold(take func(fd int) error) error {
-	file, err := os.OpenFile(l.path, os.O_RDWR|os.O_CREATE|unix.O_NOFOLLOW, 0o600)
+	file, created, err := l.open()
 	if err != nil {
 		return fmt.Errorf("dbkit: open the %s %s: %w", l.name, l.path, err)
 	}
-	if err := l.own(file); err != nil {
+	if err := l.check(file); err != nil {
 		return errors.Join(err, file.Close())
+	}
+	if created {
+		if err := l.own(file); err != nil {
+			return errors.Join(err, file.Close())
+		}
 	}
 	if err := take(int(file.Fd())); err != nil {
 		return errors.Join(err, file.Close())
 	}
 	l.file = file
+	return nil
+}
+
+// open creates the lock file or opens the one that exists, never through a link, and reports whether it created it.
+func (l *fileLocker) open() (*os.File, bool, error) {
+	file, err := openFile(l.path, os.O_RDWR|os.O_CREATE|os.O_EXCL|unix.O_NOFOLLOW, 0o600)
+	if !errors.Is(err, unix.EEXIST) {
+		return file, err == nil, err
+	}
+	file, err = openFile(l.path, os.O_RDWR|unix.O_NOFOLLOW, 0)
+	return file, false, err
+}
+
+// check returns the error for an open lock file that is not a regular file with exactly one link.
+func (l *fileLocker) check(file *os.File) error {
+	var st unix.Stat_t
+	if err := fstat(int(file.Fd()), &st); err != nil {
+		return fmt.Errorf("dbkit: check the %s %s: %w", l.name, l.path, err)
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 {
+		return fmt.Errorf("dbkit: the %s %s must be a regular file with one link", l.name, l.path)
+	}
 	return nil
 }
 

@@ -595,6 +595,124 @@ func TestAFailedSnapshotLockCallStopsTheSnapshot(t *testing.T) {
 	internalMustHoldOnly(t, folder, snapshotLockFile)
 }
 
+// lockLinked makes a regular file in a fresh folder, links it again at lock so it has two links, and returns its path.
+func lockLinked(t *testing.T, lock string) string {
+	t.Helper()
+	linked := filepath.Join(internalFolder(t), "linked")
+	if err := os.WriteFile(linked, []byte("linked bytes"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v, want nil", err)
+	}
+	if err := os.Link(linked, lock); err != nil {
+		t.Fatalf("Link() error = %v, want nil", err)
+	}
+	return linked
+}
+
+// lockNeverTried fails the test when a run that returned tried the lock.
+func lockNeverTried(t *testing.T, tries <-chan error) {
+	t.Helper()
+	select {
+	case err := <-tries:
+		t.Errorf("the run tried the lock and got %v, want no try", err)
+	default:
+	}
+}
+
+// lockMustKeepOwner fails the test unless the file at path still belongs to uid and gid.
+func lockMustKeepOwner(t *testing.T, path string, uid, gid int) {
+	t.Helper()
+	if gotUID, gotGID := lockOwner(t, path); gotUID != uid || gotGID != gid {
+		t.Errorf("%s belongs to %d:%d, want its own %d:%d", path, gotUID, gotGID, uid, gid)
+	}
+}
+
+// lockRuns are the users a run of a lock test runs as.
+var lockRuns = []struct {
+	// name names the user.
+	name string
+	// uid is the effective user id of the run.
+	uid int
+}{
+	{name: "a run as root", uid: lockRootUID},
+	{name: "a run as another user", uid: lockServiceUID},
+}
+
+func TestAHardLinkAtTheMigrationLockIsRefused(t *testing.T) {
+	for _, tc := range lockRuns {
+		t.Run(tc.name, func(t *testing.T) {
+			db, path := lockOpen(t)
+			lockRegroup(t, path)
+			lock := path + lockSuffix
+			linked := lockLinked(t, lock)
+			uid, gid := lockOwner(t, linked)
+			lockAs(t, tc.uid)
+			tries := lockTries(t)
+			var runs atomic.Int32
+
+			err := Migrate(t.Context(), db, lockMigrations(&runs, lockLongWait))
+
+			want := "dbkit: run the migrations of " + lockTable + ": dbkit: the migration lock " + lock +
+				" must be a regular file with one link"
+			if err == nil || err.Error() != want {
+				t.Errorf("Migrate() error = %v, want %q", err, want)
+			}
+			lockMustKeepOwner(t, linked, uid, gid)
+			lockNeverTried(t, tries)
+			if got := runs.Load(); got != 0 {
+				t.Errorf("the run applied version 1 %d times, want none", got)
+			}
+		})
+	}
+}
+
+func TestAHardLinkAtTheSnapshotLockIsRefused(t *testing.T) {
+	for _, tc := range lockRuns {
+		t.Run(tc.name, func(t *testing.T) {
+			db, path := lockOpen(t)
+			if _, err := db.ExecContext(t.Context(), "CREATE TABLE lock_rows (a INTEGER NOT NULL)"); err != nil {
+				t.Fatalf("ExecContext() error = %v, want nil", err)
+			}
+			lockRegroup(t, path)
+			folder := internalFolder(t)
+			lock := filepath.Join(folder, snapshotLockFile)
+			linked := lockLinked(t, lock)
+			uid, gid := lockOwner(t, linked)
+			lockAs(t, tc.uid)
+			tries := lockTries(t)
+
+			got, err := NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
+
+			want := "dbkit: the snapshot lock " + lock + " must be a regular file with one link"
+			if err == nil || err.Error() != want || got.Path != "" {
+				t.Errorf("Snapshot() = %+v, %v, want no snapshot and %q", got, err, want)
+			}
+			lockMustKeepOwner(t, linked, uid, gid)
+			lockNeverTried(t, tries)
+			internalMustHoldOnly(t, folder, snapshotLockFile)
+		})
+	}
+}
+
+func TestAFailedLockFileCheckStopsTheLock(t *testing.T) {
+	db, path := lockOpen(t)
+	kept := fstat
+	fstat = func(int, *unix.Stat_t) error { return unix.EIO }
+	t.Cleanup(func() { fstat = kept })
+	tries := lockTries(t)
+	var runs atomic.Int32
+
+	err := Migrate(t.Context(), db, lockMigrations(&runs, lockLongWait))
+
+	want := "dbkit: check the migration lock " + path + lockSuffix + ": " + unix.EIO.Error()
+	if !errors.Is(err, unix.EIO) || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("Migrate() error = %v, want EIO in an error ending %q", err, want)
+	}
+	lockNeverTried(t, tries)
+	if got := runs.Load(); got != 0 {
+		t.Errorf("the run applied version 1 %d times, want none", got)
+	}
+}
+
 func TestTheSnapshotLockOfARunAsRootBelongsToTheDatabaseOwner(t *testing.T) {
 	db, path := lockOpen(t)
 	if _, err := db.ExecContext(t.Context(), "CREATE TABLE lock_rows (a INTEGER NOT NULL)"); err != nil {
@@ -612,5 +730,108 @@ func TestTheSnapshotLockOfARunAsRootBelongsToTheDatabaseOwner(t *testing.T) {
 	if lockUID, lockGID := lockOwner(t, filepath.Join(folder, snapshotLockFile)); lockUID != uid || lockGID != gid {
 		t.Errorf("the snapshot lock belongs to %d:%d, want %d:%d, the owner of the database file",
 			lockUID, lockGID, uid, gid)
+	}
+}
+
+// lockExisting makes an empty lock file at lock in another group of the test user and returns its owner and group.
+func lockExisting(t *testing.T, lock string) (int, int) {
+	t.Helper()
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v, want nil", err)
+	}
+	lockRegroup(t, lock)
+	return lockOwner(t, lock)
+}
+
+func TestARunAsRootKeepsTheOwnerOfALockFileThatExists(t *testing.T) {
+	t.Run("the migration lock", func(t *testing.T) {
+		db, path := lockOpen(t)
+		lock := path + lockSuffix
+		uid, gid := lockExisting(t, lock)
+		lockAs(t, lockRootUID)
+		var runs atomic.Int32
+
+		if err := Migrate(t.Context(), db, lockMigrations(&runs, lockLongWait)); err != nil {
+			t.Fatalf("Migrate() error = %v, want nil", err)
+		}
+
+		lockMustKeepOwner(t, lock, uid, gid)
+		if got := runs.Load(); got != 1 {
+			t.Errorf("the run applied version 1 %d times, want once", got)
+		}
+	})
+	t.Run("the snapshot lock", func(t *testing.T) {
+		db, folder := internalSnapshotOpen(t)
+		lock := filepath.Join(folder, snapshotLockFile)
+		uid, gid := lockExisting(t, lock)
+		lockAs(t, lockRootUID)
+		target := filepath.Join(folder, "copy.db")
+
+		if got, err := NewSnapshotter(db).Snapshot(t.Context(), target); err != nil || got.Path != target {
+			t.Fatalf("Snapshot() = %+v, %v, want the path %s", got, err, target)
+		}
+
+		lockMustKeepOwner(t, lock, uid, gid)
+	})
+}
+
+func TestALinkRemovedBeforeTheLockCheckKeepsTheOwnerOfTheLinkedFile(t *testing.T) {
+	db, path := lockOpen(t)
+	lockRegroup(t, path)
+	lock := path + lockSuffix
+	linked := lockLinked(t, lock)
+	uid, gid := lockOwner(t, linked)
+	lockAs(t, lockRootUID)
+	kept := fstat
+	fstat = func(fd int, st *unix.Stat_t) error {
+		if err := os.Remove(lock); err != nil {
+			return err
+		}
+		return kept(fd, st)
+	}
+	t.Cleanup(func() { fstat = kept })
+	var runs atomic.Int32
+
+	if err := Migrate(t.Context(), db, lockMigrations(&runs, lockLongWait)); err != nil {
+		t.Fatalf("Migrate() error = %v, want nil once the extra link is gone", err)
+	}
+
+	lockMustKeepOwner(t, linked, uid, gid)
+	if got := runs.Load(); got != 1 {
+		t.Errorf("the run applied version 1 %d times, want once", got)
+	}
+}
+
+func TestALockFileRemovedBetweenTheOpensFailsTheLock(t *testing.T) {
+	db, path := lockOpen(t)
+	lock := path + lockSuffix
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v, want nil", err)
+	}
+	kept := openFile
+	openFile = func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		if flag&os.O_CREATE == 0 {
+			if err := os.Remove(name); err != nil {
+				return nil, err
+			}
+		}
+		return kept(name, flag, perm)
+	}
+	t.Cleanup(func() { openFile = kept })
+	tries := lockTries(t)
+	var runs atomic.Int32
+
+	err := Migrate(t.Context(), db, lockMigrations(&runs, lockLongWait))
+
+	want := "dbkit: run the migrations of " + lockTable + ": dbkit: open the migration lock " + lock + ": "
+	if !errors.Is(err, os.ErrNotExist) || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("Migrate() error = %v, want an error marked ErrNotExist starting %q", err, want)
+	}
+	lockNeverTried(t, tries)
+	if got := runs.Load(); got != 0 {
+		t.Errorf("the run applied version 1 %d times, want none", got)
+	}
+	if _, err := os.Lstat(lock); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Lstat(%s) error = %v, want the removed lock file never made again", lock, err)
 	}
 }

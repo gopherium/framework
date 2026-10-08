@@ -74,7 +74,7 @@ type fileLocker struct {
 	name string
 	// path is the path of the lock file.
 	path string
-	// database is the path of the database file the lock file sits beside.
+	// database is the path of the database file whose owner a run as root gives a lock file it creates.
 	database string
 	// wait is how long lock waits for the lock.
 	wait time.Duration

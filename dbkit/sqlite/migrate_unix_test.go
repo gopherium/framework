@@ -12,9 +12,27 @@ import (
 	"syscall"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/gopherium/framework/dbkit/sqlite"
 )
+
+// migrateAtOnceWait is how long a test waits for a call that must return at once.
+const migrateAtOnceWait = 10 * time.Second
+
+// migrateAtOnce returns the error of call, and fails the test when call still runs after migrateAtOnceWait.
+func migrateAtOnce(t *testing.T, call func() error) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- call() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(migrateAtOnceWait):
+		t.Fatalf("the call still runs after %v, want it to return at once", migrateAtOnceWait)
+		return nil
+	}
+}
 
 // migrateLockOf returns the path of the lock file beside the database file at path.
 func migrateLockOf(path string) string {
@@ -103,4 +121,41 @@ func TestMigrateNeverFollowsALinkAtTheLockPath(t *testing.T) {
 		t.Errorf("Migrate() error = %v, want an error marked ELOOP holding %q", err, want)
 	}
 	migrateMustHoldNoTable(t, db)
+}
+
+func TestMigrateRefusesAFIFOAtTheLockPath(t *testing.T) {
+	t.Parallel()
+
+	db, path := migrateOpen(t)
+	lock := migrateLockOf(path)
+	if err := syscall.Mkfifo(lock, 0o600); err != nil {
+		t.Fatalf("Mkfifo() error = %v, want nil", err)
+	}
+
+	err := migrateAtOnce(t, func() error { return sqlite.Migrate(t.Context(), db, migrateValid()) })
+
+	want := "dbkit: run the migrations of " + migrateFirstTable + ": dbkit: the migration lock " + lock +
+		" must be a regular file with one link"
+	if err == nil || err.Error() != want {
+		t.Errorf("Migrate() error = %v, want %q", err, want)
+	}
+	migrateMustHoldNoTable(t, db)
+}
+
+func TestMigrateTakesALockFileThatAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	db, path := migrateOpen(t)
+	lock := migrateLockOf(path)
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v, want nil", err)
+	}
+	before := migrateLockInfo(t, lock)
+
+	migrateMust(t, db, migrateValid())
+
+	if !os.SameFile(before, migrateLockInfo(t, lock)) {
+		t.Errorf("the lock file changed, want the existing regular file kept as the lock")
+	}
+	migrateMustVersions(t, db, migrateFirstTable, 0, 1)
 }
