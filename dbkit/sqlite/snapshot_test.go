@@ -52,6 +52,8 @@ const (
 	snapshotStageCheck = "check"
 	// snapshotHolding is the line a snapshot child prints once it holds.
 	snapshotHolding = "dbkit test: the snapshot child holds"
+	// snapshotLock is the name of the lock file a snapshot keeps in its target folder.
+	snapshotLock = ".snapshot.lock"
 )
 
 // snapshotPass answers 1 for every call of snapshot_gate.
@@ -581,9 +583,9 @@ func TestSnapshotLeavesNoTargetAfterAKill(t *testing.T) {
 		atKill []string
 	}{
 		{name: "while the copy is written", stage: snapshotStageCopy,
-			atKill: []string{"earlier.db", "killed.db.partial", "killed.db.partial-journal"}},
+			atKill: []string{snapshotLock, "earlier.db", "killed.db.partial", "killed.db.partial-journal"}},
 		{name: "while the copy is checked", stage: snapshotStageCheck,
-			atKill: []string{"earlier.db", "killed.db.partial"}},
+			atKill: []string{snapshotLock, "earlier.db", "killed.db.partial"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -610,7 +612,43 @@ func TestSnapshotLeavesNoTargetAfterAKill(t *testing.T) {
 			if err != nil || got.Path != next {
 				t.Fatalf("Snapshot() after the kill = %+v, %v, want the path %s", got, err, next)
 			}
-			snapshotMustHoldOnly(t, folder, "earlier.db", "next.db")
+			snapshotMustHoldOnly(t, folder, snapshotLock, "earlier.db", "next.db")
+		})
+	}
+}
+
+func TestSnapshotRefusesAFolderAnotherSnapshotWritesInto(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		stage   string
+		running []string
+	}{
+		{name: "while the other copy is written", stage: snapshotStageCopy,
+			running: []string{snapshotLock, "running.db.partial", "running.db.partial-journal"}},
+		{name: "while the other copy is checked", stage: snapshotStageCheck,
+			running: []string{snapshotLock, "running.db.partial"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			opts := testOptions()
+			opts.Functions = snapshotFunctions(t, snapshotPass)
+			db, path := snapshotOpen(t, opts)
+			snapshotSeed(t, db)
+			rulesExec(t, db, "CREATE VIEW snapshot_view AS SELECT n FROM snapshot_count")
+			folder := snapshotFolder(t)
+			child := snapshotStartChild(t, path, filepath.Join(folder, "running.db"), tc.stage)
+
+			got, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "second.db"))
+
+			want := "dbkit: take the snapshot lock " + filepath.Join(folder, snapshotLock) + ": " +
+				sqlite.ErrSnapshotRunning.Error()
+			if !errors.Is(err, sqlite.ErrSnapshotRunning) || err.Error() != want || got != (dbkit.Snapshot{}) {
+				t.Errorf("Snapshot() = %+v, %v, want no snapshot and %q", got, err, want)
+			}
+			snapshotMustHoldOnly(t, folder, tc.running...)
+			snapshotMustBeKilled(t, child.kill())
 		})
 	}
 }
@@ -807,7 +845,7 @@ func TestSnapshotRefusesAMissingFolder(t *testing.T) {
 
 	got, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(missing, "copy.db"))
 
-	want := "dbkit: list the snapshot folder " + missing + ": "
+	want := "dbkit: open the snapshot lock " + filepath.Join(missing, snapshotLock) + ": "
 	if !errors.Is(err, fs.ErrNotExist) || !strings.HasPrefix(err.Error(), want) || got != (dbkit.Snapshot{}) {
 		t.Errorf("Snapshot() = %+v, %v, want no snapshot and an error marked ErrNotExist starting %q", got, err, want)
 	}
@@ -931,7 +969,7 @@ func TestAFailedQuickCheckLeavesNoTarget(t *testing.T) {
 	snapshotMustRefuse(t, db, target, "dbkit: the snapshot copy "+target+
 		".partial failed PRAGMA quick_check: CHECK constraint failed in snapshot_checked")
 
-	snapshotMustBeEmpty(t, folder)
+	snapshotMustHoldOnly(t, folder, snapshotLock)
 }
 
 func TestAFailedCopyLeavesNoTarget(t *testing.T) {
@@ -950,7 +988,7 @@ func TestAFailedCopyLeavesNoTarget(t *testing.T) {
 	if !errors.Is(err, failed) || err.Error() != want || got != (dbkit.Snapshot{}) {
 		t.Errorf("Snapshot() = %+v, %v, want no snapshot and %q", got, err, want)
 	}
-	snapshotMustBeEmpty(t, folder)
+	snapshotMustHoldOnly(t, folder, snapshotLock)
 }
 
 func TestAFailedPathReadLeavesNoTarget(t *testing.T) {

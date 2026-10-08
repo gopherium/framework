@@ -31,7 +31,14 @@ const (
 	partialJournalSuffix = partialSuffix + "-journal"
 	// quickCheckPassed is the one report PRAGMA quick_check gives a sound database.
 	quickCheckPassed = "ok"
+	// snapshotLockFile is the name of the lock file a snapshot holds in its target folder.
+	snapshotLockFile = ".snapshot.lock"
+	// snapshotLockName names the snapshot lock in its errors.
+	snapshotLockName = "snapshot lock"
 )
+
+// ErrSnapshotRunning is the error of a snapshot into a folder another snapshot is writing into.
+var ErrSnapshotRunning = errors.New("dbkit: another snapshot is writing into this folder")
 
 var (
 	// syncFile writes the data of an open file to its disk.
@@ -58,12 +65,8 @@ func (s *snapshotter) Snapshot(ctx context.Context, target string) (dbkit.Snapsh
 	if s.db == nil {
 		return dbkit.Snapshot{}, errNoSnapshotHandle
 	}
-	partial, err := s.prepare(ctx, target)
-	if err != nil {
+	if err := s.copyLocked(ctx, target); err != nil {
 		return dbkit.Snapshot{}, err
-	}
-	if err := s.writeCopy(ctx, partial, target); err != nil {
-		return dbkit.Snapshot{}, errors.Join(err, os.Remove(partial))
 	}
 	if err := syncPath(filepath.Dir(target)); err != nil {
 		return dbkit.Snapshot{Path: target}, fmt.Errorf("dbkit: sync the folder of the snapshot %s: %w", target, err)
@@ -75,15 +78,42 @@ func (s *snapshotter) Snapshot(ctx context.Context, target string) (dbkit.Snapsh
 	return dbkit.Snapshot{Path: target, Checkpoint: c}, err
 }
 
-// prepare checks target, clears the stale copies beside it and creates its empty copy, and returns the copy's path.
-func (s *snapshotter) prepare(ctx context.Context, target string) (string, error) {
-	if err := checkTarget(target); err != nil {
-		return "", err
-	}
-	live, err := s.liveFile(ctx)
+// copyLocked moves a checked copy of the database to target while it holds the snapshot lock of the target's folder.
+func (s *snapshotter) copyLocked(ctx context.Context, target string) (err error) {
+	partial, locker, err := s.prepare(ctx, target)
 	if err != nil {
-		return "", err
+		return err
 	}
+	defer func() { err = errors.Join(err, locker.unlock()) }()
+	if err := s.writeCopy(ctx, partial, target); err != nil {
+		return errors.Join(err, os.Remove(partial))
+	}
+	return nil
+}
+
+// prepare checks target, takes the snapshot lock of its folder and starts its copy, and returns the copy's path.
+func (s *snapshotter) prepare(ctx context.Context, target string) (string, *fileLocker, error) {
+	if err := checkTarget(target); err != nil {
+		return "", nil, err
+	}
+	path, live, err := s.liveFile(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	folder := filepath.Dir(target)
+	locker := &fileLocker{name: snapshotLockName, path: filepath.Join(folder, snapshotLockFile), database: path}
+	if err := locker.tryLock(ErrSnapshotRunning); err != nil {
+		return "", nil, err
+	}
+	partial, err := startCopy(target, live)
+	if err != nil {
+		return "", nil, errors.Join(err, locker.unlock())
+	}
+	return partial, locker, nil
+}
+
+// startCopy clears the stale copies beside target and creates its empty copy, and returns the copy's path.
+func startCopy(target string, live fs.FileInfo) (string, error) {
 	if err := removePartials(filepath.Dir(target), live); err != nil {
 		return "", err
 	}
@@ -94,17 +124,17 @@ func (s *snapshotter) prepare(ctx context.Context, target string) (string, error
 	return partial, nil
 }
 
-// liveFile returns the facts of the main database file of the handle.
-func (s *snapshotter) liveFile(ctx context.Context) (fs.FileInfo, error) {
+// liveFile returns the path and the facts of the main database file of the handle.
+func (s *snapshotter) liveFile(ctx context.Context) (string, fs.FileInfo, error) {
 	var path string
 	if err := s.db.QueryRowContext(ctx, mainPath).Scan(&path); err != nil {
-		return nil, fmt.Errorf("dbkit: read the database path: %w", err)
+		return "", nil, fmt.Errorf("dbkit: read the database path: %w", err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf("dbkit: read the database file %s: %w", path, err)
+		return "", nil, fmt.Errorf("dbkit: read the database file %s: %w", path, err)
 	}
-	return info, nil
+	return path, info, nil
 }
 
 // checkpoint runs PRAGMA wal_checkpoint(TRUNCATE) and returns its row with how long it ran.

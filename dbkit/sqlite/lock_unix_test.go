@@ -579,3 +579,38 @@ func TestAFailedLockCallEndsTheWait(t *testing.T) {
 		t.Errorf("the run applied version 1 %d times, want none", got)
 	}
 }
+
+func TestAFailedSnapshotLockCallStopsTheSnapshot(t *testing.T) {
+	db, folder := internalSnapshotOpen(t)
+	kept := flock
+	flock = func(int, int) error { return unix.ENOLCK }
+	t.Cleanup(func() { flock = kept })
+
+	got, err := NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
+
+	want := "dbkit: take the snapshot lock " + filepath.Join(folder, snapshotLockFile) + ": " + unix.ENOLCK.Error()
+	if !errors.Is(err, unix.ENOLCK) || err.Error() != want || got.Path != "" {
+		t.Errorf("Snapshot() = %+v, %v, want no snapshot and %q", got, err, want)
+	}
+	internalMustHoldOnly(t, folder, snapshotLockFile)
+}
+
+func TestTheSnapshotLockOfARunAsRootBelongsToTheDatabaseOwner(t *testing.T) {
+	db, path := lockOpen(t)
+	if _, err := db.ExecContext(t.Context(), "CREATE TABLE lock_rows (a INTEGER NOT NULL)"); err != nil {
+		t.Fatalf("ExecContext() error = %v, want nil", err)
+	}
+	lockRegroup(t, path)
+	lockAs(t, lockRootUID)
+	folder := internalFolder(t)
+
+	if _, err := NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db")); err != nil {
+		t.Fatalf("Snapshot() error = %v, want nil", err)
+	}
+
+	uid, gid := lockOwner(t, path)
+	if lockUID, lockGID := lockOwner(t, filepath.Join(folder, snapshotLockFile)); lockUID != uid || lockGID != gid {
+		t.Errorf("the snapshot lock belongs to %d:%d, want %d:%d, the owner of the database file",
+			lockUID, lockGID, uid, gid)
+	}
+}

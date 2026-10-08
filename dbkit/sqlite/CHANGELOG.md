@@ -45,6 +45,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - `NewSnapshotter`, a copy through `VACUUM INTO`, checked and moved into place, then a `PRAGMA wal_checkpoint(TRUNCATE)` it reports.
 - `Snapshot` refuses a target that exists, is relative, starts with `file:`, holds `?` or ends with `.partial` or `.partial-journal`.
 - `Snapshot` removes the partial copies and journals left in its folder, never the live database file.
+- `Snapshot` holds a `.snapshot.lock` file in its folder and fails with `ErrSnapshotRunning` while another snapshot holds it.
 - A snapshot is never readable more widely than the live database file.
 - The final move of a snapshot never replaces a file that appeared at the target during the copy.
 - `sqlitetest.NewTemplate`, a file migrated once, with `Template.Open`, `Template.OpenWithFaults` and `Template.Close`.

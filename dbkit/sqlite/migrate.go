@@ -36,6 +36,8 @@ const (
 	mainPath = "SELECT file FROM pragma_database_list WHERE name = 'main'"
 	// lockSuffix ends the name of the migration lock file beside a database file.
 	lockSuffix = ".migrate.lock"
+	// migrationLockName names the migration lock in its errors.
+	migrationLockName = "migration lock"
 	// reservedPrefix starts every table name SQLite keeps for itself, in upper case.
 	reservedPrefix = "SQLITE_"
 )
@@ -68,6 +70,8 @@ var (
 
 // fileLocker holds an exclusive lock on one lock file.
 type fileLocker struct {
+	// name names the lock in its errors.
+	name string
 	// path is the path of the lock file.
 	path string
 	// database is the path of the database file the lock file sits beside.
@@ -197,7 +201,9 @@ func Migrate(ctx context.Context, db *sql.DB, m Migrations) (err error) {
 	if err != nil {
 		return fmt.Errorf("dbkit: build the migration runner of %s: %w", m.Table, err)
 	}
-	locker := &fileLocker{path: path + lockSuffix, database: path, wait: m.LockWait, poll: m.LockPoll}
+	locker := &fileLocker{
+		name: migrationLockName, path: path + lockSuffix, database: path, wait: m.LockWait, poll: m.LockPoll,
+	}
 	if err := locker.lock(ctx); err != nil {
 		return fmt.Errorf("dbkit: run the migrations of %s: %w", m.Table, err)
 	}

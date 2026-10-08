@@ -3,6 +3,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"io/fs"
@@ -202,7 +203,7 @@ func TestAFailedCopySyncLeavesNoTarget(t *testing.T) {
 	if !errors.Is(err, errSnapshotSyncFailed) || err.Error() != want || got != (dbkit.Snapshot{}) {
 		t.Errorf("Snapshot() = %+v, %v, want no snapshot and %q", got, err, want)
 	}
-	internalMustHoldOnly(t, folder)
+	internalMustHoldOnly(t, folder, snapshotLockFile)
 }
 
 func TestAFailedMoveLeavesNoTarget(t *testing.T) {
@@ -218,7 +219,45 @@ func TestAFailedMoveLeavesNoTarget(t *testing.T) {
 	if !errors.Is(err, errSnapshotMoveFailed) || err.Error() != want || got != (dbkit.Snapshot{}) {
 		t.Errorf("Snapshot() = %+v, %v, want no snapshot and %q", got, err, want)
 	}
-	internalMustHoldOnly(t, folder)
+	internalMustHoldOnly(t, folder, snapshotLockFile)
+}
+
+func TestASecondSnapshotInTheFolderKeepsTheFirstCopy(t *testing.T) {
+	db, folder := internalSnapshotOpen(t)
+	first, second := filepath.Join(folder, "first.db"), filepath.Join(folder, "second.db")
+	moving, proceed := make(chan struct{}), make(chan struct{})
+	kept := rename
+	rename = func(from, to string) error {
+		if to == first {
+			close(moving)
+			<-proceed
+		}
+		return kept(from, to)
+	}
+	t.Cleanup(func() { rename = kept })
+	result := make(chan error, 1)
+	go func() {
+		_, err := NewSnapshotter(db).Snapshot(context.Background(), first)
+		result <- err
+	}()
+	select {
+	case <-moving:
+	case err := <-result:
+		t.Fatalf("the first Snapshot() returned %v before its move", err)
+	}
+
+	got, err := NewSnapshotter(db).Snapshot(t.Context(), second)
+
+	close(proceed)
+	want := "dbkit: take the snapshot lock " + filepath.Join(folder, snapshotLockFile) + ": " +
+		ErrSnapshotRunning.Error()
+	if !errors.Is(err, ErrSnapshotRunning) || err.Error() != want || got != (dbkit.Snapshot{}) {
+		t.Errorf("the second Snapshot() = %+v, %v, want no snapshot and %q", got, err, want)
+	}
+	if err := <-result; err != nil {
+		t.Errorf("the first Snapshot() error = %v, want nil", err)
+	}
+	internalMustHoldOnly(t, folder, snapshotLockFile, "first.db")
 }
 
 func TestSnapshotKeepsATargetMadeDuringTheCopy(t *testing.T) {
@@ -243,7 +282,7 @@ func TestSnapshotKeepsATargetMadeDuringTheCopy(t *testing.T) {
 		t.Errorf("the target holds %d bytes, %v after the snapshot, want the %d bytes written during the copy",
 			len(data), err, len(internalLateTarget))
 	}
-	internalMustHoldOnly(t, folder, "copy.db")
+	internalMustHoldOnly(t, folder, snapshotLockFile, "copy.db")
 }
 
 func TestAFailedFolderSyncKeepsTheCopy(t *testing.T) {
@@ -257,5 +296,5 @@ func TestAFailedFolderSyncKeepsTheCopy(t *testing.T) {
 	if !errors.Is(err, errSnapshotSyncFailed) || err.Error() != want || got != (dbkit.Snapshot{Path: target}) {
 		t.Errorf("Snapshot() = %+v, %v, want the path %s with no checkpoint and %q", got, err, target, want)
 	}
-	internalMustHoldOnly(t, folder, "copy.db")
+	internalMustHoldOnly(t, folder, snapshotLockFile, "copy.db")
 }
