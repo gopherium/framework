@@ -29,6 +29,40 @@ func snapshotLockOpen(t *testing.T) (*sql.DB, string) {
 	return db, snapshotFolder(t)
 }
 
+func TestSnapshotKeepsTheJournalOfALiveDatabaseNamedAsACopy(t *testing.T) {
+	t.Parallel()
+
+	folder := snapshotFolder(t)
+	live := filepath.Join(folder, "site.db"+snapshotPartial)
+	db, err := sql.Open("sqlite", live)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v, want nil", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	rulesExec(t, db, "CREATE TABLE snapshot_rows (a INTEGER NOT NULL)")
+	writer, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx() error = %v, want nil", err)
+	}
+	t.Cleanup(func() { _ = writer.Rollback() })
+	if _, err := writer.ExecContext(t.Context(), "INSERT INTO snapshot_rows VALUES (1)"); err != nil {
+		t.Fatalf("insert in the open write transaction: %v", err)
+	}
+	journal := live + "-journal"
+	mustExist(t, journal)
+	target := filepath.Join(folder, "copy.db")
+
+	got, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), target)
+
+	if err != nil || got.Path != target {
+		t.Fatalf("Snapshot() = %+v, %v, want the path %s", got, err, target)
+	}
+	mustExist(t, journal)
+	if err := writer.Commit(); err != nil {
+		t.Errorf("Commit() of the open write transaction error = %v, want nil", err)
+	}
+}
+
 func TestTheSnapshotLockIsPrivateAndKept(t *testing.T) {
 	t.Parallel()
 

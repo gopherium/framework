@@ -27,8 +27,10 @@ const (
 	walCheckpoint = "PRAGMA wal_checkpoint(TRUNCATE)"
 	// partialSuffix ends the name a snapshot gives its copy until the copy is checked and moved to its target.
 	partialSuffix = ".dbkit-snapshot.partial"
+	// journalSuffix ends the name of the rollback journal SQLite keeps beside a database file.
+	journalSuffix = "-journal"
 	// partialJournalSuffix ends the name of the rollback journal SQLite keeps beside a copy while it writes it.
-	partialJournalSuffix = partialSuffix + "-journal"
+	partialJournalSuffix = partialSuffix + journalSuffix
 	// quickCheckPassed is the one report PRAGMA quick_check gives a sound database.
 	quickCheckPassed = "ok"
 	// snapshotLockFile is the name of the lock file a snapshot holds in its target folder.
@@ -201,7 +203,7 @@ func checkTarget(target string) error {
 	return nil
 }
 
-// removePartials removes regular copy and journal files in folder, except the live database and files it cannot stat.
+// removePartials removes the regular copies and copy journals in folder, never the live database or its journal.
 func removePartials(folder string, live fs.FileInfo) error {
 	entries, err := os.ReadDir(folder)
 	if err != nil {
@@ -212,15 +214,28 @@ func removePartials(folder string, live fs.FileInfo) error {
 		if !strings.HasSuffix(name, partialSuffix) && !strings.HasSuffix(name, partialJournalSuffix) {
 			continue
 		}
-		if info, err := entry.Info(); err != nil || !info.Mode().IsRegular() || os.SameFile(info, live) {
+		path := filepath.Join(folder, name)
+		if info, err := entry.Info(); err != nil || !info.Mode().IsRegular() || isLive(path, info, live) {
 			continue
 		}
-		path := filepath.Join(folder, name)
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("dbkit: remove the stale snapshot copy %s: %w", path, err)
 		}
 	}
 	return nil
+}
+
+// isLive reports whether the file at path with the facts info is the live database file or its rollback journal.
+func isLive(path string, info, live fs.FileInfo) bool {
+	if os.SameFile(info, live) {
+		return true
+	}
+	database, ok := strings.CutSuffix(path, journalSuffix)
+	if !ok {
+		return false
+	}
+	databaseInfo, err := os.Stat(database)
+	return err == nil && os.SameFile(databaseInfo, live)
 }
 
 // checkCopy runs PRAGMA quick_check on the copy at path through drv.
