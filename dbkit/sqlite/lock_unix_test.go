@@ -860,7 +860,7 @@ func lockAbove(path string) []string {
 	return above
 }
 
-// lockRootOwns puts in place of lstat one that answers root as the owner of each path in owned, and counts its calls.
+// lockRootOwns puts in place of lstat one that owns each path in owned by root and every other by a service user.
 func lockRootOwns(t *testing.T, owned ...string) *atomic.Int32 {
 	t.Helper()
 	calls := &atomic.Int32{}
@@ -868,6 +868,7 @@ func lockRootOwns(t *testing.T, owned ...string) *atomic.Int32 {
 	lstat = func(path string, st *unix.Stat_t) error {
 		calls.Add(1)
 		err := kept(path, st)
+		st.Uid = lockServiceUID
 		if slices.Contains(owned, path) {
 			st.Uid = lockRootUID
 		}
@@ -877,10 +878,14 @@ func lockRootOwns(t *testing.T, owned ...string) *atomic.Int32 {
 	return calls
 }
 
-// lockRootChain puts in place of lstat one that answers root as the owner of folder and of every folder above it.
-func lockRootChain(t *testing.T, folder string) {
+// lockRootChain puts in place of lstat one that answers root as the owner of each folder and every folder above it.
+func lockRootChain(t *testing.T, folders ...string) {
 	t.Helper()
-	lockRootOwns(t, append(lockAbove(folder), folder)...)
+	var owned []string
+	for _, folder := range folders {
+		owned = append(append(owned, lockAbove(folder)...), folder)
+	}
+	lockRootOwns(t, owned...)
 }
 
 // lockSymlink makes a link at path that holds text.
@@ -899,10 +904,10 @@ func lockChmod(t *testing.T, path string, mode fs.FileMode) {
 	}
 }
 
-// lockOwnedByTheTestUser returns the error of a snapshot as root whose first failing folder is path.
-func lockOwnedByTheTestUser(path string) string {
+// lockOwnedByAServiceUser returns the error of a snapshot as root whose first failing folder is path.
+func lockOwnedByAServiceUser(path string) string {
 	return fmt.Sprintf("dbkit: a snapshot as root needs a folder only root can change, and %s belongs to user %d",
-		path, os.Geteuid())
+		path, lockServiceUID)
 }
 
 // lockWritableByOthers returns the error of a snapshot as root whose first failing folder is path, with mode.
@@ -946,22 +951,22 @@ func lockMustTakeAsRoot(t *testing.T, db *sql.DB, target string) {
 }
 
 func TestASnapshotAsRootRefusesAFolderAnotherUserCanChange(t *testing.T) {
-	t.Run("a target folder the test user owns", func(t *testing.T) {
+	t.Run("a target folder a service user owns", func(t *testing.T) {
 		db, folder := internalSnapshotOpen(t)
 		lockRootOwns(t, lockAbove(folder)...)
 		lockAs(t, lockRootUID)
 
-		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "copy.db"), lockOwnedByTheTestUser(folder))
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "copy.db"), lockOwnedByAServiceUser(folder))
 
 		internalMustHoldOnly(t, folder)
 	})
-	t.Run("a root folder whose parent the test user owns", func(t *testing.T) {
+	t.Run("a root folder whose parent a service user owns", func(t *testing.T) {
 		db, folder := internalSnapshotOpen(t)
 		parent := filepath.Dir(folder)
 		lockRootOwns(t, append(lockAbove(parent), folder)...)
 		lockAs(t, lockRootUID)
 
-		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "copy.db"), lockOwnedByTheTestUser(parent))
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "copy.db"), lockOwnedByAServiceUser(parent))
 
 		internalMustHoldOnly(t, folder)
 	})
@@ -1028,41 +1033,39 @@ func TestTheRootFolderCheckStopsAtALinkLoop(t *testing.T) {
 }
 
 func TestASnapshotAsRootChecksEveryFolderALinkLeadsThrough(t *testing.T) {
-	t.Run("a link to a folder the test user owns", func(t *testing.T) {
+	t.Run("a link to a folder a service user owns", func(t *testing.T) {
 		db, folder := internalSnapshotOpen(t)
 		linked := internalFolder(t)
 		lockSymlink(t, filepath.Join(folder, "link"), linked)
 		lockRootChain(t, folder)
 		lockAs(t, lockRootUID)
 
-		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "link", "copy.db"), lockOwnedByTheTestUser(linked))
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "link", "copy.db"), lockOwnedByAServiceUser(linked))
 
 		internalMustHoldOnly(t, folder, "link")
 		internalMustHoldOnly(t, linked)
 	})
-	t.Run("a link to a root folder, in a folder the test user owns", func(t *testing.T) {
+	t.Run("a link to a root folder, in a folder a service user owns", func(t *testing.T) {
 		db, folder := internalSnapshotOpen(t)
 		linked := internalFolder(t)
 		lockSymlink(t, filepath.Join(folder, "link"), linked)
-		lockRootOwns(t, lockAbove(folder)...)
-		lockRootChain(t, linked)
+		lockRootOwns(t, append(lockAbove(folder), append(lockAbove(linked), linked)...)...)
 		lockAs(t, lockRootUID)
 
-		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "link", "copy.db"), lockOwnedByTheTestUser(folder))
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "link", "copy.db"), lockOwnedByAServiceUser(folder))
 
 		internalMustHoldOnly(t, folder, "link")
 		internalMustHoldOnly(t, linked)
 	})
-	t.Run("a link inside the target of a link, in a folder the test user owns", func(t *testing.T) {
+	t.Run("a link inside the target of a link, in a folder a service user owns", func(t *testing.T) {
 		db, folder := internalSnapshotOpen(t)
 		between, linked := internalFolder(t), internalFolder(t)
 		lockSymlink(t, filepath.Join(between, "inner"), linked)
 		lockSymlink(t, filepath.Join(folder, "link"), filepath.Join(between, "inner"))
-		lockRootChain(t, folder)
-		lockRootChain(t, linked)
+		lockRootChain(t, folder, linked)
 		lockAs(t, lockRootUID)
 
-		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "link", "copy.db"), lockOwnedByTheTestUser(between))
+		lockMustRefuseAsRoot(t, db, filepath.Join(folder, "link", "copy.db"), lockOwnedByAServiceUser(between))
 
 		internalMustHoldOnly(t, folder, "link")
 		internalMustHoldOnly(t, between, "inner")
@@ -1099,8 +1102,7 @@ func TestASnapshotAsRootTakesAFolderOnlyRootCanChange(t *testing.T) {
 			db, folder := internalSnapshotOpen(t)
 			linked := internalFolder(t)
 			lockSymlink(t, filepath.Join(folder, "link"), tc.text(linked))
-			lockRootChain(t, folder)
-			lockRootChain(t, linked)
+			lockRootChain(t, folder, linked)
 			lockAs(t, lockRootUID)
 
 			lockMustTakeAsRoot(t, db, filepath.Join(folder, "link", "copy.db"))
@@ -1128,8 +1130,7 @@ func TestALinkRemovedBeforeItIsReadStopsASnapshotAsRoot(t *testing.T) {
 	linked := internalFolder(t)
 	link := filepath.Join(folder, "link")
 	lockSymlink(t, link, linked)
-	lockRootChain(t, folder)
-	lockRootChain(t, linked)
+	lockRootChain(t, folder, linked)
 	kept := lstat
 	lstat = func(path string, st *unix.Stat_t) error {
 		err := kept(path, st)

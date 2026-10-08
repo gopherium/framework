@@ -960,6 +960,9 @@ func TestSnapshotRefusesATargetUnderAFile(t *testing.T) {
 func TestSnapshotRefusesAMissingFolder(t *testing.T) {
 	t.Parallel()
 
+	if os.Geteuid() == 0 {
+		t.Skip("a run as root checks the folders first, as TestASnapshotAsRootIntoAMissingFolderFailsTheCheck shows")
+	}
 	db, _ := snapshotOpen(t, testOptions())
 	missing := filepath.Join(snapshotFolder(t), "missing")
 
