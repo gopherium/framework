@@ -110,7 +110,7 @@ func TestACopyWithNoPagesFailsTheCheck(t *testing.T) {
 
 	t.Run("an empty file", func(t *testing.T) {
 		t.Parallel()
-		path := filepath.Join(t.TempDir(), "copy.db.partial")
+		path := filepath.Join(t.TempDir(), "copy.db"+partialSuffix)
 		if err := os.WriteFile(path, nil, 0o600); err != nil {
 			t.Fatalf("WriteFile() error = %v, want nil", err)
 		}
@@ -119,7 +119,7 @@ func TestACopyWithNoPagesFailsTheCheck(t *testing.T) {
 	})
 	t.Run("a missing file", func(t *testing.T) {
 		t.Parallel()
-		path := filepath.Join(t.TempDir(), "copy.db.partial")
+		path := filepath.Join(t.TempDir(), "copy.db"+partialSuffix)
 
 		internalMustFailCheck(t, path, "dbkit: the snapshot copy "+path+" holds no pages")
 	})
@@ -128,7 +128,7 @@ func TestACopyWithNoPagesFailsTheCheck(t *testing.T) {
 func TestACopyTheDriverCannotOpenFailsTheCheck(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "missing", "copy.db.partial")
+	path := filepath.Join(t.TempDir(), "missing", "copy.db"+partialSuffix)
 
 	err := checkCopy(t.Context(), internalDriver(t), path)
 
@@ -142,7 +142,7 @@ func TestACopyTheDriverCannotOpenFailsTheCheck(t *testing.T) {
 func TestACopyThatIsNoDatabaseFailsTheCheck(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "copy.db.partial")
+	path := filepath.Join(t.TempDir(), "copy.db"+partialSuffix)
 	if err := os.WriteFile(path, []byte(strings.Repeat("not a database file ", 256)), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v, want nil", err)
 	}

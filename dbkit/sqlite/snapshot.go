@@ -25,14 +25,14 @@ const (
 		"(SELECT page_count FROM pragma_page_count)"
 	// walCheckpoint checkpoints the write-ahead log and truncates it.
 	walCheckpoint = "PRAGMA wal_checkpoint(TRUNCATE)"
-	// partialSuffix ends the name a copy carries until it is checked and moved to its target.
-	partialSuffix = ".partial"
+	// partialSuffix ends the name a snapshot gives its copy until the copy is checked and moved to its target.
+	partialSuffix = ".dbkit-snapshot.partial"
 	// partialJournalSuffix ends the name of the rollback journal SQLite keeps beside a copy while it writes it.
 	partialJournalSuffix = partialSuffix + "-journal"
 	// quickCheckPassed is the one report PRAGMA quick_check gives a sound database.
 	quickCheckPassed = "ok"
 	// snapshotLockFile is the name of the lock file a snapshot holds in its target folder.
-	snapshotLockFile = ".snapshot.lock"
+	snapshotLockFile = ".dbkit-snapshot.lock"
 	// snapshotLockName names the snapshot lock in its errors.
 	snapshotLockName = "snapshot lock"
 )
@@ -196,7 +196,7 @@ func checkTarget(target string) error {
 	return nil
 }
 
-// removePartials removes each copy and copy journal in folder, except the live database and any file it cannot stat.
+// removePartials removes regular copy and journal files in folder, except the live database and files it cannot stat.
 func removePartials(folder string, live fs.FileInfo) error {
 	entries, err := os.ReadDir(folder)
 	if err != nil {
@@ -207,7 +207,7 @@ func removePartials(folder string, live fs.FileInfo) error {
 		if !strings.HasSuffix(name, partialSuffix) && !strings.HasSuffix(name, partialJournalSuffix) {
 			continue
 		}
-		if info, err := entry.Info(); err != nil || os.SameFile(info, live) {
+		if info, err := entry.Info(); err != nil || !info.Mode().IsRegular() || os.SameFile(info, live) {
 			continue
 		}
 		path := filepath.Join(folder, name)
