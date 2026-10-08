@@ -10,6 +10,8 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-08
+
 ### Added
 
 - `Open`, one SQLite handle from a `sqlite:` address, which connects to nothing until the first query.
@@ -54,3 +56,5 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - `sqlitetest.NewTemplate`, a file migrated once, with `Template.Open`, `Template.OpenWithFaults` and `Template.Close`.
 - `NewTemplate` closes its handle and removes its folder when migrate fails, panics or stops its goroutine.
 - `Faults.Pass`, which stops failing a statement chosen with `FailStatement`.
+
+[0.1.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fsqlite%2Fv0.1.0
