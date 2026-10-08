@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -288,6 +289,18 @@ func templateRoot(t *testing.T) string {
 	return root
 }
 
+// templateLinkRoot points the temp folder of the process at a link to a fresh folder and returns the resolved folder.
+func templateLinkRoot(t *testing.T) string {
+	t.Helper()
+	target := realFolder(t, t.TempDir())
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("Symlink() error = %v, want nil", err)
+	}
+	t.Setenv("TMPDIR", link)
+	return target
+}
+
 // mustHoldNothing fails the test unless folder is empty.
 func mustHoldNothing(t *testing.T, folder string) {
 	t.Helper()
@@ -388,18 +401,54 @@ func TestTemplateThatStopsInMigrateLeavesNoFolderBehind(t *testing.T) {
 }
 
 func TestTemplateNeedsATempFolder(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "missing")
-	t.Setenv("TMPDIR", missing)
+	plain := filepath.Join(t.TempDir(), "plain")
+	if err := os.WriteFile(plain, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v, want nil", err)
+	}
 	var runs int
+	cases := []struct {
+		// name names the temp folder.
+		name string
+		// root is the temp folder of the process.
+		root string
+		// marked is the error NewTemplate wraps.
+		marked error
+		// want starts the error NewTemplate answers.
+		want string
+	}{
+		{"a missing temp folder", filepath.Join(t.TempDir(), "missing"), fs.ErrNotExist,
+			"dbkit: resolve the temp folder: "},
+		{"a temp folder that is a plain file", plain, syscall.ENOTDIR,
+			"dbkit: make the template folder: "},
+	}
 
-	tp, err := NewTemplate(t.Context(), internalOptions(), schemaMigration(&runs))
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("TMPDIR", c.root)
 
-	want := "dbkit: make the template folder: "
-	if tp != nil || !errors.Is(err, fs.ErrNotExist) || !strings.HasPrefix(err.Error(), want) {
-		t.Errorf("NewTemplate() = %v, %v, want nil and an error starting %q for a missing folder", tp, err, want)
+			tp, err := NewTemplate(t.Context(), internalOptions(), schemaMigration(&runs))
+
+			if tp != nil || !errors.Is(err, c.marked) || !strings.HasPrefix(err.Error(), c.want) {
+				t.Errorf("NewTemplate() = %v, %v, want nil and an error marked %v starting %q",
+					tp, err, c.marked, c.want)
+			}
+		})
 	}
 	if runs != 0 {
 		t.Errorf("migrate ran %d times without a template folder, want never", runs)
+	}
+}
+
+func TestTemplateFolderBehindALinkIsResolved(t *testing.T) {
+	root := templateLinkRoot(t)
+
+	tp := mustTemplate(t, internalOptions(), schemaMigration(new(int)))
+
+	if got := filepath.Dir(tp.folder); got != root {
+		t.Errorf("the template folder sits in %s, want %s with every link resolved", got, root)
+	}
+	if got := templateRows(t, tp.Open(t)); got != 0 {
+		t.Errorf("rows in a copy of a template behind a link = %d, want an empty table", got)
 	}
 }
 
@@ -430,7 +479,7 @@ func TestTemplateOfAMigrateThatWritesNothingServesAnEmptyDatabase(t *testing.T) 
 }
 
 func TestTemplateRefusesAMigrateThatLeavesAConnectionOpen(t *testing.T) {
-	root := templateRoot(t)
+	root := templateLinkRoot(t)
 	var file string
 
 	tp, err := NewTemplate(t.Context(), internalOptions(), func(ctx context.Context, db *sql.DB) error {

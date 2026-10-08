@@ -28,7 +28,7 @@ var (
 
 // Template is a migrated and closed database file that each test opens a copy of.
 type Template struct {
-	// folder is the temp folder that holds the template file.
+	// folder is the temp folder that holds the template file, with every link resolved.
 	folder string
 	// opts are the options every copy opens with.
 	opts sqlite.Options
@@ -45,7 +45,11 @@ func NewTemplate(
 	if migrate == nil {
 		return nil, errNoMigrate
 	}
-	folder, err := os.MkdirTemp("", templatePattern)
+	root, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return nil, fmt.Errorf("dbkit: resolve the temp folder: %w", err)
+	}
+	folder, err := os.MkdirTemp(root, templatePattern)
 	if err != nil {
 		return nil, fmt.Errorf("dbkit: make the template folder: %w", err)
 	}
