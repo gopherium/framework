@@ -28,7 +28,12 @@ func Open(t testing.TB, opts sqlite.Options) *sql.DB {
 // OpenWithFaults returns a handle like Open whose connections answer with the failures of faults.
 func OpenWithFaults(t testing.TB, opts sqlite.Options, faults *Faults) *sql.DB {
 	t.Helper()
-	folder := realFolder(t, t.TempDir())
+	return openFaulty(t, realFolder(t, t.TempDir()), opts, faults)
+}
+
+// openFaulty returns a handle with opts on the file in folder whose connections answer with the failures of faults.
+func openFaulty(t testing.TB, folder string, opts sqlite.Options, faults *Faults) *sql.DB {
+	t.Helper()
 	path := filepath.Join(folder, fileName)
 	seam.Set(path, faults.wrap)
 	t.Cleanup(func() { seam.Clear(path) })
