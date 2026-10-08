@@ -23,6 +23,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - A panic in one of `Options.Functions` fails its statement with an error naming the function.
 - Each new connection runs `PRAGMA optimize` and notes a busy answer to `Options.Logger`.
 - `Open` switches SQLite to OFD locks where Linux allows it.
+- A handle opens its connections one at a time, so its first connections to a new file never fail busy while SQLite switches it to WAL.
 - `Open` runs on Linux and macOS, and refuses every database on other systems.
 - `Classify`, which wraps a SQLite error in its `dbkit` error class.
 - `LibcVersion`, the pinned `modernc.org/libc` version.
@@ -32,3 +33,24 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - `Faults.FailStatement`, which fails every statement with the exact chosen text, inside transactions too.
 - `Faults.FailNextCommit`, which rolls the next commit back and answers the chosen error once.
 - `sqlitetest.CheckLibc`, which fails a test when the build's `modernc.org/libc` differs from `LibcVersion`.
+- `Migrate` and `Migrations`, one owner's goose migrations under a lock file beside the database, with `Table`, `LockWait` and `LockPoll` required.
+- `Migrate` takes Go migrations only from `Migrations.Go`, never from goose's global registry.
+- `Migrate` refuses a SQL migration marked `-- +goose NO TRANSACTION`, naming the file, before any migration runs.
+- The migration lock waits up to `LockWait`, ends with the context, and is gone when its holder dies. Its file has mode 0600 and is never deleted.
+- `Migrate` takes the migration lock before goose uses the handle, so a waiting run holds no connection and a first run waits for the lock.
+- `Migrate` refuses a `Table` that is a SQLite keyword or starts with `sqlite_`, in any case.
+- A run as root gives the owner and group of the database file only to a migration or snapshot lock file it creates.
+- `Rebuild`, a table rebuild with foreign keys off from a goose `RunDB` migration, skipped when `done` finds the new shape in place.
+- `Rebuild` fails on any row `PRAGMA foreign_key_check` reports, and never returns a connection with foreign keys off to the pool.
+- After its context ends, `Rebuild` rolls back before foreign keys go back on, and its connection returns to the pool.
+- `NewSnapshotter`, a copy through `VACUUM INTO`, checked and moved into place, then a `PRAGMA wal_checkpoint(TRUNCATE)` it reports.
+- `Snapshot` refuses a target that exists, is relative, differs from its `filepath.Clean` form, starts with `file:`, holds `?` or ends with `.dbkit-snapshot.partial` or `.dbkit-snapshot.partial-journal`.
+- A `Snapshot` as root refuses a target folder that a user other than root owns or may write in, and any such folder above it through every link unless it is sticky.
+- `Snapshot` removes only the regular `.dbkit-snapshot.partial` and `.dbkit-snapshot.partial-journal` files left in its folder, never the live database file or its journal.
+- `Snapshot` holds a `.dbkit-snapshot.lock` file in its folder and fails with `ErrSnapshotRunning` while another snapshot holds it.
+- Both locks fail on a lock path that holds a hard link, a FIFO, a device or anything but a regular file with one link.
+- A snapshot is never readable more widely than the live database file.
+- The final move of a snapshot never replaces a file that appeared at the target during the copy.
+- `sqlitetest.NewTemplate`, a file migrated once, with `Template.Open`, `Template.OpenWithFaults` and `Template.Close`.
+- `NewTemplate` closes its handle and removes its folder when migrate fails, panics or stops its goroutine.
+- `Faults.Pass`, which stops failing a statement chosen with `FailStatement`.

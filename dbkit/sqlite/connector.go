@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"sync"
 
 	modernc "modernc.org/sqlite"
 
@@ -30,6 +31,8 @@ type connector struct {
 	driver *modernc.Driver
 	// open opens one connection by the driver's name of the file.
 	open func(name string) (driver.Conn, error)
+	// opening lets one call of open run at a time.
+	opening sync.Mutex
 	// name is the driver's name of the file with every rule.
 	name string
 	// path is the absolute path of the file.
@@ -56,12 +59,14 @@ func newConnector(drv *modernc.Driver, path string, opts Options) *connector {
 	}
 }
 
-// Connect opens one connection to the file, runs the optimize step on it and passes it through the path's seam.
+// Connect opens one connection to the file, one open at a time, optimizes it and passes it through the path's seam.
 func (c *connector) Connect(ctx context.Context) (driver.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	c.opening.Lock()
 	conn, err := c.open(c.name)
+	c.opening.Unlock()
 	if err != nil {
 		return nil, err
 	}
