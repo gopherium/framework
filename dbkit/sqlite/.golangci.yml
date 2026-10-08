@@ -30,6 +30,7 @@ linters:
           allow:
             - $gostd
             - github.com/gopherium/framework/dbkit
+            - github.com/pressly/goose/v3
             - modernc.org/sqlite
             - modernc.org/libc
             - golang.org/x/sys
