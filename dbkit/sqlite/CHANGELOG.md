@@ -23,6 +23,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - A panic in one of `Options.Functions` fails its statement with an error naming the function.
 - Each new connection runs `PRAGMA optimize` and notes a busy answer to `Options.Logger`.
 - `Open` switches SQLite to OFD locks where Linux allows it.
+- A handle opens its connections one at a time, so its first connections to a new file never fail busy while SQLite switches it to WAL.
 - `Open` runs on Linux and macOS, and refuses every database on other systems.
 - `Classify`, which wraps a SQLite error in its `dbkit` error class.
 - `LibcVersion`, the pinned `modernc.org/libc` version.

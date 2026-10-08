@@ -4,6 +4,7 @@ package sqlite_test
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"log/slog"
@@ -15,8 +16,12 @@ import (
 	"github.com/gopherium/framework/dbkit/sqlite/internal/seam"
 )
 
-// connectorSkipped is the message of the note a skipped optimize leaves.
-const connectorSkipped = "dbkit: PRAGMA optimize skipped on a new connection while the database is busy"
+const (
+	// connectorSkipped is the message of the note a skipped optimize leaves.
+	connectorSkipped = "dbkit: PRAGMA optimize skipped on a new connection while the database is busy"
+	// connectorNewFiles is how many new files the test opens a full pool on at once.
+	connectorNewFiles = 100
+)
 
 // connectorRecords is a log handler that sends every record it handles to a channel.
 type connectorRecords struct {
@@ -126,6 +131,59 @@ func TestAnOptimizeWithNoWriterLeavesNoNote(t *testing.T) {
 	case r := <-records:
 		t.Errorf("note %q arrived, want none from an optimize with no writer", r.Message)
 	default:
+	}
+}
+
+// connectorTaken is one connection a goroutine took from the pool, or the error it got.
+type connectorTaken struct {
+	// conn is the connection taken, nil after an error.
+	conn *sql.Conn
+	// err is the error of the take.
+	err error
+}
+
+// connectorOpenAtOnce takes every connection of a full pool on db at once, closes them and returns every error.
+func connectorOpenAtOnce(t *testing.T, db *sql.DB) error {
+	t.Helper()
+	start := make(chan struct{})
+	taken := make(chan connectorTaken, optionsMaxConns)
+	for range optionsMaxConns {
+		go func() {
+			<-start
+			conn, err := db.Conn(t.Context())
+			taken <- connectorTaken{conn: conn, err: err}
+		}()
+	}
+	close(start)
+	var errs []error
+	var conns []*sql.Conn
+	for range optionsMaxConns {
+		got := <-taken
+		errs = append(errs, got.err)
+		if got.conn != nil {
+			conns = append(conns, got.conn)
+		}
+	}
+	for _, conn := range conns {
+		errs = append(errs, conn.Close())
+	}
+	return errors.Join(errs...)
+}
+
+func TestTheFirstConnectionsOfANewFileOpenTogether(t *testing.T) {
+	t.Parallel()
+
+	for file := range connectorNewFiles {
+		db := rulesOpen(t, testOptions())
+
+		err := connectorOpenAtOnce(t, db)
+
+		if err != nil {
+			t.Fatalf("a full pool opened at once on new file %d error = %v, want every connection open", file, err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatalf("Close() error = %v, want nil", err)
+		}
 	}
 }
 
