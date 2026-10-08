@@ -8,6 +8,12 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `dbkit/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `EscapeLike`, a search term with `%`, `_` and `\` escaped for a LIKE pattern, which SQLite reads only beside `ESCAPE '\'`.
+
 ## [0.1.0] - 2026-10-07
 
 ### Added
