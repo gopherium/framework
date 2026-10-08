@@ -29,6 +29,13 @@ func (f *Faults) FailStatement(query string, err error) {
 	f.statements[query] = err
 }
 
+// Pass stops failing the statement whose text is exactly query.
+func (f *Faults) Pass(query string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.statements, query)
+}
+
 // statement returns the error chosen for the statement with the text query, or nil.
 func (f *Faults) statement(query string) error {
 	f.mu.Lock()

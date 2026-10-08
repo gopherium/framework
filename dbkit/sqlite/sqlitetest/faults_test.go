@@ -787,3 +787,68 @@ func TestTheRulesStayOnThroughAWrappedConnection(t *testing.T) {
 		}
 	}
 }
+
+func TestPassStopsFailingTheChosenStatement(t *testing.T) {
+	t.Parallel()
+
+	for _, way := range statementWays {
+		t.Run(way.name, func(t *testing.T) {
+			t.Parallel()
+			faults := &sqlitetest.Faults{}
+			db := faultOpen(t, faults)
+			faults.FailStatement(faultChosen, errInjected)
+			faults.FailStatement(faultInsert, errInjected)
+			tx := mustBeginUntilCleanup(t, db)
+			if err := way.run(t.Context(), db, faultChosen); !errors.Is(err, errInjected) {
+				t.Fatalf("%s(%q) before Pass error = %v, want the injected error", way.name, faultChosen, err)
+			}
+
+			faults.Pass(faultChosen)
+
+			if err := way.run(t.Context(), db, faultChosen); err != nil {
+				t.Errorf("%s(%q) after Pass error = %v, want it to run", way.name, faultChosen, err)
+			}
+			if err := way.run(t.Context(), tx, faultChosen); err != nil {
+				t.Errorf("%s(%q) in a transaction after Pass error = %v, want it to run", way.name, faultChosen, err)
+			}
+			if _, err := db.ExecContext(t.Context(), faultInsert); !errors.Is(err, errInjected) {
+				t.Errorf("ExecContext(%q) after Pass of another statement error = %v, want the injected error",
+					faultInsert, err)
+			}
+		})
+	}
+}
+
+func TestPassReachesAStatementPreparedBeforeIt(t *testing.T) {
+	t.Parallel()
+
+	faults := &sqlitetest.Faults{}
+	stmt := mustPrepareChosen(t, faultOpen(t, faults))
+	faults.FailStatement(faultChosen, errInjected)
+	var n int64
+	if err := stmt.QueryRowContext(t.Context()).Scan(&n); !errors.Is(err, errInjected) {
+		t.Fatalf("QueryRow before Pass error = %v, want the injected error", err)
+	}
+
+	faults.Pass(faultChosen)
+
+	if err := stmt.QueryRowContext(t.Context()).Scan(&n); err != nil {
+		t.Errorf("QueryRow of a statement prepared before Pass error = %v, want it to run", err)
+	}
+}
+
+func TestPassOfAStatementNeverChosenChangesNothing(t *testing.T) {
+	t.Parallel()
+
+	faults := &sqlitetest.Faults{}
+	db := faultOpen(t, faults)
+
+	faults.Pass(faultChosen)
+
+	mustExec(t, db, faultInsert)
+	faults.FailStatement(faultChosen, errInjected)
+	var n int64
+	if err := db.QueryRowContext(t.Context(), faultChosen).Scan(&n); !errors.Is(err, errInjected) {
+		t.Errorf("QueryRow of a statement chosen after an earlier Pass error = %v, want the injected error", err)
+	}
+}
