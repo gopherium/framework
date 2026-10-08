@@ -14,6 +14,9 @@ need and ignore the rest.
 - [`dbkit`](dbkit/) names the database engines, their error classes and
   shared types, and lends capped shares of a program's one database
   handle.
+- [`dbkit/postgres`](dbkit/postgres/) opens a program's one PostgreSQL
+  pool with a `database/sql` view on the same cap, classifies its
+  errors, runs its migrations and ships test helpers.
 - [`dbkit/sqlite`](dbkit/sqlite/) opens a program's one SQLite handle
   with every connection rule on, classifies its errors and ships test
   helpers.
