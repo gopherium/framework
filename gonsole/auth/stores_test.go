@@ -3,77 +3,59 @@
 package auth_test
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"maps"
-	"slices"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/gopherium/gouncer/authkit/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/gopherium/framework/gonsole/auth"
+	"github.com/gopherium/framework/gonsole/auth/recordstest"
 )
 
-// recordsAt returns the PostgreSQL records store of the database at address, its pool closed when the test ends.
-func recordsAt(t *testing.T, address string) auth.RecordStore {
+// plantRecord inserts one record as applied at a given time, finding the account the acting address names.
+const plantRecord = `INSERT INTO gonsole.records (id, applied_at, actor, account_id, command, args, flags)
+VALUES ($1::uuid, $2, $3, (SELECT id FROM auth.users WHERE email = $3), $4, $5::jsonb, $6::jsonb)`
+
+// postgresFixture returns the PostgreSQL record store of a fresh database and the hooks recordstest drives it with.
+func postgresFixture(t *testing.T) recordstest.Fixture {
 	t.Helper()
+	address := migrated(t)
 	pool, err := pgxpool.New(t.Context(), address)
 	if err != nil {
 		t.Fatalf("opening %s: %v", address, err)
 	}
 	t.Cleanup(pool.Close)
-	return auth.PostgresRecords(pool)
+	accounts := postgres.NewUserStore(pool)
+	return recordstest.Fixture{
+		Records: auth.PostgresRecords(pool),
+		Migrate: func(ctx context.Context) error { return auth.RecordMigration().Run(ctx, address) },
+		Account: func(ctx context.Context, email string) (string, error) {
+			held := auth.Account{Email: email, Name: "Maria Perez", Password: demoPassword, Role: "admin"}
+			if err := auth.EnsureAccounts(ctx, accounts, []auth.Account{held}, io.Discard); err != nil {
+				return "", err
+			}
+			user, err := accounts.UserByEmail(ctx, email)
+			return user.ID.String(), err
+		},
+		Plant: func(ctx context.Context, entry auth.Entry, appliedAt time.Time) error {
+			flags := map[string]string{}
+			maps.Copy(flags, entry.Flags)
+			_, err := pool.Exec(ctx, plantRecord, entry.ID, appliedAt, entry.Actor, entry.Command,
+				append([]string{}, entry.Args...), flags)
+			return err
+		},
+	}
 }
 
-func TestPostgresRecordsHoldsTheTableOnlyAfterItsMigration(t *testing.T) {
+func TestPostgresRecordsKeepTheContract(t *testing.T) {
 	t.Parallel()
 
-	address := migrated(t)
-	records := recordsAt(t, address)
-	before, beforeErr := records.Held(t.Context())
-	if err := auth.RecordMigration().Run(t.Context(), address); err != nil {
-		t.Fatalf("RecordMigration() = %v", err)
-	}
-
-	after, afterErr := records.Held(t.Context())
-
-	if before || beforeErr != nil || !after || afterErr != nil {
-		t.Errorf("Held() = %t %v before and %t %v after the migration, want false then true", before, beforeErr,
-			after, afterErr)
-	}
-}
-
-func TestPostgresRecordsStoresAnEntryAndListsIt(t *testing.T) {
-	t.Parallel()
-
-	address := seeded(t)
-	if err := auth.RecordMigration().Run(t.Context(), address); err != nil {
-		t.Fatalf("RecordMigration() = %v", err)
-	}
-	records := recordsAt(t, address)
-	entry := auth.Entry{
-		ID: uuid.Must(uuid.NewV7()).String(), Actor: "admin@example.com", Command: "account:role",
-		Args: []string{"author@example.com", "editor"}, Flags: map[string]string{"yes": "true"},
-	}
-
-	if err := records.Insert(t.Context(), entry); err != nil {
-		t.Fatalf("Insert() = %v", err)
-	}
-	listed, err := records.Latest(t.Context(), 10)
-
-	if err != nil || len(listed) != 1 {
-		t.Fatalf("Latest() = %v, %v, want the one entry", listed, err)
-	}
-	got, admin := listed[0], account(t, storeAt(t, address), "admin@example.com").ID.String()
-	if got.Actor != entry.Actor || got.Command != entry.Command || got.AccountID == nil || *got.AccountID != admin {
-		t.Errorf("Latest() = %+v, want the actor, the command and the account %s", got, admin)
-	}
-	if !slices.Equal(got.Args, entry.Args) || !maps.Equal(got.Flags, entry.Flags) || got.AppliedAt.IsZero() {
-		t.Errorf("Latest() args %q, flags %v, applied at %v, want %q, %v and a time", got.Args, got.Flags,
-			got.AppliedAt, entry.Args, entry.Flags)
-	}
+	recordstest.Run(t, postgresFixture)
 }
 
 func TestAnEntryKeepsTheDocumentAccountRecordsAnswers(t *testing.T) {

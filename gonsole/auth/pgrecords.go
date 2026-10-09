@@ -17,7 +17,7 @@ const storeRecord = `INSERT INTO gonsole.records (id, actor, account_id, command
 VALUES ($1::uuid, $2, (SELECT id FROM auth.users WHERE email = $2), $3, $4::jsonb, $5::jsonb)`
 
 // latestRecords reads the newest records first, as many as the limit allows.
-const latestRecords = `SELECT applied_at, actor, account_id::text, command, args, flags
+const latestRecords = `SELECT id::text, applied_at, actor, account_id::text, command, args, flags
 FROM gonsole.records ORDER BY applied_at DESC, id DESC LIMIT $1`
 
 // querier runs the statements of the PostgreSQL record store, on a pool or on one connection.
@@ -63,7 +63,7 @@ func (r postgresRecords) Latest(ctx context.Context, limit int) ([]Entry, error)
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Entry, error) {
 		var held Entry
-		err := row.Scan(&held.AppliedAt, &held.Actor, &held.AccountID, &held.Command, &held.Args, &held.Flags)
+		err := row.Scan(&held.ID, &held.AppliedAt, &held.Actor, &held.AccountID, &held.Command, &held.Args, &held.Flags)
 		return held, err
 	})
 }
