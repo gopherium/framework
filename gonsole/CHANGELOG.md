@@ -8,6 +8,21 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `Program.Open`, the application's opener of the one database handle a run shares, which must not connect.
+- `Call.DB`, the run's one handle, opened on first use, kept after a failed open and closed after the plugins release.
+- `ErrDescribing`, the error `Call.DB` answers in a describing call such as `help` and `list`.
+- `Call.WithDB`, a copy of a call that carries a ready handle, for tests.
+- `Step.RunOn`, a schema step on the run's handle, and `Step.Apply`, which runs whichever form a step sets.
+
+### Changed
+
+- The audit refuses a schema step that sets both `Run` and `RunOn` or neither, and a `RunOn` step without `Open`.
+- A schema step with neither form used to panic at `migrate`, and now every command refuses it.
+
 ## [0.6.1] - 2026-10-07
 
 ### Fixed
