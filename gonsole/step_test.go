@@ -158,6 +158,58 @@ func TestApplyRunsEitherForm(t *testing.T) {
 	}
 }
 
+// mustRefuseTheStep fails the test unless Check and a run of list both refuse p with the one offence want.
+func mustRefuseTheStep(t *testing.T, p gonsole.Program, want string) {
+	t.Helper()
+	if got := errorText(p.Check(gonsole.Loaded{})); got != want {
+		t.Errorf("Check() = %q, want %q", got, want)
+	}
+	if got := execute(t, p, "list"); got.code != gonsole.ExitFailed || got.stderr != "myapp: "+want+"\n" {
+		t.Errorf("list exits %d with stderr %q, want 1 and the offence %q", got.code, got.stderr, want)
+	}
+}
+
+func TestCheckRefusesAStepWithBothForms(t *testing.T) {
+	t.Parallel()
+
+	var s steps
+	both := s.atAddress("reports")
+	both.RunOn = s.onHandle("reports").RunOn
+
+	mustRefuseTheStep(t, migrating(newOpener(), s.atAddress("accounts"), both),
+		`gonsole: step "reports" sets both Run and RunOn`)
+}
+
+func TestCheckRefusesAStepWithNeither(t *testing.T) {
+	t.Parallel()
+
+	var s steps
+
+	mustRefuseTheStep(t, migrating(newOpener(), s.atAddress("accounts"), gonsole.Step{Name: "reports"}),
+		`gonsole: step "reports" sets neither Run nor RunOn`)
+}
+
+func TestCheckRefusesAHandleStepWithoutAnOpener(t *testing.T) {
+	t.Parallel()
+
+	var s steps
+	p := migrating(newOpener(), s.atAddress("accounts"), s.onHandle("reports"))
+	p.Open = nil
+
+	mustRefuseTheStep(t, p, `gonsole: step "reports" runs on the database handle without Open`)
+}
+
+func TestCheckPassesStepsOfEitherFormWithAnOpener(t *testing.T) {
+	t.Parallel()
+
+	var s steps
+	p := migrating(newOpener(), s.atAddress("accounts"), s.onHandle("reports"))
+
+	if err := p.Check(gonsole.Loaded{}); err != nil {
+		t.Errorf("Check() = %v, want nil", err)
+	}
+}
+
 func TestApplyRefusesBothAndNeither(t *testing.T) {
 	t.Parallel()
 
