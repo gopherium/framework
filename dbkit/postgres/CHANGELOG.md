@@ -10,6 +10,8 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-09
+
 ### Added
 
 - `CheckAddress`, which checks a PostgreSQL address before pgx reads it, every refused address marked `dbkit.ErrAddress` and never echoed.
@@ -54,3 +56,6 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 ### Security
 
 - Requires `golang.org/x/text` v0.41.0, which fixes GO-2026-6629.
+- Requires Go 1.27.2, which fixes GO-2026-6607 in `crypto/tls`.
+
+[0.1.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fpostgres%2Fv0.1.0
