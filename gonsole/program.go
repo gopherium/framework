@@ -4,6 +4,7 @@ package gonsole
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -63,6 +64,8 @@ type Program struct {
 	Env Env
 	// Database is the name of the setting that holds the database address.
 	Database string
+	// Open returns a handle on the database at databaseURL without connecting, the one handle Call.DB answers.
+	Open func(ctx context.Context, databaseURL string) (*sql.DB, error)
 	// Reserved lists namespaces core keeps before any of its commands uses them.
 	Reserved []string
 	// Renamed maps an old two word spelling to the full name of the command that replaced it.
@@ -99,7 +102,7 @@ func Main(p Program) int {
 
 // Run runs the command args name and returns the exit code.
 func (p Program) Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	r := &runner{program: p, stdin: stdin, stdout: stdout, stderr: stderr}
+	r := &runner{program: p, handle: &handle{open: p.Open}, stdin: stdin, stdout: stdout, stderr: stderr}
 	r.commands, r.namespaces = index(slices.Concat(p.Commands, r.base()))
 	a := newAudit(p)
 	a.core()
@@ -107,7 +110,7 @@ func (p Program) Run(ctx context.Context, args []string, stdin io.Reader, stdout
 		return r.exit(err)
 	}
 	r.plugins = &memo{register: p.Plugins, audit: a, call: Call{
-		Stdin: stdin, Stdout: stdout, Stderr: stderr, Env: r.settings(), database: p.Database,
+		Stdin: stdin, Stdout: stdout, Stderr: stderr, Env: r.settings(), database: p.Database, handle: r.handle,
 	}}
 	return r.exit(r.finish(ctx, r.dispatch(ctx, args)))
 }
@@ -118,6 +121,7 @@ type runner struct {
 	commands   map[string]Command
 	namespaces map[string][]string
 	plugins    *memo
+	handle     *handle
 	stdin      io.Reader
 	stdout     io.Writer
 	stderr     io.Writer
@@ -125,9 +129,9 @@ type runner struct {
 	flags      *flag.FlagSet
 }
 
-// finish releases the plugins and returns err joined with the release failure, the failure alone after a help answer.
+// finish releases the plugins, then closes the handle, and returns err joined with their failures, alone after help.
 func (r *runner) finish(ctx context.Context, err error) error {
-	released := r.plugins.release(ctx)
+	released := errors.Join(r.plugins.release(ctx), r.handle.close())
 	if errors.Is(err, flag.ErrHelp) {
 		return released
 	}

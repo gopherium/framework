@@ -88,8 +88,23 @@ func (a *audit) core() {
 		a.shadows(cmd)
 	}
 	a.renamed()
+	a.migrations()
 	if a.program.BareServes && a.program.Serve == nil {
 		a.refuse("BareServes is set without Serve")
+	}
+}
+
+// migrations refuses a core schema step that sets both forms or neither, or runs on the handle without Open.
+func (a *audit) migrations() {
+	for _, step := range a.program.Migrations {
+		switch {
+		case step.Run != nil && step.RunOn != nil:
+			a.refuse(bothForms, step.Name)
+		case step.Run == nil && step.RunOn == nil:
+			a.refuse(neitherForm, step.Name)
+		case step.RunOn != nil && a.program.Open == nil:
+			a.refuse("step %q runs on the database handle without Open", step.Name)
+		}
 	}
 }
 

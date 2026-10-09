@@ -5,9 +5,11 @@ package gonsole
 import (
 	"cmp"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 )
 
 // base returns the commands the engine owns in the program.
@@ -103,7 +105,7 @@ func (r *runner) sow(ctx context.Context, call Call, loaded Loaded) error {
 // migrate applies the core schema steps under the lock, writing one line per applied step to w.
 func (r *runner) migrate(ctx context.Context, call Call, w io.Writer) error {
 	return r.locked(ctx, call, func(address string) error {
-		return r.steps(ctx, address, w)
+		return r.steps(ctx, call, address, w)
 	})
 }
 
@@ -111,7 +113,7 @@ func (r *runner) migrate(ctx context.Context, call Call, w io.Writer) error {
 func (r *runner) migrateAll(ctx context.Context, call Call, w io.Writer) (Loaded, error) {
 	var loaded Loaded
 	err := r.locked(ctx, call, func(address string) (err error) {
-		if err = r.steps(ctx, address, w); err != nil {
+		if err = r.steps(ctx, call, address, w); err != nil {
 			return err
 		}
 		loaded, err = r.migratePlugins(ctx, call, w)
@@ -134,10 +136,14 @@ func (r *runner) locked(ctx context.Context, call Call, apply func(address strin
 	return apply(address)
 }
 
-// steps applies the core schema steps to the database at address, writing one line per applied step to w.
-func (r *runner) steps(ctx context.Context, address string, w io.Writer) error {
+// steps applies the core schema steps at address or on the run's handle, writing one line per applied step to w.
+func (r *runner) steps(ctx context.Context, call Call, address string, w io.Writer) error {
+	db, err := r.stepHandle(ctx, call)
+	if err != nil {
+		return err
+	}
 	for _, step := range r.program.Migrations {
-		if err := step.Run(ctx, address); err != nil {
+		if err := step.Apply(ctx, address, db); err != nil {
 			return fmt.Errorf("migrate %s: %w", step.Name, err)
 		}
 		if _, err := fmt.Fprintf(w, "migrated %s\n", step.Name); err != nil {
@@ -145,6 +151,14 @@ func (r *runner) steps(ctx context.Context, address string, w io.Writer) error {
 		}
 	}
 	return nil
+}
+
+// stepHandle returns the run's database handle when a core schema step runs on it, nil when none does.
+func (r *runner) stepHandle(ctx context.Context, call Call) (*sql.DB, error) {
+	if !slices.ContainsFunc(r.program.Migrations, func(step Step) bool { return step.RunOn != nil }) {
+		return nil, nil
+	}
+	return call.DB(ctx)
 }
 
 // migratePlugins applies every plugin's schema and writes its line to w, nothing in a program without plugins.
