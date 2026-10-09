@@ -8,6 +8,12 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
+## [0.5.0] - 2026-10-09
+
+### Added
+
+- `RolesFrom`, which builds `Roles` from a role registry and the privileged roles the program names.
+
 ## [0.4.1] - 2026-10-07
 
 ### Changed
@@ -72,6 +78,7 @@ Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 - Every command finds an account by its address trimmed and in lower case.
 - `Commands`, every account command in the order it is declared.
 
+[0.5.0]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fauth%2Fv0.5.0
 [0.4.1]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fauth%2Fv0.4.1
 [0.4.0]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fauth%2Fv0.4.0
 [0.3.0]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fauth%2Fv0.3.0
