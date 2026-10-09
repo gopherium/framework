@@ -26,7 +26,7 @@ func Authorize(cfg Config) func(ctx context.Context, call gonsole.Call, capabili
 			return err
 		}
 		return withPool(ctx, call, func(pool *pgxpool.Pool) error {
-			if err := recordsHeld(ctx, pool); err != nil {
+			if err := recordsHeld(ctx, postgresRecords{db: pool}); err != nil {
 				return err
 			}
 			return may(ctx, postgres.NewUserStore(pool), roles, address(call.Actor), capability)

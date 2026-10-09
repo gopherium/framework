@@ -4,9 +4,7 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"maps"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,10 +12,6 @@ import (
 
 	"github.com/gopherium/framework/gonsole"
 )
-
-// storeRecord inserts one record, finding the account the acting address names.
-const storeRecord = `INSERT INTO gonsole.records (id, actor, account_id, command, args, flags)
-VALUES ($1::uuid, $2, (SELECT id FROM auth.users WHERE email = $2), $3, $4::jsonb, $5::jsonb)`
 
 // Record returns the hook that stores one row naming the acting account and the command it applied.
 func Record(cfg Config) func(ctx context.Context, call gonsole.Call, command string) error {
@@ -58,10 +52,13 @@ func store(ctx context.Context, databaseURL string, call gonsole.Call, command s
 		return err
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-	flags := map[string]string{}
-	maps.Copy(flags, call.Flags)
-	id := uuid.Must(uuid.NewV7()).String()
-	args := string(must(json.Marshal(append([]string{}, call.Args...))))
-	_, err = conn.Exec(ctx, storeRecord, id, address(call.Actor), command, args, string(must(json.Marshal(flags))))
-	return err
+	return postgresRecords{db: conn}.Insert(ctx, entryOf(call, command))
+}
+
+// entryOf returns the entry recording command as call ran it, under a new UUIDv7.
+func entryOf(call gonsole.Call, command string) Entry {
+	return Entry{
+		ID: uuid.Must(uuid.NewV7()).String(), Actor: address(call.Actor), Command: command,
+		Args: call.Args, Flags: call.Flags,
+	}
 }
