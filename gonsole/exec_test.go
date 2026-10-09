@@ -22,9 +22,15 @@ import (
 // exampleSwitch is the variable that turns the test binary into the example program.
 const exampleSwitch = "GONSOLE_EXEC_EXAMPLE"
 
+// handleSwitch is the variable that turns the test binary into the example program that migrates on one handle.
+const handleSwitch = "GONSOLE_EXEC_HANDLE"
+
 func TestMain(m *testing.M) {
 	if os.Getenv(exampleSwitch) == "1" {
 		os.Exit(gonsole.Main(exampleapp.Program(os.Getenv)))
+	}
+	if os.Getenv(handleSwitch) == "1" {
+		os.Exit(gonsole.Main(exampleapp.HandleProgram(os.Getenv)))
 	}
 	os.Exit(m.Run())
 }
