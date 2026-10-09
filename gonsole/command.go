@@ -60,6 +60,8 @@ type Call struct {
 	database string
 	// plugins is the registration of the plugins the run shares.
 	plugins *memo
+	// handle is the database handle the run shares.
+	handle *handle
 }
 
 // DatabaseURL returns the program's database address, an error naming an empty setting unless the call describes.
