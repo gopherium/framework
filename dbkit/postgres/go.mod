@@ -1,6 +1,6 @@
 module github.com/gopherium/framework/dbkit/postgres
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/gopherium/framework/dbkit v0.1.0
