@@ -10,6 +10,10 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
 ## [Unreleased]
 
+### Changed
+
+- The module needs Go 1.27.2.
+
 ## [0.1.0] - 2026-10-08
 
 ### Added
