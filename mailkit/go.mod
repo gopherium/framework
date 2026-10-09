@@ -1,6 +1,6 @@
 module github.com/gopherium/framework/mailkit
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/mocktools/go-smtp-mock/v2 v2.5.4
