@@ -10,7 +10,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/gopherium/gouncer"
-	"github.com/gopherium/gouncer/authkit/postgres"
 
 	"github.com/gopherium/framework/gonsole"
 )
@@ -22,7 +21,7 @@ func List(_ Config) gonsole.Command {
 		Summary: "list every account with its role",
 		JSON:    true,
 		Run: func(ctx context.Context, call gonsole.Call) error {
-			return withStore(ctx, call, func(store *postgres.UserStore) error {
+			return withStore(ctx, call, func(store Accounts) error {
 				users, err := store.ListUsers(ctx)
 				if err != nil {
 					return err

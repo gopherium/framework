@@ -7,8 +7,6 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/gopherium/gouncer/authkit/postgres"
-
 	"github.com/gopherium/framework/gonsole"
 )
 
@@ -43,7 +41,7 @@ func grant(ctx context.Context, call gonsole.Call, cfg Config) error {
 	if err := known(roles, role); err != nil {
 		return err
 	}
-	return withReach(ctx, call, cfg, roles, func(store *postgres.UserStore, within reach) error {
+	return withReach(ctx, call, cfg, roles, func(store Accounts, within reach) error {
 		if err := within.gives(role); err != nil {
 			return err
 		}
@@ -52,7 +50,7 @@ func grant(ctx context.Context, call gonsole.Call, cfg Config) error {
 }
 
 // grantIn gives role to every account in store holding none, a dry run until the call applies.
-func grantIn(ctx context.Context, call gonsole.Call, store *postgres.UserStore, role string) error {
+func grantIn(ctx context.Context, call gonsole.Call, store Accounts, role string) error {
 	if !call.Apply {
 		count, err := roleless(ctx, store)
 		if err != nil {
@@ -70,7 +68,7 @@ func grantIn(ctx context.Context, call gonsole.Call, store *postgres.UserStore, 
 }
 
 // roleless returns how many accounts in store hold no role.
-func roleless(ctx context.Context, store *postgres.UserStore) (int64, error) {
+func roleless(ctx context.Context, store Accounts) (int64, error) {
 	users, err := store.ListUsers(ctx)
 	if err != nil {
 		return 0, err

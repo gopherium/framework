@@ -59,7 +59,7 @@ func alternatives(names []string) string {
 }
 
 // withStore runs use over the account store of the program's database and closes its pool after.
-func withStore(ctx context.Context, call gonsole.Call, use func(store *postgres.UserStore) error) error {
+func withStore(ctx context.Context, call gonsole.Call, use func(store Accounts) error) error {
 	return withPool(ctx, call, func(pool *pgxpool.Pool) error {
 		return use(postgres.NewUserStore(pool))
 	})

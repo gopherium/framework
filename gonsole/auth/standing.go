@@ -6,8 +6,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gopherium/gouncer/authkit/postgres"
-
 	"github.com/gopherium/framework/gonsole"
 )
 
@@ -42,7 +40,7 @@ func setStanding(ctx context.Context, call gonsole.Call, cfg Config, verb string
 	if err != nil {
 		return err
 	}
-	return withReach(ctx, call, cfg, roles, func(store *postgres.UserStore, within reach) error {
+	return withReach(ctx, call, cfg, roles, func(store Accounts, within reach) error {
 		held, err := store.UserByEmail(ctx, email)
 		if err != nil {
 			return err
