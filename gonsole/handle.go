@@ -64,7 +64,7 @@ func (h *handle) opened(ctx context.Context, c Call) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := h.open(ctx, address)
+	db, err := h.called(ctx, address)
 	switch {
 	case err != nil:
 		return nil, fmt.Errorf("open the database: %w", err)
@@ -72,6 +72,12 @@ func (h *handle) opened(ctx context.Context, c Call) (*sql.DB, error) {
 		return nil, errors.New("gonsole: Open answered no database")
 	}
 	return db, nil
+}
+
+// called runs the program's opener at address, a panic inside it as the error naming Open.
+func (h *handle) called(ctx context.Context, address string) (db *sql.DB, err error) {
+	defer recoverRun("Open", &err)
+	return h.open(ctx, address)
 }
 
 // close closes the handle the run opened, nothing when none opened.

@@ -8,6 +8,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -294,6 +295,39 @@ func TestAFailedOpenIsReturnedToEveryCaller(t *testing.T) {
 	}
 	if opens := o.opens.Load(); opens != 1 {
 		t.Errorf("Open ran %d times, want once", opens)
+	}
+}
+
+func TestAPanickingOpenIsReturnedToEveryCaller(t *testing.T) {
+	t.Parallel()
+
+	opens := 0
+	var h handles
+	p := handled(newOpener(), gonsole.Command{
+		Name: "report:list", Summary: "list every report",
+		Run: func(ctx context.Context, call gonsole.Call) error {
+			_, registered := call.Plugins(ctx)
+			_, err := h.ask(ctx, call)
+			return errors.Join(registered, err)
+		},
+	})
+	p.Open = func(context.Context, string) (*sql.DB, error) {
+		opens++
+		panic("the pool size is wrong")
+	}
+	p.Plugins = func(ctx context.Context, call gonsole.Call) (gonsole.Loaded, error) {
+		_, err := h.ask(ctx, call)
+		return gonsole.Loaded{}, err
+	}
+
+	got := execute(t, p, "report:list")
+
+	want := "open the database: Open: panic: the pool size is wrong"
+	if len(h.failures) != 2 || errorText(h.failures[0]) != want || errorText(h.failures[1]) != want {
+		t.Errorf("DB() errors = %v, want %q for the registration and the command", h.failures, want)
+	}
+	if got.code != gonsole.ExitFailed || !strings.HasPrefix(got.stderr, "myapp: "+want+"\n") || opens != 1 {
+		t.Errorf("code %d, Open ran %d times, stderr %q, want 1, once and the panic first", got.code, opens, got.stderr)
 	}
 }
 
