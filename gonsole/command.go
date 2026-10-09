@@ -4,9 +4,11 @@ package gonsole
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 )
 
@@ -95,6 +97,27 @@ type Step struct {
 	Name string
 	// Run applies the step against the database at databaseURL.
 	Run func(ctx context.Context, databaseURL string) error
+	// RunOn applies the step on the run's one database handle.
+	RunOn func(ctx context.Context, db *sql.DB) error
+}
+
+// bothForms is the offence of a step that sets both Run and RunOn.
+const bothForms = "step %q sets both Run and RunOn"
+
+// neitherForm is the offence of a step that sets neither Run nor RunOn.
+const neitherForm = "step %q sets neither Run nor RunOn"
+
+// Apply runs the one form the step sets, Run at address or RunOn on db.
+func (s Step) Apply(ctx context.Context, address string, db *sql.DB) error {
+	switch {
+	case s.Run != nil && s.RunOn != nil:
+		return fmt.Errorf("gonsole: "+bothForms, s.Name)
+	case s.Run != nil:
+		return s.Run(ctx, address)
+	case s.RunOn != nil:
+		return s.RunOn(ctx, db)
+	}
+	return fmt.Errorf("gonsole: "+neitherForm, s.Name)
 }
 
 // Encode writes v to Stdout as one indented JSON document.
