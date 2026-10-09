@@ -8,6 +8,12 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `RolesFrom`, which builds `Roles` from a role registry and the privileged roles the program names.
+
 ## [0.4.1] - 2026-10-07
 
 ### Changed
