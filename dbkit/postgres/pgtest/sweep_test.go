@@ -6,12 +6,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/gopherium/framework/dbkit"
 	"github.com/gopherium/framework/dbkit/postgres/pgtest"
@@ -115,6 +117,28 @@ func TestSweepReturnsTheErrorOfTheList(t *testing.T) {
 	prefix := "dbkit: list the test databases: "
 	if !errors.Is(err, context.Canceled) || !strings.HasPrefix(err.Error(), prefix) || dropped != nil {
 		t.Errorf("Sweep() = %v, %v, want nothing and context.Canceled after %q", dropped, err, prefix)
+	}
+}
+
+func TestSweepNamesTheRightsARoleThatCannotReadServerFilesLacks(t *testing.T) {
+	t.Parallel()
+
+	role, password := serverName("dbkit_sweep_"), "sweep-role-password"
+	serverExec(t, "CREATE ROLE %I LOGIN CREATEDB PASSWORD %L", role, password)
+	t.Cleanup(func() { serverExec(t, "DROP ROLE %I", role) })
+	server, err := url.Parse(serverAddress())
+	if err != nil {
+		t.Fatal("the test server address cannot be parsed")
+	}
+	server.User = url.UserPassword(role, password)
+
+	dropped, err := pgtest.Sweep(t.Context(), server.String(), sweepCentury)
+
+	prefix := "dbkit: Sweep needs a role that may run pg_stat_file and drop the test databases, such as a superuser: "
+	var serverErr *pgconn.PgError
+	if !errors.As(err, &serverErr) || serverErr.Code != "42501" || !strings.HasPrefix(err.Error(), prefix) ||
+		dropped != nil {
+		t.Errorf("Sweep() = %v, %v, want nothing and the server's 42501 after %q", dropped, err, prefix)
 	}
 }
 

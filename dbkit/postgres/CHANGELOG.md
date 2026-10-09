@@ -49,6 +49,7 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 - `pgtest.Sweep`, which drops each pgtestdb instance older than `olderThan` with no session on it, and returns the names it dropped.
 - `pgtest.Sweep` refuses an `olderThan` at or below zero, and keeps templates and every database that is not an instance.
 - `pgtest.Sweep` runs a plain `DROP DATABASE` and leaves out a database that is gone before its drop.
+- `pgtest.Sweep` names the rights it needs when its role may not run `pg_stat_file`.
 
 ### Security
 

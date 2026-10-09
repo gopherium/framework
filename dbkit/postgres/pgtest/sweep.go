@@ -22,7 +22,13 @@ const (
 	objectInUse = "55006"
 	// noDatabase is the PostgreSQL error code of a drop that finds the database gone.
 	noDatabase = "3D000"
+	// insufficientPrivilege is the PostgreSQL error code of a query the role has no right to run.
+	insufficientPrivilege = "42501"
 )
+
+// errSweepRights is the error of a sweep whose role may not read when each test database was made.
+var errSweepRights = errors.New(
+	"dbkit: Sweep needs a role that may run pg_stat_file and drop the test databases, such as a superuser")
 
 // instancePattern matches the name pgtestdb gives each database it cuts from a template.
 const instancePattern = `^testdb_tpl_[0-9a-f]{32}_inst_[0-9a-f]{8}$`
@@ -48,10 +54,9 @@ func sweep(ctx context.Context, address string, olderThan time.Duration, scope s
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, h.Close()) }()
-	rows, _ := h.Pool.Query(ctx, instances, instancePattern, scope, olderThan)
-	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	names, err := list(ctx, h.Pool, olderThan, scope)
 	if err != nil {
-		return nil, fmt.Errorf("dbkit: list the test databases: %w", err)
+		return nil, err
 	}
 	var dropped []string
 	for _, name := range names {
@@ -64,6 +69,20 @@ func sweep(ctx context.Context, address string, olderThan time.Duration, scope s
 		}
 	}
 	return dropped, nil
+}
+
+// list returns through pool the names of the instances older than olderThan whose name holds scope.
+func list(ctx context.Context, pool *pgxpool.Pool, olderThan time.Duration, scope string) ([]string, error) {
+	rows, _ := pool.Query(ctx, instances, instancePattern, scope, olderThan)
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	var serverErr *pgconn.PgError
+	switch {
+	case errors.As(err, &serverErr) && serverErr.Code == insufficientPrivilege:
+		return nil, fmt.Errorf("%w: %w", errSweepRights, err)
+	case err != nil:
+		return nil, fmt.Errorf("dbkit: list the test databases: %w", err)
+	}
+	return names, nil
 }
 
 // drop drops the database name through pool unless a session is on it or it is gone, and reports whether it went.
