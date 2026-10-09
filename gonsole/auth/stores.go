@@ -9,6 +9,14 @@ import (
 	"github.com/gopherium/gouncer/authkit"
 )
 
+// Stores is the account store and the record store one call runs on.
+type Stores struct {
+	// Accounts holds the accounts.
+	Accounts Accounts
+	// Records holds the command records.
+	Records RecordStore
+}
+
 // Accounts is the account store the account commands and Authorize run on.
 type Accounts interface {
 	authkit.AdminStore

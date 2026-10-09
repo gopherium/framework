@@ -21,15 +21,22 @@ import (
 const plantRecord = `INSERT INTO gonsole.records (id, applied_at, actor, account_id, command, args, flags)
 VALUES ($1::uuid, $2, $3, (SELECT id FROM auth.users WHERE email = $3), $4, $5::jsonb, $6::jsonb)`
 
-// postgresFixture returns the PostgreSQL record store of a fresh database and the hooks recordstest drives it with.
-func postgresFixture(t *testing.T) recordstest.Fixture {
+// poolAt returns a pool over the database at address, closed when the test ends.
+func poolAt(t *testing.T, address string) *pgxpool.Pool {
 	t.Helper()
-	address := migrated(t)
 	pool, err := pgxpool.New(t.Context(), address)
 	if err != nil {
 		t.Fatalf("opening %s: %v", address, err)
 	}
 	t.Cleanup(pool.Close)
+	return pool
+}
+
+// postgresFixture returns the PostgreSQL record store of a fresh database and the hooks recordstest drives it with.
+func postgresFixture(t *testing.T) recordstest.Fixture {
+	t.Helper()
+	address := migrated(t)
+	pool := poolAt(t, address)
 	accounts := postgres.NewUserStore(pool)
 	return recordstest.Fixture{
 		Records: auth.PostgresRecords(pool),

@@ -41,7 +41,7 @@ func create(ctx context.Context, call gonsole.Call, cfg Config) error {
 	if err := known(roles, call.Flags["role"]); err != nil {
 		return err
 	}
-	return withStore(ctx, call, func(store Accounts) error {
+	return cfg.withStore(ctx, call, func(store Accounts) error {
 		return authkit.CreateAdmin(ctx, store, call.Flags["email"], call.Flags["name"], call.Flags["role"],
 			call.Stdin, call.Stdout)
 	})

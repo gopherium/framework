@@ -22,11 +22,11 @@ type reach struct {
 func withReach(ctx context.Context, call gonsole.Call, cfg Config, roles Roles,
 	use func(store Accounts, within reach) error) error {
 	if cfg.Capability == "" {
-		return withStore(ctx, call, func(store Accounts) error {
+		return cfg.withStore(ctx, call, func(store Accounts) error {
 			return use(store, reach{})
 		})
 	}
-	return withStore(ctx, call, func(store Accounts) error {
+	return cfg.withStore(ctx, call, func(store Accounts) error {
 		user, err := acting(ctx, store, address(call.Actor))
 		if err != nil {
 			return err

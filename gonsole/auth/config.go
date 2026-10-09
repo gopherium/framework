@@ -4,6 +4,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -26,6 +27,8 @@ type Config struct {
 	RecordTimeout time.Duration
 	// RecordsLimit is how many records account:records lists when the COMMAND_RECORDS_LIMIT setting is empty.
 	RecordsLimit int
+	// Stores builds a call's stores and the release of what it opened, nil for PostgreSQL at the database setting.
+	Stores func(ctx context.Context, call gonsole.Call) (Stores, func(context.Context) error, error)
 }
 
 // Roles is one program's role vocabulary.
@@ -58,11 +61,30 @@ func alternatives(names []string) string {
 	return strings.Join(names[:last], ", ") + " or " + names[last]
 }
 
-// withStore runs use over the account store of the program's database and closes its pool after.
-func withStore(ctx context.Context, call gonsole.Call, use func(store Accounts) error) error {
-	return withPool(ctx, call, func(pool *pgxpool.Pool) error {
-		return use(postgres.NewUserStore(pool))
+// withStore runs use over the account store of the call and releases it after.
+func (c Config) withStore(ctx context.Context, call gonsole.Call, use func(store Accounts) error) error {
+	return c.withStores(ctx, call, func(stores Stores) error {
+		return use(stores.Accounts)
 	})
+}
+
+// withStores runs use over the stores of the call and releases them after, even when use panics.
+func (c Config) withStores(ctx context.Context, call gonsole.Call, use func(stores Stores) error) (err error) {
+	if c.Stores == nil {
+		return withPool(ctx, call, func(pool *pgxpool.Pool) error {
+			return use(Stores{Accounts: postgres.NewUserStore(pool), Records: postgresRecords{db: pool}})
+		})
+	}
+	stores, release, err := c.Stores(ctx, call)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if released := release(context.WithoutCancel(ctx)); released != nil {
+			err = errors.Join(err, released)
+		}
+	}()
+	return use(stores)
 }
 
 // withPool runs use over a pool of the program's database and closes the pool after.

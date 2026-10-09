@@ -16,8 +16,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/gopherium/framework/gonsole"
 )
 
@@ -35,8 +33,8 @@ func Records(cfg Config) gonsole.Command {
 			if err != nil {
 				return err
 			}
-			return withPool(ctx, call, func(pool *pgxpool.Pool) error {
-				held, err := latest(ctx, postgresRecords{db: pool}, limit)
+			return cfg.withStores(ctx, call, func(stores Stores) error {
+				held, err := latest(ctx, stores.Records, limit)
 				if err != nil {
 					return err
 				}

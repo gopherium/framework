@@ -20,17 +20,35 @@ func Record(cfg Config) func(ctx context.Context, call gonsole.Call, command str
 		if err != nil {
 			return err
 		}
-		databaseURL, err := call.DatabaseURL()
+		insert, err := cfg.inserter(call)
 		if err != nil {
 			return err
 		}
 		bounded, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		if err := store(bounded, databaseURL, call, command); err != nil {
+		if err := insert(bounded, entryOf(call, command)); err != nil {
 			return fmt.Errorf("record %s: %w", command, err)
 		}
 		return nil
 	}
+}
+
+// inserter returns what stores the call's entry, the built stores or one connection to the database setting.
+func (c Config) inserter(call gonsole.Call) (func(ctx context.Context, entry Entry) error, error) {
+	if c.Stores != nil {
+		return func(ctx context.Context, entry Entry) error {
+			return c.withStores(ctx, call, func(stores Stores) error {
+				return stores.Records.Insert(ctx, entry)
+			})
+		}, nil
+	}
+	databaseURL, err := call.DatabaseURL()
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, entry Entry) error {
+		return store(ctx, databaseURL, entry)
+	}, nil
 }
 
 // recordTimeout returns how long storing one record may take, as the setting or the fallback names it.
@@ -45,14 +63,14 @@ func (c Config) recordTimeout(env gonsole.Env) (time.Duration, error) {
 	return timeout, nil
 }
 
-// store inserts the record of command as call ran it into the database at databaseURL.
-func store(ctx context.Context, databaseURL string, call gonsole.Call, command string) error {
+// store inserts entry into the database at databaseURL over one connection.
+func store(ctx context.Context, databaseURL string, entry Entry) error {
 	conn, err := pgx.Connect(ctx, databaseURL)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-	return postgresRecords{db: conn}.Insert(ctx, entryOf(call, command))
+	return postgresRecords{db: conn}.Insert(ctx, entry)
 }
 
 // entryOf returns the entry recording command as call ran it, under a new UUIDv7.

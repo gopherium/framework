@@ -9,8 +9,6 @@ import (
 	"slices"
 
 	"github.com/gopherium/gouncer"
-	"github.com/gopherium/gouncer/authkit/postgres"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/gopherium/framework/gonsole"
 )
@@ -25,11 +23,11 @@ func Authorize(cfg Config) func(ctx context.Context, call gonsole.Call, capabili
 		if err != nil {
 			return err
 		}
-		return withPool(ctx, call, func(pool *pgxpool.Pool) error {
-			if err := recordsHeld(ctx, postgresRecords{db: pool}); err != nil {
+		return cfg.withStores(ctx, call, func(stores Stores) error {
+			if err := recordsHeld(ctx, stores.Records); err != nil {
 				return err
 			}
-			return may(ctx, postgres.NewUserStore(pool), roles, address(call.Actor), capability)
+			return may(ctx, stores.Accounts, roles, address(call.Actor), capability)
 		})
 	}
 }
