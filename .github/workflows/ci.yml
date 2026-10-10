@@ -35,6 +35,8 @@ jobs:
 
   test-postgres:
     runs-on: ubuntu-latest
+    env:
+      DBKIT_TEST_POSTGRES_URL: "postgres://postgres:postgres@localhost:5434/postgres?sslmode=disable"
     strategy:
       fail-fast: false
       matrix:
