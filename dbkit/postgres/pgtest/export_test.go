@@ -7,3 +7,6 @@ var SweepWithin = sweep
 
 // ConfigOf is configOf under an exported name.
 var ConfigOf = configOf
+
+// NewSweptWithin is newSwept under an exported name.
+var NewSweptWithin = newSwept
