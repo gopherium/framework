@@ -166,6 +166,7 @@ func TestStatementWrites(t *testing.T) {
 		{"SELECT \x80delete FROM t", false},
 		{"SELECT zdelete, Zdelete FROM t", false},
 		{"SELECT x0delete, x9delete FROM t", false},
+		{"SELECT id FROM t WHERE title LIKE $1 ESCAPE $2", false},
 	}
 	sqliteOnly := []writeCase{
 		{"SELECT [DELETE]", false},
@@ -189,6 +190,7 @@ func TestStatementWrites(t *testing.T) {
 		{"SELECT [] FROM t", false},
 		{"SELECT 1 -- note\rDELETE FROM t", false},
 		{"SELECT /* a /* b */ 1", false},
+		{`SELECT id FROM t WHERE title LIKE $1 ESCAPE '\'`, false},
 	}
 	postgresOnly := []writeCase{
 		{"SELECT $$it's$$, 1", true},
@@ -213,6 +215,7 @@ func TestStatementWrites(t *testing.T) {
 		{"SELECT 'x\\'' ; DELETE FROM t --'", true},
 		{"SELECT 'a\\d' FROM t", true},
 		{"SELECT 'it''s', \"a\\b\" FROM t", false},
+		{`SELECT id FROM t WHERE title LIKE $1 ESCAPE '\'`, true},
 		{"SELECT 1into t2 FROM t", true},
 		{"SELECT 1delete", true},
 		{"SELECT 1e'x'", true},
