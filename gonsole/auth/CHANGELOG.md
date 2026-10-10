@@ -8,6 +8,16 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `Accounts`, the account store every account command and `Authorize` run on.
+- `RecordStore` and `Entry`, the store of the command records and one record in it.
+- `PostgresRecords`, the record store of a PostgreSQL database.
+- `Stores` and `Config.Stores`, which build the stores of each call, nil keeping PostgreSQL at the database setting.
+- `recordstest`, the contract suite every record store passes.
+
 ## [0.5.0] - 2026-10-09
 
 ### Added
