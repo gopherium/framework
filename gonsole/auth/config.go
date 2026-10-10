@@ -27,7 +27,7 @@ type Config struct {
 	RecordTimeout time.Duration
 	// RecordsLimit is how many records account:records lists when the COMMAND_RECORDS_LIMIT setting is empty.
 	RecordsLimit int
-	// Stores builds a call's stores and the release of what it opened, nil for PostgreSQL at the database setting.
+	// Stores builds a call's stores and the release of what it opened, if any, nil for PostgreSQL at the database setting.
 	Stores func(ctx context.Context, call gonsole.Call) (Stores, func(context.Context) error, error)
 }
 
@@ -78,6 +78,9 @@ func (c Config) withStores(ctx context.Context, call gonsole.Call, use func(stor
 	stores, release, err := c.Stores(ctx, call)
 	if err != nil {
 		return err
+	}
+	if release == nil {
+		return use(stores)
 	}
 	defer func() {
 		if released := release(context.WithoutCancel(ctx)); released != nil {

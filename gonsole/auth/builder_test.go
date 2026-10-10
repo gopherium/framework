@@ -182,6 +182,38 @@ func TestRecordReleasesTheBuiltStoresAfterTheInsert(t *testing.T) {
 	}
 }
 
+func TestRecordTakesANilReleaseAsNothingToRelease(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		inserted error
+		code     int
+		want     string
+	}{
+		{"when the insert succeeds", nil, gonsole.ExitDone, ""},
+		{"when the insert fails", errInsert, gonsole.ExitFailed, "myapp: record report:purge: the insert failed\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			records := inserter{insert: func(context.Context) error { return tt.inserted }}
+			cfg := checked()
+			cfg.Stores = func(context.Context, gonsole.Call) (auth.Stores, func(context.Context) error, error) {
+				return auth.Stores{Records: records}, nil, nil
+			}
+			p := recording(unreachable, cfg, nil, command("report:purge"))
+
+			got := testkit.Run(t, p, "", "report:purge", "-as", "admin@example.com")
+
+			if got.Code != tt.code || got.Stderr != tt.want {
+				t.Errorf("code %d, stderr %q, want %d and %q", got.Code, got.Stderr, tt.code, tt.want)
+			}
+		})
+	}
+}
+
 func TestRecordReleasesTheBuiltStoresWhenTheInsertPanics(t *testing.T) {
 	t.Parallel()
 
