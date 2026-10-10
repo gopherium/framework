@@ -11,6 +11,9 @@ import (
 	"github.com/gopherium/framework/dbkit/postgres/pgtest"
 )
 
+// sweptWait is how long a later caller must stay blocked behind a sweep to show that it waits.
+const sweptWait = 300 * time.Millisecond
+
 // sweptStale returns the name of a stale instance of the template that scope names, created and aged for the test.
 func sweptStale(t *testing.T, scope string) string {
 	t.Helper()
@@ -43,6 +46,36 @@ func TestNewSweptSweepsEachAddressOnceThenHandsOutADatabase(t *testing.T) {
 		if got := newRows(t, address); got != 1 {
 			t.Errorf("a database NewSwept returned holds %d rows, want the migrated row", got)
 		}
+	}
+}
+
+func TestNewSweptMakesALaterCallerWaitForTheSweep(t *testing.T) {
+	t.Parallel()
+
+	_, names, scope := sweepInstances(t, 1)
+	migrator := newMigrator()
+	heldLock := sweepLock(t, names[0])
+	first, second := make(chan string, 1), make(chan string, 1)
+	go func() { first <- pgtest.NewSweptWithin(t, serverAddress(), sweepAnyAge, migrator, scope) }()
+	sweepAwaitDrops(t, names[0], 1, nil)
+	go func() { second <- pgtest.NewSweptWithin(t, serverAddress(), sweepAnyAge, migrator, scope) }()
+
+	var address string
+	select {
+	case address = <-second:
+		t.Error("the second NewSwept() returned while the first one's sweep was still dropping, want it to wait")
+	case <-time.After(sweptWait):
+	}
+	if err := heldLock.Rollback(t.Context()); err != nil {
+		t.Fatalf("Rollback() error = %v, want nil", err)
+	}
+	serverDropTemplateAtEnd(t, serverDatabase(t, <-first))
+	if address == "" {
+		address = <-second
+	}
+	if newRows(t, address) != 1 || sweepExists(t, names[0]) {
+		t.Errorf("after the sweep the second database holds %d rows and the stale one exists %t, want 1 and false",
+			newRows(t, address), sweepExists(t, names[0]))
 	}
 }
 
