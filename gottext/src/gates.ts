@@ -1,39 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { po } from 'gettext-parser'
+import type { GetTextTranslation } from 'gettext-parser'
 
 import { METADATA, held, keyOf } from './catalog.js'
 import { fuzzyOf } from './merge.js'
 
 /**
- * Returns every key a catalogue carries a filled translation for.
- * @param source - The catalogue as PO text.
- * @returns The keys answered.
+ * Reports whether a translation fills every form its message requires.
+ * @param entry - The translation the catalogue carries, if any.
+ * @param forms - How many forms the message requires in this language.
+ * @returns Whether every required form is answered.
  */
-function answered(source: string): Set<string> {
-	const held = new Set<string>()
-	for (const [context, entries] of Object.entries(po.parse(source).translations)) {
-		for (const [msgid, entry] of Object.entries(entries)) {
-			if (msgid !== METADATA && entry.msgstr.length > 0 && entry.msgstr.every((form) => form !== '')) {
-				held.add(keyOf(context, msgid))
-			}
-		}
-	}
-	return held
+function answered(entry: GetTextTranslation | undefined, forms: number): boolean {
+	return entry !== undefined && entry.msgstr.length >= forms && entry.msgstr.every((form) => form !== '')
+}
+
+/**
+ * Returns the declared plural count, or the runtime's default when no usable count is named.
+ * @param rule - The catalogue's plural rule, if it declares one.
+ * @returns How many forms a plural message requires.
+ */
+function pluralCount(rule: string | undefined): number {
+	const counted = /nplurals\s*=\s*(\d+)/.exec(rule ?? '')
+	return counted === null ? 2 : Number(counted[1]) || 2
 }
 
 /**
  * Returns every message of a catalogue that still waits for a translation.
+ * Plural messages need the catalogue's declared form count, or two when it names no usable count.
  * @param source - The catalogue as PO text.
  * @param template - The template naming every message that must be answered.
  * @returns The keys still waiting, in the order the template holds them.
  */
 export function untranslated(source: string, template: string = source): string[] {
-	const held = answered(source)
+	const carried = po.parse(source)
+	const forms = pluralCount(carried.headers?.['Plural-Forms'])
 	const waiting: string[] = []
 	for (const [context, entries] of Object.entries(po.parse(template).translations)) {
-		for (const msgid of Object.keys(entries)) {
-			if (msgid !== METADATA && !held.has(keyOf(context, msgid))) {
+		for (const [msgid, entry] of Object.entries(entries)) {
+			const answer = held(held(carried.translations, context), msgid)
+			if (msgid !== METADATA && !answered(answer, entry.msgid_plural === undefined ? 1 : forms)) {
 				waiting.push(keyOf(context, msgid))
 			}
 		}

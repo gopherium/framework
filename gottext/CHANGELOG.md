@@ -5,6 +5,13 @@ versioning follows [Semantic Versioning](https://semver.org/). While at 0.x,
 minor releases may break. Releases are tagged `gottext/vX.Y.Z` and publish
 from CI.
 
+## [Unreleased]
+
+### Fixed
+
+- `untranslated` reports plural messages missing forms required by the catalogue's
+  `Plural-Forms` header, including answers flattened to one form in the catalogue.
+
 ## [0.6.0] - 2026-10-04
 
 ### Added

@@ -250,6 +250,91 @@ test('names every message still waiting for a translation', () => {
 	expect(untranslated(CATALOGUE, TEMPLATE)).toEqual(['Newer posts'])
 })
 
+test('names a plural message missing a form its catalogue requires', () => {
+	const source = `msgid ""
+msgstr ""
+"Plural-Forms: nplurals=3; plural=(n == 1 ? 0 : n == 2 ? 1 : 2);\\n"
+
+msgid "One post"
+msgid_plural "Many posts"
+msgstr[0] "One answer"
+msgstr[1] "Two answers"
+`
+
+	expect(untranslated(source)).toEqual(['One post'])
+	expect(untranslated(source.replace('msgstr[1]', 'msgstr[2]'))).toEqual(['One post'])
+	expect(untranslated(source, source.replace('nplurals=3', 'nplurals=2'))).toEqual(['One post'])
+})
+
+test('names a plural message whose catalogue flattened its answer to one form', () => {
+	const naming = 'msgctxt "posts"\nmsgid "One post"\nmsgid_plural "Many posts"\nmsgstr[0] ""\nmsgstr[1] ""\n'
+	const source = `${CATALOGUE}\nmsgctxt "posts"\nmsgid "One post"\nmsgstr "Una entrada"\n`
+
+	expect(untranslated(source, naming)).toEqual(['posts\u0004One post'])
+})
+
+test('requires both plural forms when a catalogue declares no plural rule', () => {
+	const source = 'msgid "One post"\nmsgid_plural "Many posts"\nmsgstr[0] "Una entrada"\n'
+
+	expect(untranslated(source)).toEqual(['One post'])
+})
+
+test.each(['plural=(n != 1);', 'nplurals=0; plural=0;'])(
+	'uses two plural forms when the declared count is unusable: %s',
+	(rule) => {
+		const header = `msgid ""\nmsgstr ""\n"Plural-Forms: ${rule}\\n"\n\n`
+		const source = `${header}msgid "One post"\nmsgid_plural "Many posts"\nmsgstr[0] "Una entrada"\n`
+
+		expect(untranslated(source)).toEqual(['One post'])
+		expect(untranslated(`${source}msgstr[1] "Varias entradas"\n`)).toEqual([])
+	},
+)
+
+test('names a message whose declared plural forms include an empty answer', () => {
+	const source = `${CATALOGUE}\nmsgid "One post"\nmsgid_plural "Many posts"\nmsgstr[0] "Una entrada"\nmsgstr[1] ""\n`
+
+	expect(untranslated(source)).toEqual(['One post'])
+})
+
+test('names a message whose context the catalogue does not answer', () => {
+	const naming = 'msgctxt "posts"\nmsgid "One post"\nmsgstr ""\n'
+
+	expect(untranslated(CATALOGUE, naming)).toEqual(['posts\u0004One post'])
+})
+
+test('accepts one plural form for a language declaring just one', () => {
+	const naming = 'msgid "One post"\nmsgid_plural "Many posts"\nmsgstr[0] ""\nmsgstr[1] ""\n'
+	const source = `msgid ""
+msgstr ""
+"Plural-Forms: nplurals=1; plural=0;\\n"
+
+msgid "One post"
+msgid_plural "Many posts"
+msgstr[0] "投稿"
+`
+
+	expect(untranslated(source)).toEqual([])
+	expect(untranslated(source, naming)).toEqual([])
+})
+
+test('accepts every declared plural form beside a singular message', () => {
+	const source = `msgid ""
+msgstr ""
+"Plural-Forms: nplurals=3; plural=(n == 1 ? 0 : n == 2 ? 1 : 2);\\n"
+
+msgid "Saved"
+msgstr "Saved answer"
+
+msgid "One post"
+msgid_plural "Many posts"
+msgstr[0] "One answer"
+msgstr[1] "Two answers"
+msgstr[2] "Many answers"
+`
+
+	expect(untranslated(source)).toEqual([])
+})
+
 test('names every message the template no longer carries', () => {
 	const stale = `${CATALOGUE}
 msgid "Retired"
