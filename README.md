@@ -20,6 +20,9 @@ need and ignore the rest.
 - [`dbkit/sqlite`](dbkit/sqlite/) opens a program's one SQLite handle
   with every connection rule on, classifies its errors and ships test
   helpers.
+- [`goncierge`](goncierge/) holds the capabilities each role carries, as
+  granted by named sources, and the rules a plugin declares its roles
+  under.
 - [`gonsole`](gonsole/) runs the command line of a Go program built from
   core commands, settings and compiled plugins.
 - [`gonsole/auth`](gonsole/auth/) offers the account commands of a program
