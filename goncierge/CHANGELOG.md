@@ -2,7 +2,7 @@
 
 Releases of this module are tagged `goncierge/vX.Y.Z`.
 
-## Unreleased
+## 0.1.0 - 2026-10-10
 
 - First release: a `Registry` of the capabilities each role carries, granted, revoked and withdrawn per source.
 - `Replace` swaps every grant of one source in one step.
