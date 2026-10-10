@@ -10,6 +10,12 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 
 ## [Unreleased]
 
+### Added
+
+- `pgtest.NewSwept`, which sweeps a server's stale test databases at
+  most once per test process and address, then answers `New`. A failed
+  sweep is logged on the test and the tests go on.
+
 ## [0.1.0] - 2026-10-09
 
 ### Added
