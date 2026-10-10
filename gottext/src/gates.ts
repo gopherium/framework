@@ -13,7 +13,7 @@ import { fuzzyOf } from './merge.js'
  * @returns Whether every required form is answered.
  */
 function answered(entry: GetTextTranslation | undefined, forms: number): boolean {
-	return entry !== undefined && entry.msgstr.length >= forms && entry.msgstr.every((form) => form !== '')
+	return entry !== undefined && entry.msgstr.length >= forms && entry.msgstr.slice(0, forms).every((form) => form !== '')
 }
 
 /**

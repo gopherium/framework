@@ -317,6 +317,20 @@ msgstr[0] "投稿"
 	expect(untranslated(source, naming)).toEqual([])
 })
 
+test('ignores an empty plural form beyond the count the language requires', () => {
+	const source = `msgid ""
+msgstr ""
+"Plural-Forms: nplurals=1; plural=0;\\n"
+
+msgid "One post"
+msgid_plural "Many posts"
+msgstr[0] "投稿"
+msgstr[1] ""
+`
+
+	expect(untranslated(source)).toEqual([])
+})
+
 test('accepts every declared plural form beside a singular message', () => {
 	const source = `msgid ""
 msgstr ""
