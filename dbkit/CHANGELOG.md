@@ -12,7 +12,7 @@ Releases of this module are tagged `dbkit/vX.Y.Z`.
 
 ### Added
 
-- `EscapeLike`, a search term with `%`, `_` and `\` escaped for a LIKE pattern, which SQLite reads only beside `ESCAPE '\'`.
+- `EscapeLike`, a search term with `%`, `_` and `\` escaped by a backslash, matched as `LIKE $1 ESCAPE $2` with the backslash bound to `$2`.
 
 ### Changed
 
