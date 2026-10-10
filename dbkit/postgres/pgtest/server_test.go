@@ -3,11 +3,13 @@
 package pgtest_test
 
 import (
-	"cmp"
 	"context"
 	"crypto/rand"
+	"errors"
+	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -19,12 +21,42 @@ import (
 	"github.com/gopherium/framework/dbkit/postgres/pgtest"
 )
 
-// serverFallback is the test server the tests reach when DBKIT_TEST_POSTGRES_URL is empty.
-const serverFallback = "postgres://postgres:postgres@localhost:5434/postgres?sslmode=disable"
+const (
+	// serverVariable names the environment variable that holds the test server address.
+	serverVariable = "DBKIT_TEST_POSTGRES_URL"
+	// serverMissing is the line the tests print when serverVariable is empty.
+	serverMissing = "dbkit: the tests need " + serverVariable +
+		", the address of a PostgreSQL server they may create databases on"
+)
+
+// TestMain runs the tests once serverVariable holds the test server address.
+func TestMain(m *testing.M) {
+	if strings.TrimSpace(serverAddress()) == "" {
+		_, _ = fmt.Fprintln(os.Stderr, serverMissing)
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
 
 // serverAddress returns the address of the test server.
 func serverAddress() string {
-	return cmp.Or(os.Getenv("DBKIT_TEST_POSTGRES_URL"), serverFallback)
+	return os.Getenv(serverVariable)
+}
+
+func TestTheTestsStopWhenTheServerVariableIsEmptyOrBlank(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"", " \t"} {
+		child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^$")
+		child.Env = append(os.Environ(), serverVariable+"="+value)
+		out, err := child.CombinedOutput()
+
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || !strings.Contains(string(out), serverMissing) {
+			t.Errorf("the tests with %s set to %q ended with %v and printed %q, want a failed run that prints %q",
+				serverVariable, value, err, out, serverMissing)
+		}
+	}
 }
 
 // serverConfig returns the pgtestdb configuration of the test server, its user, password and database escaped.
@@ -45,7 +77,7 @@ func TestServerConfigKeepsTheEscapedPartsOfTheServerAddress(t *testing.T) {
 		Path:     "/database" + urlNeedsEscaping,
 		RawQuery: "sslmode=disable",
 	}
-	t.Setenv("DBKIT_TEST_POSTGRES_URL", server.String())
+	t.Setenv(serverVariable, server.String())
 	password, _ := server.User.Password()
 	database := strings.TrimPrefix(server.Path, "/")
 
