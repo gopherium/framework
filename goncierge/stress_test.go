@@ -29,21 +29,25 @@ func TestTogglingASourceBesideReadersKeepsEveryAnswerWhole(t *testing.T) {
 	whole := []string{"events.manage", "events.publish"}
 
 	var stop atomic.Bool
-	var writers, readers sync.WaitGroup
+	var writing, writers, readers sync.WaitGroup
+	writing.Add(8)
 	for range 8 {
 		writers.Go(func() {
-			for range 300 {
+			writing.Done()
+			for !stop.Load() {
 				_ = registry.Grant("events", "moderator", whole...)
 				_ = registry.Grant("events", "admin", "events.manage")
 				registry.Withdraw("events")
+				runtime.Gosched()
 			}
 		})
 	}
+	writing.Wait()
 	byAdmin := []string{"admin", "editor", "author"}
 	byModerator := []string{"moderator", "author"}
 	for range 8 {
 		readers.Go(func() {
-			for !stop.Load() {
+			for range 300 {
 				if !registry.Can("admin", "manage_users") {
 					t.Error("Can(admin, manage_users) = false while the source toggles, want true")
 					return
@@ -64,9 +68,9 @@ func TestTogglingASourceBesideReadersKeepsEveryAnswerWhole(t *testing.T) {
 			}
 		})
 	}
-	writers.Wait()
-	stop.Store(true)
 	readers.Wait()
+	stop.Store(true)
+	writers.Wait()
 
 	if registry.Known("moderator") || registry.Can("admin", "events.manage") {
 		t.Error("the events grants survived the last withdraw")

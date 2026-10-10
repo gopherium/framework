@@ -5,6 +5,7 @@ package goncierge_test
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -194,25 +195,36 @@ func TestCheckBesideADeclareSeesTheOldDeclarationOrTheNew(t *testing.T) {
 	}
 	mustDeclare(t, registry, rules, "events", older...)
 
-	var done atomic.Bool
+	var stop atomic.Bool
 	var group sync.WaitGroup
+	writing := make(chan struct{})
 	group.Go(func() {
-		defer done.Store(true)
-		for range 500 {
+		close(writing)
+		for !stop.Load() {
 			_ = goncierge.Declare(registry, rules, "events", newer)
 			_ = goncierge.Declare(registry, rules, "events", older)
+			runtime.Gosched()
 		}
 	})
 
 	every := []string{"admin", "organizer", "steward"}
-	for !done.Load() {
+	<-writing
+	for range 500 {
 		if got := registry.Roles(); !slices.Equal(got, every) {
-			t.Fatalf("Roles() = %q beside a declaration, want %q", got, every)
+			t.Errorf("Roles() = %q beside a declaration, want %q", got, every)
+			break
 		}
 		if got := registry.Grantable("admin"); !slices.Equal(got, every) {
-			t.Fatalf("Grantable(admin) = %q beside a declaration, want %q", got, every)
+			t.Errorf("Grantable(admin) = %q beside a declaration, want %q", got, every)
+			break
 		}
+		if got := registry.HoldersOf("events.manage"); len(got) != 0 && !slices.Equal(got, every) {
+			t.Errorf("HoldersOf(events.manage) = %q beside a declaration, want none or %q", got, every)
+			break
+		}
+		runtime.Gosched()
 	}
+	stop.Store(true)
 	group.Wait()
 }
 

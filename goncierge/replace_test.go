@@ -4,6 +4,7 @@ package goncierge_test
 
 import (
 	"errors"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -135,24 +136,31 @@ func TestCheckBesideAReplaceSeesTheOldGrantsOrTheNew(t *testing.T) {
 		t.Fatalf("Replace(events) error = %v, want nil", err)
 	}
 
-	var done atomic.Bool
+	var stop atomic.Bool
 	var group sync.WaitGroup
+	writing := make(chan struct{})
 	group.Go(func() {
-		defer done.Store(true)
-		for range 500 {
+		close(writing)
+		for !stop.Load() {
 			_ = registry.Replace("events", newer)
 			_ = registry.Replace("events", older)
+			runtime.Gosched()
 		}
 	})
 
 	both := []string{"organizer", "steward"}
-	for !done.Load() {
+	<-writing
+	for range 500 {
 		if got := registry.Roles(); !slices.Equal(got, both) {
-			t.Fatalf("Roles() = %q beside a replace, want %q", got, both)
+			t.Errorf("Roles() = %q beside a replace, want %q", got, both)
+			break
 		}
 		if got := registry.HoldersOf("events.manage"); len(got) != 0 && !slices.Equal(got, both) {
-			t.Fatalf("HoldersOf(events.manage) = %q beside a replace, want none or %q", got, both)
+			t.Errorf("HoldersOf(events.manage) = %q beside a replace, want none or %q", got, both)
+			break
 		}
+		runtime.Gosched()
 	}
+	stop.Store(true)
 	group.Wait()
 }
