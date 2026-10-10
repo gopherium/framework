@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/gopherium/gouncer"
-	"github.com/gopherium/gouncer/authkit/postgres"
 
 	"github.com/gopherium/framework/gonsole"
 )
@@ -38,7 +37,7 @@ func setRole(ctx context.Context, call gonsole.Call, cfg Config) error {
 	if err := known(roles, role); err != nil {
 		return err
 	}
-	return withReach(ctx, call, cfg, roles, func(store *postgres.UserStore, within reach) error {
+	return withReach(ctx, call, cfg, roles, func(store Accounts, within reach) error {
 		if err := within.gives(role); err != nil {
 			return err
 		}

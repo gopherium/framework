@@ -16,15 +16,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/gopherium/framework/gonsole"
 )
-
-// latestRecords reads the newest records first, as many as the limit allows.
-const latestRecords = `SELECT applied_at, actor, account_id::text, command, args, flags
-FROM gonsole.records ORDER BY applied_at DESC, id DESC LIMIT $1`
 
 // Records returns account:records, which lists the latest command records.
 func Records(cfg Config) gonsole.Command {
@@ -40,14 +33,14 @@ func Records(cfg Config) gonsole.Command {
 			if err != nil {
 				return err
 			}
-			return withPool(ctx, call, func(pool *pgxpool.Pool) error {
-				held, err := latest(ctx, pool, limit)
+			return cfg.withStores(ctx, call, func(stores Stores) error {
+				held, err := latest(ctx, stores.Records, limit)
 				if err != nil {
 					return err
 				}
 				if call.JSON {
 					return call.Encode(struct {
-						Records []record `json:"records"`
+						Records []Entry `json:"records"`
 					}{held})
 				}
 				return lines(call.Stdout, held)
@@ -81,10 +74,10 @@ func (c Config) recordsLimit(env gonsole.Env) (int, error) {
 	return limit, nil
 }
 
-// recordsHeld refuses a database that lacks the table the records go to.
-func recordsHeld(ctx context.Context, pool *pgxpool.Pool) error {
-	var held bool
-	if err := pool.QueryRow(ctx, "SELECT to_regclass('gonsole.records') IS NOT NULL").Scan(&held); err != nil {
+// recordsHeld refuses a record store that lacks the table the records go to.
+func recordsHeld(ctx context.Context, records RecordStore) error {
+	held, err := records.Held(ctx)
+	if err != nil {
 		return err
 	}
 	if !held {
@@ -93,34 +86,16 @@ func recordsHeld(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// record is one applied guarded command as account:records answers it.
-type record struct {
-	AppliedAt time.Time         `json:"applied_at"`
-	Actor     string            `json:"actor"`
-	AccountID *string           `json:"account_id"`
-	Command   string            `json:"command"`
-	Args      []string          `json:"args"`
-	Flags     map[string]string `json:"flags"`
-}
-
-// latest returns the newest records of the database behind pool, at most limit of them.
-func latest(ctx context.Context, pool *pgxpool.Pool, limit int) ([]record, error) {
-	if err := recordsHeld(ctx, pool); err != nil {
+// latest returns the newest entries of records, at most limit of them.
+func latest(ctx context.Context, records RecordStore, limit int) ([]Entry, error) {
+	if err := recordsHeld(ctx, records); err != nil {
 		return nil, err
 	}
-	rows, err := pool.Query(ctx, latestRecords, limit)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (record, error) {
-		var held record
-		err := row.Scan(&held.AppliedAt, &held.Actor, &held.AccountID, &held.Command, &held.Args, &held.Flags)
-		return held, err
-	})
+	return records.Latest(ctx, limit)
 }
 
 // lines writes one aligned line per record to w: the time, the actor, the command, its arguments and its flags.
-func lines(w io.Writer, held []record) error {
+func lines(w io.Writer, held []Entry) error {
 	aligned := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, r := range held {
 		line := []string{r.AppliedAt.UTC().Format(time.RFC3339), r.Actor, r.Command}

@@ -9,8 +9,6 @@ import (
 	"slices"
 
 	"github.com/gopherium/gouncer"
-	"github.com/gopherium/gouncer/authkit/postgres"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/gopherium/framework/gonsole"
 )
@@ -25,17 +23,17 @@ func Authorize(cfg Config) func(ctx context.Context, call gonsole.Call, capabili
 		if err != nil {
 			return err
 		}
-		return withPool(ctx, call, func(pool *pgxpool.Pool) error {
-			if err := recordsHeld(ctx, pool); err != nil {
+		return cfg.withStores(ctx, call, func(stores Stores) error {
+			if err := recordsHeld(ctx, stores.Records); err != nil {
 				return err
 			}
-			return may(ctx, postgres.NewUserStore(pool), roles, address(call.Actor), capability)
+			return may(ctx, stores.Accounts, roles, address(call.Actor), capability)
 		})
 	}
 }
 
 // acting returns the account at the address actor, an error naming the address when no account holds it.
-func acting(ctx context.Context, store *postgres.UserStore, actor string) (gouncer.User, error) {
+func acting(ctx context.Context, store Accounts, actor string) (gouncer.User, error) {
 	user, err := store.UserByEmail(ctx, actor)
 	if errors.Is(err, gouncer.ErrUserNotFound) {
 		return gouncer.User{}, fmt.Errorf("no account answers to %s", actor)
@@ -44,7 +42,7 @@ func acting(ctx context.Context, store *postgres.UserStore, actor string) (gounc
 }
 
 // may refuses actor unless an enabled account it activated holds a role carrying capability.
-func may(ctx context.Context, store *postgres.UserStore, roles Roles, actor, capability string) error {
+func may(ctx context.Context, store Accounts, roles Roles, actor, capability string) error {
 	user, err := acting(ctx, store, actor)
 	switch {
 	case err != nil:

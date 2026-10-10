@@ -5,6 +5,7 @@ linters:
   enable:
     - cyclop
     - depguard
+    - forbidigo
     - gocognit
     - lll
     - misspell
@@ -37,6 +38,12 @@ linters:
             - github.com/google/uuid
             - github.com/peterldowns/pgtestdb
             - github.com/pressly/goose/v3
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^sql\.Open(DB)?$
+          pkg: ^database/sql$
+          msg: take the run's database handle from gonsole.Call.DB
   exclusions:
     rules:
       - path: _test\.go

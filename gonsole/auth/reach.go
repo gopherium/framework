@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/gopherium/gouncer"
-	"github.com/gopherium/gouncer/authkit/postgres"
 
 	"github.com/gopherium/framework/gonsole"
 )
@@ -21,13 +20,13 @@ type reach struct {
 
 // withReach runs use over the account store and the reach of the account the call acts as.
 func withReach(ctx context.Context, call gonsole.Call, cfg Config, roles Roles,
-	use func(store *postgres.UserStore, within reach) error) error {
+	use func(store Accounts, within reach) error) error {
 	if cfg.Capability == "" {
-		return withStore(ctx, call, func(store *postgres.UserStore) error {
+		return cfg.withStore(ctx, call, func(store Accounts) error {
 			return use(store, reach{})
 		})
 	}
-	return withStore(ctx, call, func(store *postgres.UserStore) error {
+	return cfg.withStore(ctx, call, func(store Accounts) error {
 		user, err := acting(ctx, store, address(call.Actor))
 		if err != nil {
 			return err
