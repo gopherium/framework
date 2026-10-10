@@ -10,6 +10,8 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-10
+
 ### Added
 
 - `pgtest.NewSwept`, which sweeps a server's stale test databases at
@@ -64,4 +66,5 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 - Requires `golang.org/x/text` v0.41.0, which fixes GO-2026-6629.
 - Requires Go 1.27.2, which fixes GO-2026-6607 in `crypto/tls`.
 
+[0.2.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fpostgres%2Fv0.2.0
 [0.1.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fpostgres%2Fv0.1.0
