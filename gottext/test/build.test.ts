@@ -279,14 +279,14 @@ test('requires both plural forms when a catalogue declares no plural rule', () =
 	expect(untranslated(source)).toEqual(['One post'])
 })
 
-test.each(['plural=(n != 1);', 'nplurals=0; plural=0;'])(
-	'uses two plural forms when the declared count is unusable: %s',
+test.each(['', 'plural=(n != 1);', 'nplurals=0; plural=0;'])(
+	'refuses a declared plural rule with no usable count: %s',
 	(rule) => {
 		const header = `msgid ""\nmsgstr ""\n"Plural-Forms: ${rule}\\n"\n\n`
 		const source = `${header}msgid "One post"\nmsgid_plural "Many posts"\nmsgstr[0] "Una entrada"\n`
 
-		expect(untranslated(source)).toEqual(['One post'])
-		expect(untranslated(`${source}msgstr[1] "Varias entradas"\n`)).toEqual([])
+		expect(() => untranslated(source))
+			.toThrow('the committed catalogue declares a plural rule naming no usable count')
 	},
 )
 

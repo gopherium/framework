@@ -37,6 +37,24 @@ export function globCatalogs(chunks: Chunks): (locale: string) => Promise<Catalo
 }
 
 /**
+ * Returns the declared plural count, or two when the catalogue has no plural rule.
+ * @param rule - The catalogue's plural rule, if it declares one.
+ * @returns How many forms a plural message requires.
+ * @throws When a declared rule names no usable count.
+ */
+export function pluralCount(rule: string | undefined): number {
+	if (rule === undefined) {
+		return 2
+	}
+	const counted = /nplurals\s*=\s*(\d+)/.exec(rule)
+	const forms = counted === null ? 0 : Number(counted[1])
+	if (forms < 1) {
+		throw new Error('the committed catalogue declares a plural rule naming no usable count')
+	}
+	return forms
+}
+
+/**
  * Returns the entry a table holds under a key, ignoring anything it inherits.
  * @param table - The table to read, or nothing when the catalogue lacks it.
  * @param key - The key to look under.

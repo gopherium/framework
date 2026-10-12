@@ -165,13 +165,12 @@ msgstr[2] ""
 	expect(held).not.toMatch(/msgstr\[2\]/)
 })
 
-test('refuses a committed rule naming no usable count', () => {
-	const ours = 'msgid ""\nmsgstr ""\n"Plural-Forms: plural=(n != 1);\\n"\n'
+test.each(['', 'plural=(n != 1);', 'nplurals=0; plural=0;'])('refuses an unusable plural count: %s', (rule) => {
+	const ours = `msgid ""\nmsgstr ""\n"Plural-Forms: ${rule}\\n"\n`
 	const theirs = 'msgid ""\nmsgstr ""\n\nmsgid "Older posts"\nmsgstr "Entradas anteriores"\n'
 
-	expect(() => withPluralRuleOf(ours, theirs)).toThrow(/count/)
-	expect(() => withPluralRuleOf(ours.replace('plural=', 'nplurals=0; plural='), theirs))
-		.toThrow(/count/)
+	expect(() => withPluralRuleOf(ours, theirs))
+		.toThrow('the committed catalogue declares a plural rule naming no usable count')
 })
 
 test('takes the platform plural rule when the catalogue declares none', () => {

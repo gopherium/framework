@@ -3,7 +3,7 @@
 import { po } from 'gettext-parser'
 import type { GetTextTranslation, GetTextTranslations } from 'gettext-parser'
 
-import { METADATA, held as ownEntry } from './catalog.js'
+import { METADATA, held as ownEntry, pluralCount } from './catalog.js'
 
 /** COMPILED is how every catalogue this brick writes is laid out. */
 const COMPILED = { foldLength: 0, eol: '\n' } as const
@@ -95,11 +95,7 @@ export function withPluralRuleOf(current: string, incoming: string): string {
 	}
 	const held = po.parse(incoming)
 	held.headers['Plural-Forms'] = rule
-	const counted = /nplurals\s*=\s*(\d+)/.exec(rule)
-	const forms = counted === null ? 0 : Number(counted[1])
-	if (forms < 1) {
-		throw new Error('the committed catalogue declares a plural rule naming no usable count')
-	}
+	const forms = pluralCount(rule)
 	for (const entries of Object.values(held.translations)) {
 		for (const entry of Object.values(entries)) {
 			if (entry.msgstr.length > forms) {
