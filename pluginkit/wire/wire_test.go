@@ -43,6 +43,38 @@ func writePluginIn(t *testing.T, root, pluginRoot, dir, manifestJSON string) {
 	}
 }
 
+// makeDirs creates each slash path directory under root.
+func makeDirs(t *testing.T, root string, dirs ...string) {
+	t.Helper()
+	for _, dir := range dirs {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatalf("creating %s: %v", dir, err)
+		}
+	}
+}
+
+// readFile returns the contents of the slash path under root.
+func readFile(t *testing.T, root, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	return string(data)
+}
+
+// writeFile writes content to the slash path under root, creating its directory.
+func writeFile(t *testing.T, root, path, content string) {
+	t.Helper()
+	full := filepath.Join(root, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("creating the directory of %s: %v", path, err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", path, err)
+	}
+}
+
 func TestLoadManifestsReadsValidPlugins(t *testing.T) {
 	t.Parallel()
 
@@ -625,22 +657,23 @@ func TestRunRejectsDuplicateIDAcrossRoots(t *testing.T) {
 // earlierWiring is what the wiring files hold before a refused run.
 const earlierWiring = "earlier wiring\n"
 
-// runBeside writes an alpha plugin, the manifest of id and earlier wiring files, then runs the generator.
-func runBeside(t *testing.T, cfg Config, id, manifestJSON string) (string, error) {
+// writeBeside writes an alpha plugin, the manifest of id and earlier wiring files under a new root.
+func writeBeside(t *testing.T, cfg Config, id, manifestJSON string) string {
 	t.Helper()
 	root := t.TempDir()
 	writePlugin(t, root, "alpha",
 		`{"id": "alpha", "name": "Alpha", "backend": "example.com/myapp/plugins/alpha", "frontend": "@myapp/plugin-alpha"}`)
 	writePlugin(t, root, id, manifestJSON)
 	for _, path := range []string{cfg.GoWiringPath, cfg.TSWiringPath} {
-		wiring := filepath.Join(root, filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(wiring), 0o755); err != nil {
-			t.Fatalf("creating the wiring directory: %v", err)
-		}
-		if err := os.WriteFile(wiring, []byte(earlierWiring), 0o644); err != nil {
-			t.Fatalf("writing the earlier wiring: %v", err)
-		}
+		writeFile(t, root, path, earlierWiring)
 	}
+	return root
+}
+
+// runBeside writes the tree of writeBeside, then runs the generator.
+func runBeside(t *testing.T, cfg Config, id, manifestJSON string) (string, error) {
+	t.Helper()
+	root := writeBeside(t, cfg, id, manifestJSON)
 	return root, Run(root, cfg)
 }
 
@@ -651,6 +684,12 @@ func assertRefused(t *testing.T, cfg Config, root, id, reason string, err error)
 	if err == nil || err.Error() != want {
 		t.Errorf("Run() error = %v, want %q", err, want)
 	}
+	assertWiringKept(t, cfg, root)
+}
+
+// assertWiringKept checks that the wiring files under root still hold the earlier wiring.
+func assertWiringKept(t *testing.T, cfg Config, root string) {
+	t.Helper()
 	for _, path := range []string{cfg.GoWiringPath, cfg.TSWiringPath} {
 		if kept, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(path))); string(kept) != earlierWiring {
 			t.Errorf("%s after the refusal = %q, want the earlier wiring untouched", path, kept)
@@ -762,6 +801,123 @@ func TestRunAcceptsAnIDOnlyTheOtherWiringOwns(t *testing.T) {
 	}
 }
 
+func TestRunReadsNoPackageJSONWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	root := writeBeside(t, testConfig, "beta", `{"id": "beta", "name": "Beta", "frontend": "@myapp/plugin-beta"}`)
+	writeFile(t, root, "frontend/package.json", "{")
+
+	if err := Run(root, testConfig); err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+
+	if kept, _ := os.ReadFile(filepath.Join(root, "frontend", "package.json")); string(kept) != "{" {
+		t.Errorf("package.json = %q, want the malformed file untouched", kept)
+	}
+}
+
+func TestRunWritesNoPackageJSONWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	root, err := runBeside(t, testConfig, "beta", `{"id": "beta", "name": "Beta", "frontend": "@myapp/plugin-beta"}`)
+
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "frontend", "package.json")); !os.IsNotExist(err) {
+		t.Errorf("package.json exists without PackageJSONPath, stat error = %v", err)
+	}
+}
+
+func TestRunRefusesAMalformedPackageJSONBeforeAnyWrite(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig
+	cfg.PackageJSONPath = "frontend/package.json"
+	cfg.GoRegistryPath = "internal/graphroot/registry_gen.go"
+	cfg.GoRegistryPackage = "graphroot"
+	root := writeBeside(t, cfg, "beta", `{"id": "beta", "name": "Beta", "frontend": "@myapp/plugin-beta"}`)
+	writeFile(t, root, cfg.PackageJSONPath, `{"dependencies": []}`)
+	makeDirs(t, root, "internal/graphroot")
+
+	err := Run(root, cfg)
+
+	want := "pluginwire: " + filepath.Join(root, "frontend", "package.json") + ": dependencies is not an object"
+	if err == nil || err.Error() != want {
+		t.Errorf("Run() error = %v, want %q", err, want)
+	}
+	assertWiringKept(t, cfg, root)
+	if kept, _ := os.ReadFile(filepath.Join(root, "frontend", "package.json")); string(kept) != `{"dependencies": []}` {
+		t.Errorf("package.json after the refusal = %q, want it untouched", kept)
+	}
+	if _, err := os.Stat(filepath.Join(root, "internal", "graphroot", "registry_gen.go")); !os.IsNotExist(err) {
+		t.Errorf("registry_gen.go exists after the refusal, stat error = %v", err)
+	}
+}
+
+func TestRunReportsAManifestRefusalBeforeAPackageJSONError(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig
+	cfg.Reserved = []string{"token"}
+	cfg.PackageJSONPath = "frontend/package.json"
+
+	root, err := runBeside(t, cfg, "token",
+		`{"id": "token", "name": "Token", "backend": "example.com/myapp/plugins/token"}`)
+
+	assertRefused(t, cfg, root, "token", "is reserved", err)
+}
+
+func TestRunWritesPackageJSONFromEveryRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writePlugin(t, root, "feed", feedManifest)
+	writePluginIn(t, root, "enterprise", "audit", `{"id": "audit", "name": "Audit", "frontend": "@myapp/plugin-audit"}`)
+	makeDirs(t, root, "cmd/myapp", "frontend/src/plugins")
+	writeFile(t, root, "frontend/package.json", `{
+	"name": "@myapp/frontend",
+	"dependencies": {
+		"@myapp/frontend-sdk": "workspace:*"
+	}
+}
+`)
+	cfg := testConfig
+	cfg.Roots = []string{"plugins", "enterprise"}
+	cfg.PackageJSONPath = "frontend/package.json"
+
+	if err := Run(root, cfg); err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+
+	want := `{
+	"name": "@myapp/frontend",
+	"dependencies": {
+		"@myapp/frontend-sdk": "workspace:*",
+		"@myapp/plugin-audit": "workspace:*",
+		"@myapp/plugin-feed": "workspace:*"
+	},
+	"pluginwire": {
+		"dependencies": [
+			"@myapp/plugin-audit",
+			"@myapp/plugin-feed"
+		]
+	}
+}
+`
+	if got := readFile(t, root, "frontend/package.json"); got != want {
+		t.Errorf("package.json = %q, want %q", got, want)
+	}
+	rootOrder := "import { plugin as feed } from '@myapp/plugin-feed'\n" +
+		"import { plugin as audit } from '@myapp/plugin-audit'\n"
+	if tsSrc := readFile(t, root, "frontend/src/plugins/index.ts"); !strings.Contains(tsSrc, rootOrder) {
+		t.Errorf("index.ts = %q, want the feed import before the audit import, in root order", tsSrc)
+	}
+	if _, err := os.Stat(filepath.Join(root, "cmd", "myapp", "plugins_gen.go")); err != nil {
+		t.Errorf("plugins_gen.go beside package.json, stat error = %v, want nil", err)
+	}
+}
+
 func TestRunRejectsIncompleteConfig(t *testing.T) {
 	t.Parallel()
 
@@ -791,11 +947,21 @@ func TestRunReportsFailures(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		roots   []string
-		prepare func(t *testing.T, root string)
+		roots       []string
+		packageJSON string
+		names       string
+		prepare     func(t *testing.T, root string)
 	}{
 		"missing plugins directory": {
 			prepare: func(_ *testing.T, _ string) {},
+		},
+		"missing package.json": {
+			packageJSON: "frontend/package.json",
+			names:       "frontend/package.json",
+			prepare: func(t *testing.T, root string) {
+				writePlugin(t, root, "feed", feedManifest)
+				makeDirs(t, root, "cmd/myapp", "frontend/src/plugins")
+			},
 		},
 		"missing named root": {
 			roots: []string{"plugins", "enterprise"},
@@ -831,9 +997,19 @@ func TestRunReportsFailures(t *testing.T) {
 			tc.prepare(t, root)
 			cfg := testConfig
 			cfg.Roots = tc.roots
+			cfg.PackageJSONPath = tc.packageJSON
 
-			if err := Run(root, cfg); err == nil {
+			err := Run(root, cfg)
+
+			if err == nil {
 				t.Fatal("Run() error = nil, want an error")
+			}
+			if tc.names == "" {
+				return
+			}
+			want := "pluginwire: " + filepath.Join(root, filepath.FromSlash(tc.names)) + ": "
+			if !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("Run() error = %q, want it to start with %q", err, want)
 			}
 		})
 	}

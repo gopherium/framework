@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package wire generates an application's plugin wiring files from the
-// plugin.json manifest of every directory under each configured plugin root.
+// Package wire generates plugin wiring and an optional registry from manifests and updates an optional package.json.
 package wire
 
 import (
@@ -28,6 +27,9 @@ type Config struct {
 
 	GoRegistryPath    string
 	GoRegistryPackage string
+
+	// PackageJSONPath is the optional slash path of a package.json that depends on each frontend, listed in pluginwire.
+	PackageJSONPath string
 
 	// Reserved lists ids no plugin may take.
 	Reserved []string
@@ -243,14 +245,14 @@ func renderRegistration(cfg Config, manifests []manifest, pkg, doc, funcName str
 	return []byte(b.String())
 }
 
+// withFrontend returns the manifests that name a frontend, in order.
+func withFrontend(manifests []manifest) []manifest {
+	return slices.DeleteFunc(slices.Clone(manifests), func(m manifest) bool { return m.Frontend == "" })
+}
+
 // generateTS renders the generated TypeScript plugin-wiring file.
 func generateTS(cfg Config, manifests []manifest) []byte {
-	frontends := make([]manifest, 0, len(manifests))
-	for _, m := range manifests {
-		if m.Frontend != "" {
-			frontends = append(frontends, m)
-		}
-	}
+	frontends := withFrontend(manifests)
 
 	var b strings.Builder
 	b.WriteString(generatedHeader(cfg.tsLicense()))
@@ -265,8 +267,32 @@ func generateTS(cfg Config, manifests []manifest) []byte {
 	return []byte(b.String())
 }
 
-// Run loads the plugin manifests under root and writes the application's
-// generated Go and TypeScript wiring files per cfg.
+// output is one file Run writes, its slash path under the root and its contents.
+type output struct {
+	path string
+	data []byte
+}
+
+// outputs renders every file Run writes per cfg.
+func outputs(root string, cfg Config, manifests []manifest) ([]output, error) {
+	files := []output{
+		{path: cfg.GoWiringPath, data: generateGo(cfg, manifests)},
+		{path: cfg.TSWiringPath, data: generateTS(cfg, manifests)},
+	}
+	if cfg.GoRegistryPath != "" {
+		files = append(files, output{path: cfg.GoRegistryPath, data: generateRegistry(cfg, manifests)})
+	}
+	if cfg.PackageJSONPath == "" {
+		return files, nil
+	}
+	packageJSON, err := syncedPackageJSON(filepath.Join(root, filepath.FromSlash(cfg.PackageJSONPath)), manifests)
+	if err != nil {
+		return nil, err
+	}
+	return append(files, output{path: cfg.PackageJSONPath, data: packageJSON}), nil
+}
+
+// Run writes the Go and TypeScript wiring, optional registry and optional package.json from the manifests under root.
 func Run(root string, cfg Config) error {
 	if err := validateConfig(cfg); err != nil {
 		return err
@@ -275,20 +301,14 @@ func Run(root string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	goPath := filepath.Join(root, filepath.FromSlash(cfg.GoWiringPath))
-	if err := os.WriteFile(goPath, generateGo(cfg, manifests), 0o644); err != nil {
-		return fmt.Errorf("pluginwire: %w", err)
+	files, err := outputs(root, cfg, manifests)
+	if err != nil {
+		return err
 	}
-	tsPath := filepath.Join(root, filepath.FromSlash(cfg.TSWiringPath))
-	if err := os.WriteFile(tsPath, generateTS(cfg, manifests), 0o644); err != nil {
-		return fmt.Errorf("pluginwire: %w", err)
-	}
-	if cfg.GoRegistryPath == "" {
-		return nil
-	}
-	registryPath := filepath.Join(root, filepath.FromSlash(cfg.GoRegistryPath))
-	if err := os.WriteFile(registryPath, generateRegistry(cfg, manifests), 0o644); err != nil {
-		return fmt.Errorf("pluginwire: %w", err)
+	for _, file := range files {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(file.path)), file.data, 0o644); err != nil {
+			return fmt.Errorf("pluginwire: %w", err)
+		}
 	}
 	return nil
 }

@@ -3,6 +3,11 @@
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
+## Unreleased
+
+- The module needs Go 1.27.2.
+- `wire.Config` gains an optional `PackageJSONPath`, a package.json where `wire.Run` lists every plugin frontend as `workspace:*`, records those names under `pluginwire` and drops a recorded name no manifest names.
+
 ## 0.6.0 - 2026-09-26
 
 - The module moved to `github.com/gopherium/framework/pluginkit`.
