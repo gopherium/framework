@@ -11,12 +11,14 @@ import (
 
 // Faults holds the failures the connections of a handle from OpenWithFaults answer with.
 type Faults struct {
-	// mu guards statements and commit.
+	// mu guards statements, commit and rollback.
 	mu sync.Mutex
 	// statements maps the exact text of each chosen statement to the error it answers with.
 	statements map[string]error
 	// commit is the error the next commit answers with, or nil.
 	commit error
+	// rollback is the error the next rollback answers with, or nil.
+	rollback error
 }
 
 // FailStatement makes every statement whose text is exactly query answer err, inside transactions too.
@@ -56,6 +58,22 @@ func (f *Faults) takeCommit() error {
 	defer f.mu.Unlock()
 	err := f.commit
 	f.commit = nil
+	return err
+}
+
+// FailNextRollback makes the next rollback end its transaction and answer err.
+func (f *Faults) FailNextRollback(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rollback = err
+}
+
+// takeRollback returns the error the next rollback answers with and clears it.
+func (f *Faults) takeRollback() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	err := f.rollback
+	f.rollback = nil
 	return err
 }
 
@@ -169,12 +187,12 @@ func (s *faultStmt) QueryContext(ctx context.Context, args []driver.NamedValue) 
 	return s.driverStmt.QueryContext(ctx, args)
 }
 
-// Begin starts a transaction whose commit answers with the next commit failure.
+// Begin starts a transaction whose commit and rollback answer with the next matching failure.
 func (c *faultConn) Begin() (driver.Tx, error) {
 	return c.BeginTx(context.Background(), driver.TxOptions{})
 }
 
-// BeginTx starts a transaction whose commit answers with the next commit failure.
+// BeginTx starts a transaction whose commit and rollback answer with the next matching failure.
 func (c *faultConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	tx, err := c.driverConn.BeginTx(ctx, opts)
 	if err != nil {
@@ -183,7 +201,7 @@ func (c *faultConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.
 	return &faultTx{Tx: tx, faults: c.faults}, nil
 }
 
-// faultTx is a driver transaction whose commit answers with the next commit failure.
+// faultTx is a driver transaction whose commit and rollback answer with the next matching failure.
 type faultTx struct {
 	// Tx is the driver's own transaction.
 	driver.Tx
@@ -197,4 +215,12 @@ func (t *faultTx) Commit() error {
 		return errors.Join(err, t.Rollback())
 	}
 	return t.Tx.Commit()
+}
+
+// Rollback ends the transaction and answers the next rollback failure, or the driver's answer when none is set.
+func (t *faultTx) Rollback() error {
+	if err := t.faults.takeRollback(); err != nil {
+		return errors.Join(err, t.Tx.Rollback())
+	}
+	return t.Tx.Rollback()
 }

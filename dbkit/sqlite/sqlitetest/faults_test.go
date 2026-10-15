@@ -164,6 +164,29 @@ func TestFaultFailsTheChosenCommit(t *testing.T) {
 	mustCount(t, db, 1)
 }
 
+func TestFaultFailsTheChosenRollback(t *testing.T) {
+	t.Parallel()
+
+	faults := &sqlitetest.Faults{}
+	db := faultOpen(t, faults)
+	faults.FailNextRollback(errInjected)
+	tx := mustBegin(t, db)
+	mustExec(t, tx, faultInsert)
+
+	err := tx.Rollback()
+
+	if !errors.Is(err, errInjected) {
+		t.Errorf("Rollback() error = %v, want the injected error", err)
+	}
+	mustCount(t, db, 0)
+	next := mustBegin(t, db)
+	mustExec(t, next, "INSERT INTO fault_rows VALUES (2)")
+	if err := next.Rollback(); err != nil {
+		t.Errorf("the next Rollback() error = %v, want nil once the fault answered", err)
+	}
+	mustCount(t, db, 0)
+}
+
 func TestFaultFailsTheChosenStatementInsideATransaction(t *testing.T) {
 	t.Parallel()
 

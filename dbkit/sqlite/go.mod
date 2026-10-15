@@ -3,7 +3,7 @@ module github.com/gopherium/framework/dbkit/sqlite
 go 1.27.2
 
 require (
-	github.com/gopherium/framework/dbkit v0.1.0
+	github.com/gopherium/framework/dbkit v0.3.0
 	github.com/pressly/goose/v3 v3.27.2
 	golang.org/x/sys v0.48.0
 	modernc.org/sqlite v1.60.1
