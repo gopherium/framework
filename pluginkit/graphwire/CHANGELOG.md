@@ -12,6 +12,12 @@ Releases up to 0.3.1 were tagged `graphwire/vX.Y.Z` in
 stdlib-only `pluginkit` module so its gqlparser dependency never enters
 `pluginkit` itself.
 
+## [Unreleased]
+
+### Changed
+
+- The module needs Go 1.27.3.
+
 ## [0.4.0] - 2026-09-26
 
 ### Changed
