@@ -2,6 +2,10 @@
 
 Releases of this module are tagged `goncierge/vX.Y.Z`.
 
+## Unreleased
+
+- The module needs Go 1.27.3.
+
 ## 0.1.0 - 2026-10-10
 
 - First release: a `Registry` of the capabilities each role carries, granted, revoked and withdrawn per source.
