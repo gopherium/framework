@@ -162,12 +162,12 @@ func (w *busyWait) during(ctx context.Context) func() {
 	return func() { w.span.Store(nil) }
 }
 
-// BeginTx starts a transaction, and an error after ctx ended also matches the error of ctx.
+// BeginTx starts a transaction, and answers the error of ctx alone when it failed after ctx ended.
 func (c *busyConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	defer c.wait.during(ctx)()
 	tx, err := c.driverConn.BeginTx(ctx, opts)
 	if err != nil {
-		return nil, ended(ctx, err)
+		return nil, interrupted(ctx, err)
 	}
 	return tx, nil
 }

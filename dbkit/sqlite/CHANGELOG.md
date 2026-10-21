@@ -12,6 +12,8 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
 ### Changed
 
+- **Breaking.** Requires `modernc.org/sqlite` v1.61.0 and `modernc.org/libc` v1.79.0, and `LibcVersion` is v1.79.0.
+- **Breaking.** A `BeginTx` error after its context ends matches only the context error, no longer `dbkit.ErrBusy`, unless opening its connection answered busy.
 - The module needs Go 1.27.3.
 
 ## [0.2.0] - 2026-10-20

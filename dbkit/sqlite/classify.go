@@ -14,7 +14,7 @@ import (
 )
 
 // LibcVersion is the modernc.org/libc version the driver is pinned with.
-const LibcVersion = "v1.77.1"
+const LibcVersion = "v1.79.0"
 
 // restrictMessage is the text SQLite gives a foreign key a RESTRICT action stops.
 const restrictMessage = "FOREIGN KEY constraint failed"

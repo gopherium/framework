@@ -360,7 +360,7 @@ func TestAStatementAfterItsContextEndedAnswersTheContextError(t *testing.T) {
 	}
 }
 
-func TestABeginAfterItsContextEndedAlsoAnswersTheContextError(t *testing.T) {
+func TestABeginAfterItsContextEndedAnswersTheContextError(t *testing.T) {
 	t.Parallel()
 
 	busy := internalBusyError(t)
@@ -371,8 +371,8 @@ func TestABeginAfterItsContextEndedAlsoAnswersTheContextError(t *testing.T) {
 	_, err := conn.BeginTx(cancelled, driver.TxOptions{})
 	_, live := conn.BeginTx(t.Context(), driver.TxOptions{})
 
-	if !errors.Is(err, busy) || !errors.Is(err, context.Canceled) {
-		t.Errorf("BeginTx() under a cancelled context error = %v, want one matching both busy and context.Canceled", err)
+	if err != context.Canceled {
+		t.Errorf("BeginTx() under a cancelled context error = %v, want exactly context.Canceled", err)
 	}
 	if live != busy {
 		t.Errorf("BeginTx() under a live context error = %v, want the busy error as it is", live)

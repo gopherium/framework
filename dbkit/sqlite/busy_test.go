@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"math"
 	"path/filepath"
 	"slices"
@@ -56,6 +57,8 @@ const (
 	busyTypedRead = "SELECT amount, label FROM typed_rows"
 	// busyNoTable is a query that reads no table, so its open rows hold no read lock.
 	busyNoTable = "VALUES (1), (2)"
+	// busySetTimeout sets a connection's own busy timeout to its one argument in milliseconds.
+	busySetTimeout = "PRAGMA busy_timeout=%d"
 )
 
 // busyShape is one call that waits for the write lock.
@@ -86,13 +89,13 @@ var busyShapes = []busyShape{
 			_ = tx.Rollback()
 		}
 		return err
-	}, true, true},
+	}, false, true},
 	{"InTx", func(ctx context.Context, db *sql.DB, _ *sql.Stmt) error {
 		return dbkit.InTx(ctx, db, func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, busyInsert)
 			return err
 		})
-	}, true, false},
+	}, false, false},
 	{"a statement prepared before the writer", func(ctx context.Context, _ *sql.DB, prepared *sql.Stmt) error {
 		_, err := prepared.ExecContext(ctx)
 		return err
@@ -225,6 +228,30 @@ func TestABusyWaitEndsWhenCancelled(t *testing.T) {
 	t.Parallel()
 
 	busyMustEndEvery(t, busyCancelOf, context.Canceled)
+}
+
+func TestACallersOwnBusyTimeoutStillEndsAtItsDeadline(t *testing.T) {
+	t.Parallel()
+
+	db := rulesOpen(t, testOptions())
+	rulesExec(t, db, busySchema)
+	pinned := busyPin(t, db)
+	busyPinExec(t, pinned, fmt.Sprintf(busySetTimeout, optionsBusyTimeout.Milliseconds()))
+	rulesHoldWriter(t, db, busyOtherInsert)
+	ctx, cancel := busyDeadlineOf(t.Context())
+	defer cancel()
+	began := time.Now()
+
+	_, err := pinned.ExecContext(ctx, busyInsert)
+
+	waited := time.Since(began)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("the insert error = %v, want one matching context.DeadlineExceeded", err)
+	}
+	if waited > busyBound {
+		t.Errorf("the insert answered after %v, want within a tenth of the busy timeout %v it set itself", waited,
+			optionsBusyTimeout)
+	}
 }
 
 // busyPin returns a connection of db pinned for the rest of the test.
