@@ -10,6 +10,10 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 
 ## [Unreleased]
 
+### Changed
+
+- The module needs Go 1.27.3.
+
 ## [0.3.0] - 2026-10-12
 
 ### Added
