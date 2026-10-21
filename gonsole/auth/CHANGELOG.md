@@ -8,6 +8,12 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
+## [Unreleased]
+
+### Changed
+
+- The module needs Go 1.27.3.
+
 ## [0.9.0] - 2026-10-18
 
 ### Added
