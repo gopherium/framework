@@ -3,6 +3,10 @@
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
+## Unreleased
+
+- The module needs Go 1.27.3.
+
 ## 0.7.0 - 2026-10-15
 
 - The module needs Go 1.27.2.
