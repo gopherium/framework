@@ -8,6 +8,12 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
+## [Unreleased]
+
+### Fixed
+
+- A transaction's commit waiting for a lock stops when its `BeginTx` context ends. Rollback still completes after cancellation.
+
 ## [0.2.0] - 2026-10-20
 
 ### Added

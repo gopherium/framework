@@ -169,7 +169,26 @@ func (c *busyConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.T
 	if err != nil {
 		return nil, ended(ctx, err)
 	}
-	return tx, nil
+	return &busyTx{Tx: tx, ctx: ctx, wait: c.wait}, nil
+}
+
+// busyTx is a driver transaction whose commit waits under the context it began with.
+type busyTx struct {
+	// Tx is the driver's transaction; its Rollback must finish even after ctx ends.
+	driver.Tx
+	// ctx is the context BeginTx was given, not database/sql's internal transaction context.
+	ctx context.Context
+	// wait is the wait of the connection the transaction uses.
+	wait *busyWait
+}
+
+// Commit waits under the transaction's context and marks a failure with its error once it ends.
+func (t *busyTx) Commit() error {
+	defer t.wait.during(t.ctx)()
+	if err := t.Tx.Commit(); err != nil {
+		return ended(t.ctx, err)
+	}
+	return nil
 }
 
 // ExecContext runs a statement, and answers the error of ctx alone when it failed after ctx ended.
