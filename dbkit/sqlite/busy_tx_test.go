@@ -36,6 +36,8 @@ func busyCommitRolledBack(t *testing.T, pinned *sql.Conn) {
 	}
 }
 
+// TestABusyCommitRollsBackBeforeReturning verifies a failed commit rolls back its write
+// while the reader keeps its lock, leaving the connection ready for another transaction.
 func TestABusyCommitRollsBackBeforeReturning(t *testing.T) {
 	t.Parallel()
 
@@ -62,6 +64,8 @@ func TestABusyCommitRollsBackBeforeReturning(t *testing.T) {
 	busyCommitRolledBack(t, pinned)
 }
 
+// TestARollbackAfterCancellationStillEndsTheTransaction verifies rollback finishes
+// after cancellation and leaves no pending writes or active transaction.
 func TestARollbackAfterCancellationStillEndsTheTransaction(t *testing.T) {
 	t.Parallel()
 
@@ -86,6 +90,8 @@ func TestARollbackAfterCancellationStillEndsTheTransaction(t *testing.T) {
 	busyCommitRolledBack(t, pinned)
 }
 
+// TestABusyCommitEndsWithItsTransactionContext verifies cancellation and deadlines
+// end commit lock waits at both polling intervals and leave the connection reusable.
 func TestABusyCommitEndsWithItsTransactionContext(t *testing.T) {
 	t.Parallel()
 
