@@ -486,7 +486,7 @@ func TestALaterStepOfAQueryWaitsOutTheBusyTimeout(t *testing.T) {
 	t.Parallel()
 
 	pinned := busyAttachHeld(t, rulesOpen(t, busyShortOptions()), "BEGIN EXCLUSIVE")
-	ctx, cancel := context.WithTimeout(t.Context(), busyDeadline)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	rows, err := pinned.QueryContext(ctx, busyLaterStep)
 	if err != nil {
@@ -495,6 +495,7 @@ func TestALaterStepOfAQueryWaitsOutTheBusyTimeout(t *testing.T) {
 	defer func() { _ = rows.Close() }()
 	first := rows.Next()
 	began := time.Now()
+	defer time.AfterFunc(busyDeadline, cancel).Stop()
 
 	second := rows.Next()
 
@@ -509,12 +510,19 @@ func TestClosingTheRowsOfAWriteWaitsOutTheBusyTimeout(t *testing.T) {
 	t.Parallel()
 
 	pinned := busyAttachHeld(t, rulesOpen(t, busyShortOptions()), "BEGIN", busyAuxRead)
-	ctx, cancel := context.WithTimeout(t.Context(), busyDeadline)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	rows, err := pinned.QueryContext(ctx, busyAuxReturning)
+	if err != nil {
+		t.Fatalf("QueryContext(%q) error = %v, want its row", busyAuxReturning, err)
+	}
+	if !rows.Next() {
+		t.Fatalf("Next() = false, want the row of %q, error %v", busyAuxReturning, rows.Err())
+	}
 	began := time.Now()
-	var a int64
+	defer time.AfterFunc(busyDeadline, cancel).Stop()
 
-	err := pinned.QueryRowContext(ctx, busyAuxReturning).Scan(&a)
+	err = rows.Close()
 
 	busyMustWaitOut(t, "the commit at Close", err, time.Since(began))
 }
