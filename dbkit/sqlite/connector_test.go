@@ -121,12 +121,13 @@ func TestANewConnectionOpensWhileAWriterHoldsTheLock(t *testing.T) {
 	connectorMustSkip(t, records, path)
 }
 
-// connectorMustWaitWithItsContext fails the test unless conn reads busy_timeout 0 and its wait ends at its deadline.
+// connectorMustWaitWithItsContext fails the test unless conn reads BusyTimeout in ms and its wait ends at its deadline.
 func connectorMustWaitWithItsContext(t *testing.T, conn *sql.Conn) {
 	t.Helper()
 	var busy int64
-	if err := conn.QueryRowContext(t.Context(), "PRAGMA busy_timeout").Scan(&busy); err != nil || busy != 0 {
-		t.Errorf("PRAGMA busy_timeout = %d, %v, want 0 with dbkit's busy handler in place of SQLite's", busy, err)
+	err := conn.QueryRowContext(t.Context(), "PRAGMA busy_timeout").Scan(&busy)
+	if want := optionsBusyTimeout.Milliseconds(); err != nil || busy != want {
+		t.Errorf("PRAGMA busy_timeout = %d, %v, want %d, the busy timeout in ms", busy, err, want)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), connectorWaitDeadline)
 	defer cancel()
@@ -366,6 +367,31 @@ func TestTheFirstOpenEndsWithItsContextAtTheLongestBusyPoll(t *testing.T) {
 	db, holder := connectorHoldNewFile(t, opts, "BEGIN EXCLUSIVE")
 
 	connectorMustEndAtItsDeadline(t, db, holder, false)
+}
+
+// connectorSerializer is the Serialize method of the driver's own connection.
+type connectorSerializer interface {
+	// Serialize returns the main database as bytes.
+	Serialize() ([]byte, error)
+}
+
+func TestRawHandsOutTheDriversConnection(t *testing.T) {
+	t.Parallel()
+
+	conn := busyPin(t, rulesOpen(t, testOptions()))
+	var got any
+
+	err := conn.Raw(func(raw any) error {
+		got = raw
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("Raw() error = %v, want nil", err)
+	}
+	if _, ok := got.(connectorSerializer); !ok {
+		t.Errorf("Raw() hands out %T, want the driver's own connection with Serialize() ([]byte, error)", got)
+	}
 }
 
 // connectorWrapped is a connection the test's wrapper returned.

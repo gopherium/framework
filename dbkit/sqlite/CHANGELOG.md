@@ -12,7 +12,17 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
 ### Changed
 
+- **Breaking.** Requires `modernc.org/sqlite` v1.61.0 and `modernc.org/libc` v1.79.0, and `LibcVersion` is v1.79.0.
+- **Breaking.** A `BeginTx` error after its context ends matches only the context error, no longer `dbkit.ErrBusy`, unless opening its connection answered busy.
+- **Breaking.** A lock wait that starts while reading a later row of a query, or closing its rows, ends at `BusyTimeout` and not with the query's context.
+- **Breaking.** A connection waiting for a lock tries again on SQLite's own schedule, up to every 100ms, so `BusyPoll` only paces opening a connection.
+- Each connection waits for a lock through the driver's own busy handler, so `PRAGMA busy_timeout` reads `BusyTimeout` again.
+- `sql.Conn.Raw` hands out the driver's own connection again.
 - The module needs Go 1.27.3.
+
+### Removed
+
+- dbkit's own busy handler and its read of a private field of the driver.
 
 ## [0.2.0] - 2026-10-20
 

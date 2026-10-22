@@ -38,7 +38,7 @@ func (s Synchronous) pragma() string {
 type Options struct {
 	// BusyTimeout is how long a connection waits for a lock, from 1ms to 596h31m23.647s.
 	BusyTimeout time.Duration
-	// BusyPoll is how often a lock wait tries again and the longest an opening try blocks, from 1ms up to BusyTimeout.
+	// BusyPoll is how often a busy open tries again and the longest one open try blocks, from 1ms up to BusyTimeout.
 	BusyPoll time.Duration
 	// CacheSize is the page cache of each connection in kibibytes, from 1 to 2147483647.
 	CacheSize int

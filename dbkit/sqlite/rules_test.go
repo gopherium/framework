@@ -125,9 +125,10 @@ func TestEveryConnectionWaitsTheBusyTimeout(t *testing.T) {
 
 	for i, conn := range rulesConns(t, db) {
 		var timeout int64
-		if err := conn.QueryRowContext(t.Context(), "PRAGMA busy_timeout").Scan(&timeout); err != nil || timeout != 0 {
-			t.Errorf("PRAGMA busy_timeout on connection %d = %d, %v, want 0 with dbkit's busy handler in place of SQLite's",
-				i, timeout, err)
+		err := conn.QueryRowContext(t.Context(), "PRAGMA busy_timeout").Scan(&timeout)
+		if want := rulesShortBusyTimeout.Milliseconds(); err != nil || timeout != want {
+			t.Errorf("PRAGMA busy_timeout on connection %d = %d, %v, want %d, the busy timeout in ms", i, timeout, err,
+				want)
 		}
 
 		waited, err := rulesBegin(t.Context(), conn)

@@ -262,7 +262,7 @@ func shareMustReadTheRules(t *testing.T, i int, conn *sql.Conn) {
 	t.Helper()
 	pragmas := map[string]int64{
 		"PRAGMA foreign_keys": 1,
-		"PRAGMA busy_timeout": 0,
+		"PRAGMA busy_timeout": optionsBusyTimeout.Milliseconds(),
 		"PRAGMA temp_store":   2,
 		"PRAGMA cache_size":   -optionsCacheSize,
 		"PRAGMA synchronous":  1,

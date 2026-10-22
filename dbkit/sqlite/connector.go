@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	modernc "modernc.org/sqlite"
@@ -37,12 +38,12 @@ type connector struct {
 	name string
 	// path is the absolute path of the file.
 	path string
-	// busyTimeout is how long a busy open or a connection waiting for a lock keeps trying.
+	// busyTimeout is how long a busy open keeps trying.
 	busyTimeout time.Duration
-	// busyPoll is how often a busy open or a connection waiting for a lock tries again.
+	// busyPoll is how often a busy open tries again and the longest one try blocks.
 	busyPoll time.Duration
-	// wait makes the waits of a new connection end with their context.
-	wait func(conn driver.Conn) (driver.Conn, error)
+	// restore sets a connection's busy timeout back to the option.
+	restore string
 	// logger receives the skipped optimize notes.
 	logger *slog.Logger
 }
@@ -53,7 +54,7 @@ func newConnector(drv *modernc.Driver, path string, opts Options) *connector {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	c := &connector{
+	return &connector{
 		driver:      drv,
 		open:        drv.Open,
 		opening:     make(chan struct{}, 1),
@@ -61,13 +62,12 @@ func newConnector(drv *modernc.Driver, path string, opts Options) *connector {
 		path:        path,
 		busyTimeout: opts.BusyTimeout,
 		busyPoll:    opts.BusyPoll,
+		restore:     "PRAGMA busy_timeout=" + strconv.FormatInt(opts.BusyTimeout.Milliseconds(), 10),
 		logger:      logger,
 	}
-	c.wait = c.waitOn
-	return c
 }
 
-// Connect opens one connection, waiting while busy, optimizes it, ends its waits with ctx and passes it to the seam.
+// Connect opens one connection, waiting while busy, optimizes it and passes it to the seam.
 func (c *connector) Connect(ctx context.Context) (driver.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -79,11 +79,7 @@ func (c *connector) Connect(ctx context.Context) (driver.Conn, error) {
 	if err := c.optimize(ctx, conn.(driver.ExecerContext)); err != nil {
 		return nil, errors.Join(err, conn.Close())
 	}
-	waiting, err := c.wait(conn)
-	if err != nil {
-		return nil, errors.Join(err, conn.Close())
-	}
-	return seam.Wrap(c.path, waiting), nil
+	return seam.Wrap(c.path, conn), nil
 }
 
 // openWaiting opens one connection, trying again every busy poll while busy, until the busy timeout passes or ctx ends.
@@ -181,16 +177,27 @@ func gaveUp(ctx context.Context, busy error) error {
 	return fmt.Errorf("dbkit: open the database: %w", ctx.Err())
 }
 
+// ended returns err marked with the error of ctx once ctx has ended, and err as it is before.
+func ended(ctx context.Context, err error) error {
+	if end := ctx.Err(); end != nil {
+		return fmt.Errorf("%w: %w", err, end)
+	}
+	return err
+}
+
 // Driver returns the private driver value of the handle.
 func (c *connector) Driver() driver.Driver {
 	return c.driver
 }
 
-// optimize lowers the busy timeout of conn, runs PRAGMA optimize and skips a busy answer with a note.
+// optimize runs PRAGMA optimize at a zero busy timeout, skips a busy answer with a note and restores BusyTimeout.
 func (c *connector) optimize(ctx context.Context, conn driver.ExecerContext) error {
 	_, err := conn.ExecContext(ctx, lowerBusyTimeout, nil)
 	if err == nil {
 		_, err = conn.ExecContext(ctx, optimizeStatement, nil)
+	}
+	if _, restoreErr := conn.ExecContext(context.WithoutCancel(ctx), c.restore, nil); restoreErr != nil {
+		return errors.Join(err, restoreErr)
 	}
 	if errors.Is(Classify(err), dbkit.ErrBusy) {
 		c.logger.InfoContext(ctx, optimizeSkipped, slog.String("path", c.path), slog.Any("error", err))
