@@ -8,7 +8,7 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-22
 
 ### Changed
 
@@ -90,5 +90,6 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - `NewTemplate` closes its handle and removes its folder when migrate fails, panics or stops its goroutine.
 - `Faults.Pass`, which stops failing a statement chosen with `FailStatement`.
 
+[0.3.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fsqlite%2Fv0.3.0
 [0.2.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fsqlite%2Fv0.2.0
 [0.1.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fsqlite%2Fv0.1.0
