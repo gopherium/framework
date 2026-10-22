@@ -26,6 +26,8 @@ const (
 	internalLower = "PRAGMA busy_timeout=0"
 	// internalOptimize is the optimize statement every new connection runs.
 	internalOptimize = "PRAGMA optimize=0x10002"
+	// internalRestore is the statement that sets internalOptions' busy timeout back.
+	internalRestore = "PRAGMA busy_timeout=1500"
 	// internalBusyPoll is the busy poll of internalOptions, the smallest Open accepts.
 	internalBusyPoll = time.Millisecond
 	// internalLongBusyTimeout is a busy timeout no internal test waits out.
@@ -57,6 +59,8 @@ var (
 	errStepFailed = errors.New("connector test: the statement failed on purpose")
 	// errCloseFailed is the error the fake connection's Close answers with.
 	errCloseFailed = errors.New("connector test: the close failed on purpose")
+	// errRestoreFailed is the error the fake connection's restore answers with.
+	errRestoreFailed = errors.New("connector test: the restore failed on purpose")
 	// errEndCause is the cause a test ends a context with.
 	errEndCause = errors.New("connector test: the context ended with this cause on purpose")
 )
@@ -73,8 +77,12 @@ type internalConn struct {
 	fail map[string]error
 	// closeErr is the error Close answers with.
 	closeErr error
+	// after runs after each statement with its text.
+	after func(query string)
 	// ran lists every statement in the order it ran.
 	ran []string
+	// ended lists every statement that ran on an ended context.
+	ended []string
 	// closed reports that Close ran.
 	closed bool
 }
@@ -96,17 +104,18 @@ func (c *internalConn) Begin() (driver.Tx, error) {
 }
 
 // ExecContext records query and answers the error chosen for it.
-func (c *internalConn) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+func (c *internalConn) ExecContext(ctx context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
 	c.ran = append(c.ran, query)
+	if ctx.Err() != nil {
+		c.ended = append(c.ended, query)
+	}
+	if c.after != nil {
+		c.after(query)
+	}
 	if err := c.fail[query]; err != nil {
 		return nil, err
 	}
 	return driver.RowsAffected(0), nil
-}
-
-// internalNoWait returns conn as it is, in place of the busy wait a connection the driver opened gets.
-func internalNoWait(conn driver.Conn) (driver.Conn, error) {
-	return conn, nil
 }
 
 // internalConnector returns a connector that opens conn, or fails with openErr, and counts its opens.
@@ -117,7 +126,6 @@ func internalConnector(conn driver.Conn, openErr error) (*connector, *int) {
 		opened++
 		return conn, openErr
 	}
-	c.wait = internalNoWait
 	return c, &opened
 }
 
@@ -163,7 +171,6 @@ func internalWaiting(timeout, poll time.Duration, open func(name string) (driver
 	opts.BusyTimeout, opts.BusyPoll = timeout, poll
 	c := newConnector(&modernc.Driver{}, "/srv/site/site.db", opts)
 	c.open = open
-	c.wait = internalNoWait
 	return c
 }
 
@@ -335,6 +342,25 @@ func internalMustOpenAgain(t *testing.T, c *connector, held *internalHeld) {
 	}
 }
 
+func TestEndedMarksAnErrorOnlyOnceItsContextEnded(t *testing.T) {
+	t.Parallel()
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if got := ended(t.Context(), errStepFailed); got != errStepFailed {
+		t.Errorf("ended() under a live context = %v, want the error as it is", got)
+	}
+	got := ended(cancelled, errStepFailed)
+	if !errors.Is(got, errStepFailed) || !errors.Is(got, context.Canceled) {
+		t.Errorf("ended() under a cancelled context = %v, want an error matching both the error and context.Canceled",
+			got)
+	}
+	if want := errStepFailed.Error() + ": " + context.Canceled.Error(); got == nil || got.Error() != want {
+		t.Errorf("ended() under a cancelled context = %v, want %q", got, want)
+	}
+}
+
 func TestConnectRefusesAnEndedContext(t *testing.T) {
 	t.Parallel()
 
@@ -487,11 +513,6 @@ func TestTheOptimizeStepRunsInOrder(t *testing.T) {
 
 	fake := &internalConn{}
 	c, _ := internalConnector(fake, nil)
-	var before [][]string
-	c.wait = func(conn driver.Conn) (driver.Conn, error) {
-		before = append(before, slices.Clone(fake.ran))
-		return conn, nil
-	}
 
 	conn, err := c.Connect(t.Context())
 
@@ -501,15 +522,7 @@ func TestTheOptimizeStepRunsInOrder(t *testing.T) {
 	if fake.closed {
 		t.Errorf("closed = %v, want the open connection left open", fake.closed)
 	}
-	internalMustRun(t, fake, internalLower, internalOptimize)
-	if want := []string{internalLower, internalOptimize}; len(before) != 1 || !slices.Equal(before[0], want) {
-		t.Errorf("statements before each busy wait = %q, want one busy wait after %q", before, want)
-	}
-}
-
-// internalWaitFails answers errStepFailed in place of the busy wait of a connection.
-func internalWaitFails(driver.Conn) (driver.Conn, error) {
-	return nil, errStepFailed
+	internalMustRun(t, fake, internalLower, internalOptimize, internalRestore)
 }
 
 func TestAFailedStepClosesTheConnection(t *testing.T) {
@@ -518,23 +531,20 @@ func TestAFailedStepClosesTheConnection(t *testing.T) {
 	cases := []struct {
 		// name names the step that fails.
 		name string
-		// failed is the statement that fails, empty when no statement does.
+		// failed is the statement that fails.
 		failed string
-		// wait stands in for the busy wait of the connection.
-		wait func(driver.Conn) (driver.Conn, error)
 		// ran lists the statements the connection runs.
 		ran []string
 	}{
-		{"the lowering", internalLower, internalNoWait, []string{internalLower}},
-		{"the optimize", internalOptimize, internalNoWait, []string{internalLower, internalOptimize}},
-		{"the busy wait", "", internalWaitFails, []string{internalLower, internalOptimize}},
+		{"the lowering", internalLower, []string{internalLower, internalRestore}},
+		{"the optimize", internalOptimize, []string{internalLower, internalOptimize, internalRestore}},
+		{"the restore", internalRestore, []string{internalLower, internalOptimize, internalRestore}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			fake := &internalConn{fail: map[string]error{c.failed: errStepFailed}}
 			connector, _ := internalConnector(fake, nil)
-			connector.wait = c.wait
 
 			conn, err := connector.Connect(t.Context())
 
@@ -559,6 +569,40 @@ func TestAFailedCloseJoinsTheStepError(t *testing.T) {
 
 	if !errors.Is(err, errStepFailed) || !errors.Is(err, errCloseFailed) {
 		t.Errorf("Connect() error = %v, want both the step's error and the close error", err)
+	}
+}
+
+func TestAFailedRestoreKeepsTheStepError(t *testing.T) {
+	t.Parallel()
+
+	fake := &internalConn{fail: map[string]error{internalOptimize: errStepFailed, internalRestore: errRestoreFailed}}
+	c, _ := internalConnector(fake, nil)
+
+	_, err := c.Connect(t.Context())
+
+	if !errors.Is(err, errStepFailed) || !errors.Is(err, errRestoreFailed) {
+		t.Errorf("Connect() error = %v, want both the step's error and the restore error", err)
+	}
+}
+
+func TestTheRestoreOutlivesAnEndedContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	fake := &internalConn{after: func(query string) {
+		if query == internalOptimize {
+			cancel()
+		}
+	}}
+	c, _ := internalConnector(fake, nil)
+
+	if _, err := c.Connect(ctx); err != nil {
+		t.Fatalf("Connect() error = %v, want nil", err)
+	}
+
+	internalMustRun(t, fake, internalLower, internalOptimize, internalRestore)
+	if len(fake.ended) != 0 {
+		t.Errorf("statements on an ended context = %q, want the restore run on a live one", fake.ended)
 	}
 }
 

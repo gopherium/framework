@@ -535,13 +535,13 @@ func mustWaitBehind(t *testing.T, conns []*sql.Conn, i int) {
 	}
 }
 
-// mustKeepTheRules fails the test unless connection i of conns, from testOptions, carries every rule.
+// mustKeepTheRules fails the test unless connection i, from testOptions at testShortBusyTimeout, keeps every rule.
 func mustKeepTheRules(t *testing.T, conns []*sql.Conn, i int) {
 	t.Helper()
 	conn := conns[i]
 	pragmas := map[string]int64{
 		"PRAGMA foreign_keys": 1,
-		"PRAGMA busy_timeout": 0,
+		"PRAGMA busy_timeout": testShortBusyTimeout.Milliseconds(),
 		"PRAGMA temp_store":   2,
 		"PRAGMA cache_size":   -testCacheSize,
 		"PRAGMA synchronous":  1,

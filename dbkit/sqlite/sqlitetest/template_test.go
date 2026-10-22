@@ -278,7 +278,7 @@ func templateMustReadTheRules(t *testing.T, i int, conn *sql.Conn, opts sqlite.O
 	t.Helper()
 	pragmas := map[string]int64{
 		"PRAGMA foreign_keys": 1,
-		"PRAGMA busy_timeout": 0,
+		"PRAGMA busy_timeout": opts.BusyTimeout.Milliseconds(),
 		"PRAGMA temp_store":   2,
 		"PRAGMA cache_size":   -int64(opts.CacheSize),
 		"PRAGMA synchronous":  templateSynchronous[opts.Synchronous],
