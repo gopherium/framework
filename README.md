@@ -40,6 +40,8 @@ need and ignore the rest.
   wiring.
 - [`pluginkit/graphwire`](pluginkit/graphwire/) generates the GraphQL
   resolver root of an application from the schemas of its plugins.
+- [`postgresblob`](postgresblob/) is a gocloud.dev/blob driver that
+  keeps a program's files in two tables of its PostgreSQL database.
 
 ## Design
 

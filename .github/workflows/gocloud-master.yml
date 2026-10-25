@@ -1,0 +1,45 @@
+name: gocloud-master
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgresblob:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DBKIT_TEST_POSTGRES_URL: "postgres://postgres:postgres@localhost:5434/postgres?sslmode=disable"
+    defaults:
+      run:
+        working-directory: postgresblob
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: postgresblob/go.mod
+          cache-dependency-path: |
+            postgresblob/go.mod
+            postgresblob/go.sum
+      - run: go get gocloud.dev@master
+      - run: go mod tidy
+      - run: go test -race ./...
+      - run: go vet ./...
