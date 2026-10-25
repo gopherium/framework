@@ -69,7 +69,7 @@ func (b *bucket) NewTypedWriter(ctx context.Context, key, contentType string,
 		contentType: contentType,
 		opts:        opts,
 		metadata:    metadata,
-		buf:         make([]byte, 0, b.opts.ChunkSize),
+		buf:         []byte{},
 		md5:         md5.New(),
 	}, nil
 }
@@ -84,12 +84,12 @@ func (w *writer) Write(p []byte) (int, error) {
 	}
 	written := 0
 	for len(p) > 0 {
-		if len(w.buf) == cap(w.buf) {
+		if len(w.buf) == w.b.opts.ChunkSize {
 			if w.err = w.flush(w.b.pool); w.err != nil {
 				return written, w.err
 			}
 		}
-		n := min(len(p), cap(w.buf)-len(w.buf))
+		n := min(len(p), w.b.opts.ChunkSize-len(w.buf))
 		w.buf = append(w.buf, p[:n]...)
 		_, _ = w.md5.Write(p[:n])
 		w.size += int64(n)
