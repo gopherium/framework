@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: ["dbkit/postgres", "gonsole/auth/postgres"]
+        module: ["dbkit/postgres", "gonsole/auth/postgres", "postgresblob"]
     defaults:
       run:
         working-directory: ${{ matrix.module }}
@@ -99,7 +99,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: ["dbkit", "dbkit/postgres", "dbkit/sqlite", "mailkit", "goncierge", "gonsole", "gonsole/auth", "gonsole/auth/postgres", "gonsole/auth/sqlite", "pluginkit", "pluginkit/graphwire"]
+        module: ["dbkit", "dbkit/postgres", "dbkit/sqlite", "mailkit", "goncierge", "gonsole", "gonsole/auth", "gonsole/auth/postgres", "gonsole/auth/sqlite", "pluginkit", "pluginkit/graphwire", "postgresblob"]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -121,7 +121,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: ["dbkit", "dbkit/postgres", "dbkit/sqlite", "mailkit", "goncierge", "gonsole", "gonsole/auth", "gonsole/auth/postgres", "gonsole/auth/sqlite", "pluginkit", "pluginkit/graphwire"]
+        module: ["dbkit", "dbkit/postgres", "dbkit/sqlite", "mailkit", "goncierge", "gonsole", "gonsole/auth", "gonsole/auth/postgres", "gonsole/auth/sqlite", "pluginkit", "pluginkit/graphwire", "postgresblob"]
     defaults:
       run:
         working-directory: ${{ matrix.module }}
