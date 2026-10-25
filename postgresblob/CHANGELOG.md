@@ -8,7 +8,7 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `postgresblob/vX.Y.Z`.
 
-## [Unreleased]
+## [0.1.0] - 2026-10-25
 
 ### Added
 
@@ -36,3 +36,5 @@ Releases of this module are tagged `postgresblob/vX.Y.Z`.
 ### Security
 
 - Requires `golang.org/x/net` v0.60.0, which fixes GO-2026-6603, GO-2026-6610, GO-2026-6611, GO-2026-6612 and GO-2026-6617.
+
+[0.1.0]: https://github.com/gopherium/framework/releases/tag/postgresblob%2Fv0.1.0
