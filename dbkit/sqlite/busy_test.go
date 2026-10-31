@@ -630,6 +630,29 @@ func TestAShareCommitEndsAtItsTransactionTimeout(t *testing.T) {
 	}
 }
 
+func TestAShareCommitEndsWithItsBeginContext(t *testing.T) {
+	t.Parallel()
+
+	db := rulesOpen(t, testOptions())
+	busyAttachEvery(t, db, "BEGIN", busyAuxRead)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	tx, err := shareOn(t, db, shareOptions("busy-share")).Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin() error = %v, want nil", err)
+	}
+	shareMustExec(t, tx, busyAuxInsert)
+	began := time.Now()
+	defer time.AfterFunc(busyDeadline, cancel).Stop()
+
+	err = tx.Commit()
+
+	busyMustEnd(t, "the share commit", busyEnd{err: err, waited: time.Since(began)}, context.Canceled)
+	if n := busyAuxRows(t, db); n != 0 {
+		t.Errorf("rows in aux = %d after the share commit ended, want 0", n)
+	}
+}
+
 // busyColumn is what database/sql reports of one column.
 type busyColumn struct {
 	// name is the column's name.
