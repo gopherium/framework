@@ -88,51 +88,57 @@ func TestMainKeepsATighterMemoryLimitGoAlreadyHolds(t *testing.T) {
 	}
 }
 
-func TestRuntimeLimitsReadsBothLimitsTrimmed(t *testing.T) {
+func TestRuntimeLimitsReadsWhatEachLimitNames(t *testing.T) {
 	t.Parallel()
 
-	got, err := settings(map[string]string{"MYAPP_MAX_PROCS": " 1 ", "MYAPP_MEMORY_LIMIT_MB": " 256 "}).RuntimeLimits()
-
-	if err != nil {
-		t.Fatalf("RuntimeLimits() = %v, want nil", err)
+	cpus := runtime.NumCPU()
+	cases := map[string]struct {
+		procs, memory string
+		want          gonsole.RuntimeLimits
+	}{
+		"values padded with spaces": {" 1 ", " 256 ", gonsole.RuntimeLimits{MaxProcs: 1, MemoryLimitMB: 256}},
+		"the most each allows": {strconv.Itoa(cpus), "1073741824",
+			gonsole.RuntimeLimits{MaxProcs: cpus, MemoryLimitMB: 1 << 30}},
+		"nothing named":     {"", "", gonsole.RuntimeLimits{}},
+		"only spaces named": {"   ", "   ", gonsole.RuntimeLimits{}},
 	}
-	if want := (gonsole.RuntimeLimits{MaxProcs: 1, MemoryLimitMB: 256}); got != want {
-		t.Errorf("RuntimeLimits() = %+v, want %+v", got, want)
-	}
-}
-
-func TestRuntimeLimitsLeavesAnUnnamedLimitUnset(t *testing.T) {
-	t.Parallel()
-
-	for name, value := range map[string]string{"unset": "", "only spaces": "   "} {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := settings(map[string]string{"MYAPP_MAX_PROCS": value, "MYAPP_MEMORY_LIMIT_MB": value}).RuntimeLimits()
+			got, err := settings(map[string]string{"MYAPP_MAX_PROCS": tc.procs, "MYAPP_MEMORY_LIMIT_MB": tc.memory}).
+				RuntimeLimits()
 
-			if err != nil {
-				t.Fatalf("RuntimeLimits() = %v, want nil", err)
-			}
-			if got != (gonsole.RuntimeLimits{}) {
-				t.Errorf("RuntimeLimits() = %+v, want both limits unset", got)
+			if err != nil || got != tc.want {
+				t.Errorf("RuntimeLimits() = %+v, %v, want %+v", got, err, tc.want)
 			}
 		})
 	}
 }
 
-func TestRuntimeLimitsTakesTheMostEachAllows(t *testing.T) {
+func TestMainLeavesALimitItCannotReadToCheck(t *testing.T) {
 	t.Parallel()
 
-	cpus := runtime.NumCPU()
-	env := settings(map[string]string{"MYAPP_MAX_PROCS": strconv.Itoa(cpus), "MYAPP_MEMORY_LIMIT_MB": "1073741824"})
-
-	got, err := env.RuntimeLimits()
-
-	if err != nil {
-		t.Fatalf("RuntimeLimits() = %v, want nil", err)
+	cases := map[string]struct {
+		variables []string
+		args      []string
+		want      result
+	}{
+		"a command past a limit out of range": {[]string{"MYAPP_MAX_PROCS=0"}, []string{"report:list"},
+			result{code: gonsole.ExitDone, stdout: "quarterly\nyearly\n"}},
+		"a command under limits": {[]string{"MYAPP_MAX_PROCS=1", "MYAPP_MEMORY_LIMIT_MB=64"}, []string{"report:list"},
+			result{code: gonsole.ExitDone, stdout: "quarterly\nyearly\n"}},
+		"a check of a limit out of range": {[]string{"MYAPP_MAX_PROCS=0"}, []string{"check"},
+			result{code: gonsole.ExitFailed, stderr: "myapp: MYAPP_MAX_PROCS: must stand above zero, got \"0\"\n"}},
 	}
-	if want := (gonsole.RuntimeLimits{MaxProcs: cpus, MemoryLimitMB: 1 << 30}); got != want {
-		t.Errorf("RuntimeLimits() = %+v, want %+v", got, want)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := runExample(t, "", tc.variables, tc.args...); got != tc.want {
+				t.Errorf("the run = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 
