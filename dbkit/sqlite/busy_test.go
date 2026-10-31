@@ -19,10 +19,12 @@ import (
 )
 
 const (
-	// busyDeadline is the deadline, and the cancel, of a call behind a held writer.
+	// busyDeadline is the deadline, and the cancel, of a call behind a held lock.
 	busyDeadline = 100 * time.Millisecond
-	// busyBound is the longest a call behind a held writer may run, a tenth of the busy timeout.
+	// busyBound is the longest a call behind a held lock may run, a tenth of the busy timeout.
 	busyBound = optionsBusyTimeout / 10
+	// busyShareTimeout is the transaction timeout of a share whose commit waits for a lock.
+	busyShareTimeout = 300 * time.Millisecond
 	// busyLateHold is how long a holder keeps the write lock after the deadline of the write it blocks.
 	busyLateHold = 400 * time.Millisecond
 	// busyHold is how long a holder keeps the write lock while a write with no deadline waits for it.
@@ -47,6 +49,8 @@ const (
 	busyAuxRead = "SELECT count(*) FROM aux_rows"
 	// busyAuxReturning writes one row to aux on its first step and commits it at the end of its rows.
 	busyAuxReturning = "INSERT INTO aux.aux_rows VALUES (1) RETURNING a"
+	// busyAuxInsert writes one row to aux.
+	busyAuxInsert = "INSERT INTO aux.aux_rows VALUES (1)"
 	// busyTypedSchema creates a table whose columns declare their types.
 	busyTypedSchema = "CREATE TABLE typed_rows (amount INTEGER NOT NULL, label VARCHAR(20) NOT NULL)"
 	// busyTypedInsert writes one row of synthetic values to the typed table.
@@ -57,8 +61,6 @@ const (
 	busyNoTable = "VALUES (1), (2)"
 	// busySetTimeout sets a connection's own busy timeout to its one argument in milliseconds.
 	busySetTimeout = "PRAGMA busy_timeout=%d"
-	// busyShortTimeout is the busy timeout a later step of a query or the close of its rows waits out on purpose.
-	busyShortTimeout = 300 * time.Millisecond
 )
 
 // busyShape is one call that waits for the write lock.
@@ -122,7 +124,7 @@ func busyWarmUp(t *testing.T, db *sql.DB) {
 	}
 }
 
-// busyEnd is how a call behind a held writer ended.
+// busyEnd is how a call behind a held lock ended.
 type busyEnd struct {
 	// err is the error of the call.
 	err error
@@ -137,17 +139,17 @@ func busyRun(ctx context.Context, shape busyShape, db *sql.DB, prepared *sql.Stm
 	return busyEnd{err: err, waited: time.Since(began)}
 }
 
-// busyMustEnd fails the test unless the call of shape ended with want, matching no dbkit.ErrBusy, within busyBound.
-func busyMustEnd(t *testing.T, shape busyShape, end busyEnd, want error) {
+// busyMustEnd fails the test unless what ended with want, matching no dbkit.ErrBusy, within busyBound.
+func busyMustEnd(t *testing.T, what string, end busyEnd, want error) {
 	t.Helper()
 	if !errors.Is(end.err, want) {
-		t.Errorf("%s error = %v, want one matching %v", shape.name, end.err, want)
+		t.Errorf("%s error = %v, want one matching %v", what, end.err, want)
 	}
 	if errors.Is(sqlite.Classify(end.err), dbkit.ErrBusy) {
-		t.Errorf("%s error %v matches dbkit.ErrBusy, want no busy match", shape.name, end.err)
+		t.Errorf("%s error %v matches dbkit.ErrBusy, want no busy match", what, end.err)
 	}
 	if end.waited > busyBound {
-		t.Errorf("%s answered after %v, want within a tenth of the busy timeout %v", shape.name, end.waited,
+		t.Errorf("%s answered after %v, want within a tenth of the busy timeout %v", what, end.waited,
 			optionsBusyTimeout)
 	}
 }
@@ -164,7 +166,7 @@ func busyMustEndEvery(t *testing.T, end func(context.Context) (context.Context, 
 
 			got := busyRun(ctx, shape, db, prepared)
 
-			busyMustEnd(t, shape, got, want)
+			busyMustEnd(t, shape.name, got, want)
 		})
 	}
 }
@@ -444,8 +446,8 @@ func TestEveryConnectionEndsItsWaitAtItsDeadline(t *testing.T) {
 	}
 }
 
-// busyAttachHeld returns a connection of db with aux, a rollback journal file a plain handle locks by running hold.
-func busyAttachHeld(t *testing.T, db *sql.DB, hold ...string) *sql.Conn {
+// busyAuxFile returns the path of a new rollback journal file that holds aux_rows, and a plain connection to it.
+func busyAuxFile(t *testing.T) (string, *sql.Conn) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "aux.db")
 	plain, err := sql.Open("sqlite", path)
@@ -453,39 +455,66 @@ func busyAttachHeld(t *testing.T, db *sql.DB, hold ...string) *sql.Conn {
 		t.Fatalf("sql.Open() error = %v, want nil", err)
 	}
 	t.Cleanup(func() { _ = plain.Close() })
-	holder, pinned := busyPin(t, plain), busyPin(t, db)
+	holder := busyPin(t, plain)
 	busyPinExec(t, holder, busyAuxSchema)
-	if _, err := pinned.ExecContext(t.Context(), busyAttach, path); err != nil {
+	return path, holder
+}
+
+// busyAttachTo attaches the file at path to conn as aux.
+func busyAttachTo(t *testing.T, conn *sql.Conn, path string) {
+	t.Helper()
+	if _, err := conn.ExecContext(t.Context(), busyAttach, path); err != nil {
 		t.Fatalf("ExecContext(%q) error = %v, want nil", busyAttach, err)
 	}
+}
+
+// busyAttachHeld returns a connection of db with aux, a rollback journal file a plain handle locks by running hold.
+func busyAttachHeld(t *testing.T, db *sql.DB, hold ...string) *sql.Conn {
+	t.Helper()
+	path, holder := busyAuxFile(t)
+	pinned := busyPin(t, db)
+	busyAttachTo(t, pinned, path)
 	for _, query := range hold {
 		busyPinExec(t, holder, query)
 	}
 	return pinned
 }
 
-// busyShortOptions returns testOptions with busyShortTimeout as the busy timeout.
-func busyShortOptions() sqlite.Options {
-	opts := testOptions()
-	opts.BusyTimeout = busyShortTimeout
-	return opts
-}
-
-// busyMustWaitOut fails the test unless what answered an error that Classify marks busy after busyShortTimeout.
-func busyMustWaitOut(t *testing.T, what string, err error, waited time.Duration) {
+// busyAttachEvery attaches aux, a rollback journal file a plain handle locks by running hold, to each connection of db.
+func busyAttachEvery(t *testing.T, db *sql.DB, hold ...string) {
 	t.Helper()
-	if !errors.Is(sqlite.Classify(err), dbkit.ErrBusy) {
-		t.Errorf("%s error = %v, want busy once the busy timeout passed", what, err)
+	path, holder := busyAuxFile(t)
+	for _, conn := range rulesConns(t, db) {
+		busyAttachTo(t, conn, path)
+		if err := conn.Close(); err != nil {
+			t.Fatalf("Close() error = %v, want nil", err)
+		}
 	}
-	if waited < busyShortTimeout {
-		t.Errorf("%s answered after %v, want at least the busy timeout %v", what, waited, busyShortTimeout)
+	for _, query := range hold {
+		busyPinExec(t, holder, query)
 	}
 }
 
-func TestALaterStepOfAQueryWaitsOutTheBusyTimeout(t *testing.T) {
+// busyRowReader is a handle or a connection that reads one row.
+type busyRowReader interface {
+	// QueryRowContext runs query with args under ctx and returns its first row.
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// busyAuxRows returns how many rows aux holds as reader sees them.
+func busyAuxRows(t *testing.T, reader busyRowReader) int64 {
+	t.Helper()
+	var n int64
+	if err := reader.QueryRowContext(t.Context(), busyAuxRead).Scan(&n); err != nil {
+		t.Fatalf("%s error = %v, want nil", busyAuxRead, err)
+	}
+	return n
+}
+
+func TestALaterStepOfAQueryEndsWithItsContext(t *testing.T) {
 	t.Parallel()
 
-	pinned := busyAttachHeld(t, rulesOpen(t, busyShortOptions()), "BEGIN EXCLUSIVE")
+	pinned := busyAttachHeld(t, rulesOpen(t, testOptions()), "BEGIN EXCLUSIVE")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	rows, err := pinned.QueryContext(ctx, busyLaterStep)
@@ -503,13 +532,13 @@ func TestALaterStepOfAQueryWaitsOutTheBusyTimeout(t *testing.T) {
 	if !first || second {
 		t.Errorf("Next() = %v, then %v, want the first row and then no second while aux is held", first, second)
 	}
-	busyMustWaitOut(t, "the second step", rows.Err(), waited)
+	busyMustEnd(t, "the second step", busyEnd{err: rows.Err(), waited: waited}, context.Canceled)
 }
 
-func TestClosingTheRowsOfAWriteWaitsOutTheBusyTimeout(t *testing.T) {
+func TestClosingTheRowsOfAWriteEndsWithTheQuerysContext(t *testing.T) {
 	t.Parallel()
 
-	pinned := busyAttachHeld(t, rulesOpen(t, busyShortOptions()), "BEGIN", busyAuxRead)
+	pinned := busyAttachHeld(t, rulesOpen(t, testOptions()), "BEGIN", busyAuxRead)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	rows, err := pinned.QueryContext(ctx, busyAuxReturning)
@@ -524,7 +553,81 @@ func TestClosingTheRowsOfAWriteWaitsOutTheBusyTimeout(t *testing.T) {
 
 	err = rows.Close()
 
-	busyMustWaitOut(t, "the commit at Close", err, time.Since(began))
+	busyMustEnd(t, "the commit at Close", busyEnd{err: err, waited: time.Since(began)}, context.Canceled)
+	if n := busyAuxRows(t, pinned); n != 0 {
+		t.Errorf("rows in aux = %d after the commit at Close ended, want 0", n)
+	}
+}
+
+func TestACommitEndsWithTheContextOfItsTransaction(t *testing.T) {
+	t.Parallel()
+
+	pinned := busyAttachHeld(t, rulesOpen(t, testOptions()), "BEGIN", busyAuxRead)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	tx, err := pinned.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx() error = %v, want nil", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, busyAuxInsert); err != nil {
+		t.Fatalf("ExecContext(%q) error = %v, want nil", busyAuxInsert, err)
+	}
+	began := time.Now()
+	defer time.AfterFunc(busyDeadline, cancel).Stop()
+
+	err = tx.Commit()
+
+	busyMustEnd(t, "the commit", busyEnd{err: err, waited: time.Since(began)}, context.Canceled)
+	if n := busyAuxRows(t, pinned); n != 0 {
+		t.Errorf("rows in aux = %d after the commit ended, want 0 with its transaction rolled back", n)
+	}
+}
+
+func TestAnInTxCommitEndsWithItsContext(t *testing.T) {
+	t.Parallel()
+
+	db := rulesOpen(t, testOptions())
+	busyAttachEvery(t, db, "BEGIN", busyAuxRead)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var began time.Time
+
+	err := dbkit.InTx(ctx, db, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, busyAuxInsert); err != nil {
+			return err
+		}
+		began = time.Now()
+		time.AfterFunc(busyDeadline, cancel)
+		return nil
+	})
+
+	busyMustEnd(t, "InTx", busyEnd{err: err, waited: time.Since(began)}, context.Canceled)
+	if n := busyAuxRows(t, db); n != 0 {
+		t.Errorf("rows in aux = %d after InTx ended, want 0", n)
+	}
+}
+
+func TestAShareCommitEndsAtItsTransactionTimeout(t *testing.T) {
+	t.Parallel()
+
+	db := rulesOpen(t, testOptions())
+	busyAttachEvery(t, db, "BEGIN", busyAuxRead)
+	opts := shareOptions("busy-share")
+	opts.TransactionTimeout = busyShareTimeout
+	tx, err := shareOn(t, db, opts).Begin(t.Context())
+	if err != nil {
+		t.Fatalf("Begin() error = %v, want nil", err)
+	}
+	shareMustExec(t, tx, busyAuxInsert)
+	began := time.Now()
+
+	err = tx.Commit()
+
+	busyMustEnd(t, "the share commit", busyEnd{err: err, waited: time.Since(began)}, context.DeadlineExceeded)
+	if n := busyAuxRows(t, db); n != 0 {
+		t.Errorf("rows in aux = %d after the share commit ended, want 0", n)
+	}
 }
 
 // busyColumn is what database/sql reports of one column.

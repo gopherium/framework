@@ -6,7 +6,7 @@ require (
 	github.com/gopherium/framework/dbkit v0.3.0
 	github.com/pressly/goose/v3 v3.27.2
 	golang.org/x/sys v0.49.0
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 )
 
 require (
