@@ -32,6 +32,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv(handleSwitch) == "1" {
 		os.Exit(gonsole.Main(exampleapp.HandleProgram(os.Getenv)))
 	}
+	if os.Getenv(limitsSwitch) == "1" {
+		os.Exit(gonsole.Main(limitsProgram()))
+	}
 	os.Exit(m.Run())
 }
 

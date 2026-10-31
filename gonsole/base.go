@@ -24,7 +24,7 @@ func (r *runner) base() []Command {
 		{Name: "check", Summary: "check every setting, every plugin and every command name", Run: r.check},
 	}
 	if r.program.Serve != nil {
-		commands = append(commands, Command{Name: "serve", Summary: "run the server", Run: r.program.Serve})
+		commands = append(commands, Command{Name: "serve", Summary: "run the server", Run: r.serve})
 	}
 	if len(r.program.Migrations) > 0 || r.program.Plugins != nil {
 		migrate := func(ctx context.Context, call Call) error {
@@ -39,18 +39,28 @@ func (r *runner) base() []Command {
 	return commands
 }
 
-// check runs the program's settings check, registers the plugins and answers that everything is valid.
+// check reads the runtime limits, runs the program's settings check, registers the plugins and answers they are valid.
 func (r *runner) check(ctx context.Context, call Call) error {
+	_, err := call.Env.RuntimeLimits()
 	if r.program.Validate != nil {
-		if err := r.program.Validate(ctx, call); err != nil {
-			return err
-		}
+		err = errors.Join(err, r.program.Validate(ctx, call))
+	}
+	if err != nil {
+		return err
 	}
 	if err := r.plugged(ctx, call); err != nil {
 		return err
 	}
-	_, err := io.WriteString(call.Stdout, "settings, plugins and command names are valid\n")
+	_, err = io.WriteString(call.Stdout, "settings, plugins and command names are valid\n")
 	return err
+}
+
+// serve refuses runtime limits it cannot read, then runs the program's server.
+func (r *runner) serve(ctx context.Context, call Call) error {
+	if _, err := call.Env.RuntimeLimits(); err != nil {
+		return err
+	}
+	return r.program.Serve(ctx, call)
 }
 
 // plugged registers the plugins and returns what failed to load, the plugin failures before the offences.
