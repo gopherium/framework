@@ -92,8 +92,9 @@ type Program struct {
 	Record func(ctx context.Context, call Call, command string) error
 }
 
-// Main runs p over os.Args[1:] and the standard streams under a context the first SIGINT or SIGTERM ends.
+// Main hands p's runtime limits to Go and runs p over os.Args[1:] under a context the first SIGINT or SIGTERM ends.
 func Main(p Program) int {
+	applyRuntimeLimits(p.Env, liveRuntime())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	context.AfterFunc(ctx, stop)

@@ -32,6 +32,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv(handleSwitch) == "1" {
 		os.Exit(gonsole.Main(exampleapp.HandleProgram(os.Getenv)))
 	}
+	if os.Getenv(limitsSwitch) == "1" {
+		os.Exit(gonsole.Main(limitsProgram()))
+	}
 	os.Exit(m.Run())
 }
 
@@ -196,6 +199,12 @@ func TestMainExitsWithTheCodeOfTheRun(t *testing.T) {
 		{"the help of a plugin command without its setting", "", nil, []string{"demo:sync", "-h"}, gonsole.ExitDone,
 			syncPage, ""},
 		{"the listing without the database setting", "", nil, []string{"list"}, gonsole.ExitDone, exampleListing, ""},
+		{"a command past a runtime limit out of range", "", []string{"MYAPP_MAX_PROCS=0"}, []string{"report:list"},
+			gonsole.ExitDone, "quarterly\nyearly\n", ""},
+		{"a command under runtime limits", "", []string{"MYAPP_MAX_PROCS=1", "MYAPP_MEMORY_LIMIT_MB=64"},
+			[]string{"report:list"}, gonsole.ExitDone, "quarterly\nyearly\n", ""},
+		{"a check of a runtime limit out of range", "", []string{"MYAPP_MAX_PROCS=0"}, []string{"check"},
+			gonsole.ExitFailed, "", "myapp: MYAPP_MAX_PROCS: must stand above zero, got \"0\"\n"},
 		{"a name no plugin command owns", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress},
 			[]string{"demo:nope"}, gonsole.ExitMisused, "", "myapp: unknown command \"demo:nope\", want demo:sync\n"},
 		{"a namespace no plugin owns", "", []string{"MYAPP_DATABASE_URL=" + databaseAddress}, []string{"nope:x"},

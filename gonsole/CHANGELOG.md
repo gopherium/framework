@@ -10,6 +10,12 @@ Releases of this module are tagged `gonsole/vX.Y.Z`.
 
 ## [Unreleased]
 
+### Added
+
+- `Env.RuntimeLimits` and `RuntimeLimits`, the processor and memory limits from the `MAX_PROCS` and `MEMORY_LIMIT_MB` settings, each unset unless named.
+- `Main` hands `MAX_PROCS` to `runtime.GOMAXPROCS` and `MEMORY_LIMIT_MB`, in megabytes of 1048576 bytes, to `debug.SetMemoryLimit` before the command runs. Each lowers what Go holds and never raises it, and neither applies when one cannot be read.
+- `check` and `serve` refuse a `MAX_PROCS` that is not from 1 to the number of CPUs, or a `MEMORY_LIMIT_MB` that is not from 1 to 1073741824.
+
 ### Changed
 
 - The module needs Go 1.27.3.
