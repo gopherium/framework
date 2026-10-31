@@ -10,6 +10,8 @@ Releases of this module are tagged `gonsole/vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-31
+
 ### Added
 
 - `Env.RuntimeLimits` and `RuntimeLimits`, the processor and memory limits from the `MAX_PROCS` and `MEMORY_LIMIT_MB` settings, each unset unless named.
@@ -128,6 +130,7 @@ Releases of this module are tagged `gonsole/vX.Y.Z`.
 - `Program.Plugins`, `Call.Plugins`, `Loaded`, `Provider` and `Walk`, for compiled plugins' commands.
 - `testkit`, running programs from tests in process and as built binaries.
 
+[0.9.0]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fv0.9.0
 [0.8.0]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fv0.8.0
 [0.7.0]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fv0.7.0
 [0.6.1]: https://github.com/gopherium/framework/releases/tag/gonsole%2Fv0.6.1
