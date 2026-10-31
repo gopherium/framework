@@ -8,6 +8,14 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking.** A lock wait while reading a later row of a query, closing its rows or committing a transaction now ends when the context of the query or of `BeginTx` ends. It then answers that context's error alone, not `dbkit.ErrBusy`, and so does an `InTx` error from its commit.
+- **Breaking.** A share's `Tx.Commit` that waits for a lock now ends with the context of `Begin` or at the transaction timeout. Its error matches that context error, not `dbkit.ErrBusy`.
+- Requires `modernc.org/sqlite` v1.61.1.
+
 ## [0.3.0] - 2026-10-22
 
 ### Changed
