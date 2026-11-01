@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -22,6 +23,8 @@ const (
 	ownerPassword = "first-password"
 	// ownerOtherPassword is the password a later hand-over sets.
 	ownerOtherPassword = "second-password"
+	// ownerFreeWait is how long a test waits for the one connection a failed hand-over must give back.
+	ownerFreeWait = 5 * time.Second
 	// ownerOthers lists what a role does not own among the database's schemas, relations, routines and types.
 	ownerOthers = `
 SELECT 'schema ' || nspname FROM pg_namespace
@@ -58,6 +61,10 @@ var ownerFixture = []string{
 	"CREATE TYPE core.pair AS (first integer, second integer)",
 	"CREATE TYPE core.span AS RANGE (SUBTYPE = integer)",
 	"CREATE DOMAIN core.word AS text",
+	"CREATE TYPE core.plain",
+	"CREATE FUNCTION core.plain_in(cstring) RETURNS core.plain LANGUAGE internal STRICT AS 'int4in'",
+	"CREATE FUNCTION core.plain_out(core.plain) RETURNS cstring LANGUAGE internal STRICT AS 'int4out'",
+	"CREATE TYPE core.plain (INPUT = core.plain_in, OUTPUT = core.plain_out, LIKE = integer)",
 	"CREATE FOREIGN DATA WRAPPER owner_wrapper",
 	"CREATE SERVER owner_server FOREIGN DATA WRAPPER owner_wrapper",
 	"CREATE FOREIGN TABLE core.far (id integer) SERVER owner_server",
@@ -338,26 +345,28 @@ func ownerDatabase(t *testing.T, site ownerSite) string {
 	return name
 }
 
-func TestHandOverUndoesEveryStepWhenOneFails(t *testing.T) {
-	t.Parallel()
-
-	site := ownerFresh(t, "CREATE TABLE public.versions (id bigint)")
-	role := ownerRole(t, site)
+// ownerHold locks table in a transaction of site that ends with the test.
+func ownerHold(t *testing.T, site ownerSite, table string) {
+	t.Helper()
 	holder, err := site.admin.Begin(t.Context())
 	if err != nil {
 		t.Fatalf("begin the transaction that holds the table: %v", err)
 	}
-	defer func() { _ = holder.Rollback(context.Background()) }()
-	if _, err := holder.Exec(t.Context(), "LOCK TABLE public.versions IN ACCESS EXCLUSIVE MODE"); err != nil {
+	t.Cleanup(func() { _ = holder.Rollback(context.Background()) })
+	if _, err := holder.Exec(t.Context(), "LOCK TABLE "+table+" IN ACCESS EXCLUSIVE MODE"); err != nil {
 		t.Fatalf("hold the table: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), openShortWait)
-	defer cancel()
+}
 
-	_, err = postgres.HandOver(ctx, site.db, postgres.Owner{Role: role, Password: ownerPassword})
-
-	if err == nil {
-		t.Fatal("HandOver() on a table another transaction holds = nil, want the failure of the step")
+// ownerWantUndone fails t unless handing site to role fails with prefix, returns no steps and leaves no role behind.
+func ownerWantUndone(t *testing.T, site ownerSite, role, prefix string) {
+	t.Helper()
+	steps, err := postgres.HandOver(t.Context(), site.db, postgres.Owner{Role: role, Password: ownerPassword})
+	if err == nil || !strings.HasPrefix(err.Error(), prefix) {
+		t.Fatalf("HandOver() = %v, want an error that starts with %q", err, prefix)
+	}
+	if steps != nil {
+		t.Errorf("a failed HandOver() returned %q, want no steps", steps)
 	}
 	if strings.Contains(err.Error(), ownerPassword) {
 		t.Errorf("HandOver() error = %v, want no password in it", err)
@@ -365,6 +374,39 @@ func TestHandOverUndoesEveryStepWhenOneFails(t *testing.T) {
 	if ownerRoleExists(t, site, role) {
 		t.Error("the role of a failed hand-over exists, want every step undone")
 	}
+}
+
+func TestHandOverUndoesEveryStepWhenOneFails(t *testing.T) {
+	t.Parallel()
+
+	site := ownerFresh(t, "CREATE TABLE public.versions (id bigint)")
+	role := ownerRole(t, site)
+	migrateAdminExec(t, site.admin, "ALTER DATABASE "+ownerDatabase(t, site)+" SET lock_timeout = '100ms'")
+	site.db.SetMaxOpenConns(1)
+	ownerHold(t, site, "public.versions")
+
+	ownerWantUndone(t, site, role, "dbkit: hand over the database: ")
+
+	ctx, cancel := context.WithTimeout(t.Context(), ownerFreeWait)
+	defer cancel()
+	if _, err := postgres.OwnerSteps(ctx, site.db, role); err != nil {
+		t.Errorf("OwnerSteps() on the one connection after a failed hand-over = %v, want it free again", err)
+	}
+}
+
+func TestHandOverReportsACommitTheServerRefusesAndReturnsNoSteps(t *testing.T) {
+	t.Parallel()
+
+	site := ownerFresh(t,
+		"CREATE TABLE public.parents (id integer PRIMARY KEY)",
+		"CREATE TABLE public.marks (id integer REFERENCES public.parents DEFERRABLE INITIALLY DEFERRED)",
+		`CREATE FUNCTION public.mark() RETURNS event_trigger LANGUAGE plpgsql AS
+			'BEGIN INSERT INTO public.marks VALUES (1); END'`,
+		"CREATE EVENT TRIGGER marks ON ddl_command_end EXECUTE FUNCTION public.mark()",
+	)
+	role := ownerRole(t, site)
+
+	ownerWantUndone(t, site, role, "dbkit: commit the hand-over: ")
 }
 
 func TestHandOverAndOwnerStepsRefuseAConnectionThatIsNoSuperuser(t *testing.T) {
@@ -394,13 +436,90 @@ func TestHandOverAndOwnerStepsRefuseARoleThatIsASuperuser(t *testing.T) {
 	_, handed := postgres.HandOver(t.Context(), site.db, postgres.Owner{Role: super})
 	_, planned := postgres.OwnerSteps(t.Context(), site.db, super)
 
-	if !errors.Is(handed, postgres.ErrSuperuserRole) || !errors.Is(planned, postgres.ErrSuperuserRole) {
-		t.Errorf("HandOver() = %v and OwnerSteps() = %v, want ErrSuperuserRole from both", handed, planned)
+	if !errors.Is(handed, postgres.ErrNotPlainRole) || !errors.Is(planned, postgres.ErrNotPlainRole) {
+		t.Errorf("HandOver() = %v and OwnerSteps() = %v, want ErrNotPlainRole from both", handed, planned)
 	}
 	var owner string
 	query := "SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = 'public.versions'::regclass"
 	if err := site.admin.QueryRow(t.Context(), query).Scan(&owner); err != nil || owner != super {
 		t.Errorf("the table belongs to %q, %v, want it left with %q", owner, err, super)
+	}
+}
+
+func TestHandOverAndOwnerStepsRefuseARoleThatCanReachTheServer(t *testing.T) {
+	t.Parallel()
+
+	for name, prepare := range map[string]func(role, middle string) []string{
+		"runs server programs": func(role, _ string) []string {
+			return []string{"CREATE ROLE " + role, "GRANT pg_execute_server_program TO " + role}
+		},
+		"reads server files": func(role, _ string) []string {
+			return []string{"CREATE ROLE " + role, "GRANT pg_read_server_files TO " + role}
+		},
+		"writes server files": func(role, _ string) []string {
+			return []string{"CREATE ROLE " + role, "GRANT pg_write_server_files TO " + role}
+		},
+		"runs server programs through another role": func(role, middle string) []string {
+			return []string{
+				"CREATE ROLE " + role, "CREATE ROLE " + middle,
+				"GRANT pg_execute_server_program TO " + middle, "GRANT " + middle + " TO " + role,
+			}
+		},
+		"holds the membership without inheriting it": func(role, _ string) []string {
+			return []string{"CREATE ROLE " + role + " NOINHERIT", "GRANT pg_execute_server_program TO " + role}
+		},
+		"creates roles": func(role, _ string) []string {
+			return []string{"CREATE ROLE " + role + " CREATEROLE"}
+		},
+	} {
+		site := ownerFresh(t)
+		role, middle := ownerRole(t, site), ownerRole(t, site)
+		for _, statement := range prepare(role, middle) {
+			migrateAdminExec(t, site.admin, statement)
+		}
+
+		_, handed := postgres.HandOver(t.Context(), site.db, postgres.Owner{Role: role, Password: ownerPassword})
+		_, planned := postgres.OwnerSteps(t.Context(), site.db, role)
+
+		if !errors.Is(handed, postgres.ErrNotPlainRole) || !errors.Is(planned, postgres.ErrNotPlainRole) {
+			t.Errorf("a role that %s: HandOver() = %v and OwnerSteps() = %v, want ErrNotPlainRole from both",
+				name, handed, planned)
+		}
+		if _, err := ownerLogIn(t, site, role, ownerPassword); err == nil {
+			t.Errorf("a role that %s logs in, want it left as it was", name)
+		}
+	}
+}
+
+func TestHandOverAcceptsARoleNameOfTheLongestLengthTheServerKeeps(t *testing.T) {
+	t.Parallel()
+
+	site := ownerFresh(t)
+	role := strings.Repeat("r", 53) + strings.ToLower(rand.Text())[:10]
+	ownerDropsRole(t, site, role)
+
+	ownerMust(t, site, postgres.Owner{Role: role, Password: ownerPassword})
+
+	if again := ownerMust(t, site, postgres.Owner{Role: role, Password: ownerPassword}); len(again) != 0 {
+		t.Errorf("a second HandOver() for a name of %d bytes ran %q, want nothing", len(role), again)
+	}
+}
+
+func TestHandOverAndOwnerStepsRefuseARoleNameLongerThanTheServerKeeps(t *testing.T) {
+	t.Parallel()
+
+	for name, role := range map[string]string{
+		"64 ASCII bytes":      strings.Repeat("r", 64),
+		"32 two-byte letters": strings.Repeat("é", 32),
+	} {
+		site := ownerFresh(t)
+
+		_, handed := postgres.HandOver(t.Context(), site.db, postgres.Owner{Role: role})
+		_, planned := postgres.OwnerSteps(t.Context(), site.db, role)
+
+		if !errors.Is(handed, postgres.ErrRoleName) || !errors.Is(planned, postgres.ErrRoleName) {
+			t.Errorf("a name of %s: HandOver() = %v and OwnerSteps() = %v, want ErrRoleName from both", name, handed, planned)
+		}
 	}
 }
 

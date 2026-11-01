@@ -15,12 +15,13 @@ import (
 var (
 	// ErrNotSuperuser refuses a hand-over on a connection that is no superuser.
 	ErrNotSuperuser = errors.New("dbkit: handing over a database takes a superuser connection")
-	// ErrSuperuserRole refuses a hand-over to a role that is a superuser.
-	ErrSuperuserRole = errors.New("dbkit: a database goes to a plain role, and this role is a superuser")
+	// ErrNotPlainRole refuses a hand-over to a role that is a superuser or can reach the database server.
+	ErrNotPlainRole = errors.New("dbkit: a database goes to a plain role, and this role can reach the database server")
+	// ErrRoleName refuses a role name longer than the server keeps.
+	ErrRoleName = errors.New("dbkit: the role name is longer than the server keeps")
 )
 
-// ownerQuery reads whether the connection and the role of $1 are superusers, the steps that make that role the owner
-// of the connected database and what it holds, and the step that gives it the password of $2.
+// ownerQuery reads whether the connection may hand over and role $1 may take over, its steps and its password step.
 const ownerQuery = `
 WITH site AS (
 	SELECT oid, nspname, nspowner FROM pg_namespace
@@ -65,15 +66,25 @@ WITH site AS (
 	FROM pg_type t
 	JOIN site ON site.oid = t.typnamespace
 	LEFT JOIN pg_class c ON c.oid = t.typrelid
-	WHERE t.typtype IN ('c', 'd', 'e', 'r') AND coalesce(c.relkind::text, 'c') = 'c'
+	WHERE t.typtype IN ('b', 'c', 'd', 'e', 'r') AND coalesce(c.relkind::text, 'c') = 'c'
 	AND pg_get_userbyid(t.typowner) <> $1::text
+	AND NOT EXISTS (SELECT FROM pg_type e WHERE e.typarray = t.oid)
 	AND NOT EXISTS (
 		SELECT FROM pg_depend d WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid AND d.deptype = 'e'
 	)
 )
 SELECT
 	(SELECT rolsuper FROM pg_roles WHERE rolname = current_user),
-	coalesce((SELECT rolsuper FROM pg_roles WHERE rolname = $1::text), false),
+	octet_length($1::text) > current_setting('max_identifier_length')::integer,
+	EXISTS (
+		SELECT FROM pg_roles r
+		WHERE r.rolname = $1::text AND (
+			r.rolcreaterole
+			OR pg_has_role(r.oid, 'pg_execute_server_program', 'MEMBER')
+			OR pg_has_role(r.oid, 'pg_read_server_files', 'MEMBER')
+			OR pg_has_role(r.oid, 'pg_write_server_files', 'MEMBER')
+		)
+	),
 	ARRAY(SELECT step FROM steps ORDER BY place, step COLLATE "C"),
 	CASE WHEN $2::text = '' THEN '{}'::text[] ELSE ARRAY[format('ALTER ROLE %I PASSWORD %L', $1::text, $2::text)] END`
 
@@ -81,7 +92,7 @@ SELECT
 type Owner struct {
 	// Role is the name of the role, created when it is missing.
 	Role string
-	// Password is the password the role logs in with, left as it is when empty.
+	// Password is the password the role logs in with, sent to the server as text, left as it is when empty.
 	Password string
 }
 
@@ -97,8 +108,7 @@ func OwnerSteps(ctx context.Context, db *sql.DB, role string) ([]string, error) 
 	return steps, err
 }
 
-// HandOver gives the role of owner the database of db and its schemas, tables, views, sequences, routines and types,
-// in one transaction, and returns the statements it ran, none of which holds the password.
+// HandOver gives owner the database of db and what it holds, in one transaction, and returns the steps it ran.
 func HandOver(ctx context.Context, db *sql.DB, owner Owner) ([]string, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -114,22 +124,27 @@ func HandOver(ctx context.Context, db *sql.DB, owner Owner) ([]string, error) {
 			return nil, fmt.Errorf("dbkit: hand over the database: %w", err)
 		}
 	}
-	return steps, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("dbkit: commit the hand-over: %w", err)
+	}
+	return steps, nil
 }
 
 // ownerRead returns the steps that hand the database of db to owner and the step that sets its password.
 func ownerRead(ctx context.Context, db ownerReader, owner Owner) (steps, password []string, err error) {
-	var connected, taken bool
+	var super, long, reaches bool
 	types := pgtype.NewMap()
 	row := db.QueryRowContext(ctx, ownerQuery, owner.Role, owner.Password)
-	if err := row.Scan(&connected, &taken, types.SQLScanner(&steps), types.SQLScanner(&password)); err != nil {
+	if err := row.Scan(&super, &long, &reaches, types.SQLScanner(&steps), types.SQLScanner(&password)); err != nil {
 		return nil, nil, fmt.Errorf("dbkit: read the owner steps: %w", err)
 	}
 	switch {
-	case !connected:
+	case !super:
 		return nil, nil, ErrNotSuperuser
-	case taken:
-		return nil, nil, ErrSuperuserRole
+	case long:
+		return nil, nil, ErrRoleName
+	case reaches:
+		return nil, nil, ErrNotPlainRole
 	}
 	return steps, password, nil
 }
