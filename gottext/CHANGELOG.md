@@ -5,6 +5,12 @@ versioning follows [Semantic Versioning](https://semver.org/). While at 0.x,
 minor releases may break. Releases are tagged `gottext/vX.Y.Z` and publish
 from CI.
 
+## [Unreleased]
+
+### Changed
+
+- Breaking: `@wordpress/i18n` moves to `>=7.0.0 <8.0.0` and Node to 22.13.0 or newer, the floor i18n 7 sets.
+
 ## [0.7.0] - 2026-10-18
 
 ### Changed
