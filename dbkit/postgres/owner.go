@@ -17,8 +17,8 @@ var (
 	ErrNotSuperuser = errors.New("dbkit: handing over a database takes a superuser connection")
 	// ErrNotPlainRole refuses a hand-over to a role that is a superuser or can reach the database server.
 	ErrNotPlainRole = errors.New("dbkit: a database goes to a plain role, and this role can reach the database server")
-	// ErrRoleName refuses a role name longer than the server keeps.
-	ErrRoleName = errors.New("dbkit: the role name is longer than the server keeps")
+	// ErrRoleName refuses a role name that is empty or longer than the server keeps.
+	ErrRoleName = errors.New("dbkit: the role name is empty or longer than the server keeps")
 )
 
 // ownerQuery reads whether the connection may hand over and role $1 may take over, its steps and its password step.
@@ -75,7 +75,7 @@ WITH site AS (
 )
 SELECT
 	(SELECT rolsuper FROM pg_roles WHERE rolname = current_user),
-	octet_length($1::text) > current_setting('max_identifier_length')::integer,
+	octet_length($1::text) NOT BETWEEN 1 AND current_setting('max_identifier_length')::integer,
 	EXISTS (
 		SELECT FROM pg_roles r
 		WHERE r.rolname = $1::text AND (
@@ -132,16 +132,16 @@ func HandOver(ctx context.Context, db *sql.DB, owner Owner) ([]string, error) {
 
 // ownerRead returns the steps that hand the database of db to owner and the step that sets its password.
 func ownerRead(ctx context.Context, db ownerReader, owner Owner) (steps, password []string, err error) {
-	var super, long, reaches bool
+	var super, unkept, reaches bool
 	types := pgtype.NewMap()
 	row := db.QueryRowContext(ctx, ownerQuery, owner.Role, owner.Password)
-	if err := row.Scan(&super, &long, &reaches, types.SQLScanner(&steps), types.SQLScanner(&password)); err != nil {
+	if err := row.Scan(&super, &unkept, &reaches, types.SQLScanner(&steps), types.SQLScanner(&password)); err != nil {
 		return nil, nil, fmt.Errorf("dbkit: read the owner steps: %w", err)
 	}
 	switch {
 	case !super:
 		return nil, nil, ErrNotSuperuser
-	case long:
+	case unkept:
 		return nil, nil, ErrRoleName
 	case reaches:
 		return nil, nil, ErrNotPlainRole

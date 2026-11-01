@@ -505,10 +505,23 @@ func TestHandOverAcceptsARoleNameOfTheLongestLengthTheServerKeeps(t *testing.T) 
 	}
 }
 
-func TestHandOverAndOwnerStepsRefuseARoleNameLongerThanTheServerKeeps(t *testing.T) {
+func TestOwnerStepsAcceptsARoleNameOfOneByte(t *testing.T) {
+	t.Parallel()
+
+	site := ownerFresh(t)
+
+	steps, err := postgres.OwnerSteps(t.Context(), site.db, "r")
+
+	if err != nil || len(steps) == 0 {
+		t.Errorf("OwnerSteps() = %q, %v, want the steps for a name of one byte", steps, err)
+	}
+}
+
+func TestHandOverAndOwnerStepsRefuseARoleNameTheServerCannotKeep(t *testing.T) {
 	t.Parallel()
 
 	for name, role := range map[string]string{
+		"no bytes":            "",
 		"64 ASCII bytes":      strings.Repeat("r", 64),
 		"32 two-byte letters": strings.Repeat("é", 32),
 	} {
