@@ -10,6 +10,10 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 
 ## [Unreleased]
 
+### Added
+
+- `HandOver`, which gives a plain role a database and what it holds, and `OwnerSteps`, which lists the steps first.
+
 ### Changed
 
 - The module needs Go 1.27.3.
