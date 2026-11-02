@@ -14,6 +14,7 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 
 - `HandOver`, which gives a plain role a database and what it holds, and `OwnerSteps`, which lists the steps first.
 - `ErrNotSuperuser`, `ErrNotPlainRole` and `ErrRoleName`, which refuse a connection that is no superuser, a role that can reach the database server, and a role name that is empty or longer than the server keeps.
+- `ReachesServer`, which reports whether the role a connection logs in as can reach the database server, by the same list `HandOver` refuses.
 
 ### Changed
 

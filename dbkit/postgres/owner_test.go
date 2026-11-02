@@ -70,6 +70,46 @@ var ownerFixture = []string{
 	"CREATE FOREIGN TABLE core.far (id integer) SERVER owner_server",
 }
 
+// ownerReachers maps each way a role can reach the server to the statements that give role that way.
+var ownerReachers = map[string]func(role, middle string) []string{
+	"runs server programs": func(role, _ string) []string {
+		return []string{"CREATE ROLE " + role, "GRANT pg_execute_server_program TO " + role}
+	},
+	"reads server files": func(role, _ string) []string {
+		return []string{"CREATE ROLE " + role, "GRANT pg_read_server_files TO " + role}
+	},
+	"writes server files": func(role, _ string) []string {
+		return []string{"CREATE ROLE " + role, "GRANT pg_write_server_files TO " + role}
+	},
+	"runs server programs through another role": func(role, middle string) []string {
+		return []string{
+			"CREATE ROLE " + role, "CREATE ROLE " + middle,
+			"GRANT pg_execute_server_program TO " + middle, "GRANT " + middle + " TO " + role,
+		}
+	},
+	"holds the membership without inheriting it": func(role, _ string) []string {
+		return []string{"CREATE ROLE " + role + " NOINHERIT", "GRANT pg_execute_server_program TO " + role}
+	},
+	"reads server files without inheriting that": func(role, _ string) []string {
+		return []string{"CREATE ROLE " + role + " NOINHERIT", "GRANT pg_read_server_files TO " + role}
+	},
+	"writes server files without inheriting that": func(role, _ string) []string {
+		return []string{"CREATE ROLE " + role + " NOINHERIT", "GRANT pg_write_server_files TO " + role}
+	},
+	"runs server programs with no right to set that role": func(role, _ string) []string {
+		return []string{"CREATE ROLE " + role, "GRANT pg_execute_server_program TO " + role + " WITH SET FALSE"}
+	},
+	"creates roles": func(role, _ string) []string {
+		return []string{"CREATE ROLE " + role + " CREATEROLE"}
+	},
+	"belongs to a superuser": func(role, middle string) []string {
+		return []string{"CREATE ROLE " + role, "CREATE ROLE " + middle + " SUPERUSER", "GRANT " + middle + " TO " + role}
+	},
+	"belongs to a role that creates roles": func(role, middle string) []string {
+		return []string{"CREATE ROLE " + role, "CREATE ROLE " + middle + " CREATEROLE", "GRANT " + middle + " TO " + role}
+	},
+}
+
 // ownerSite is a fresh database reached as the test server's own user.
 type ownerSite struct {
 	address string
@@ -164,6 +204,26 @@ func ownerLogIn(t *testing.T, site ownerSite, role, password string) (*pgx.Conn,
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 	return conn, nil
+}
+
+// ownerRunsAs returns address with role as the role its connections run as.
+func ownerRunsAs(t *testing.T, address, role string) string {
+	t.Helper()
+	parsed, err := url.Parse(address)
+	if err != nil {
+		t.Fatal("a database address does not parse, want a URL")
+	}
+	query := parsed.Query()
+	query.Set("role", role)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+// ownerPool lets role log in and returns a pool that logs in to the database of site as role.
+func ownerPool(t *testing.T, site ownerSite, role string) *sql.DB {
+	t.Helper()
+	migrateAdminExec(t, site.admin, "ALTER ROLE "+role+" LOGIN PASSWORD '"+ownerPassword+"'")
+	return mustOpen(t, ownerAddress(t, site.address, role, ownerPassword), openSmallestCap).DB
 }
 
 // ownerRoleExists reports whether a role named role exists.
@@ -449,29 +509,7 @@ func TestHandOverAndOwnerStepsRefuseARoleThatIsASuperuser(t *testing.T) {
 func TestHandOverAndOwnerStepsRefuseARoleThatCanReachTheServer(t *testing.T) {
 	t.Parallel()
 
-	for name, prepare := range map[string]func(role, middle string) []string{
-		"runs server programs": func(role, _ string) []string {
-			return []string{"CREATE ROLE " + role, "GRANT pg_execute_server_program TO " + role}
-		},
-		"reads server files": func(role, _ string) []string {
-			return []string{"CREATE ROLE " + role, "GRANT pg_read_server_files TO " + role}
-		},
-		"writes server files": func(role, _ string) []string {
-			return []string{"CREATE ROLE " + role, "GRANT pg_write_server_files TO " + role}
-		},
-		"runs server programs through another role": func(role, middle string) []string {
-			return []string{
-				"CREATE ROLE " + role, "CREATE ROLE " + middle,
-				"GRANT pg_execute_server_program TO " + middle, "GRANT " + middle + " TO " + role,
-			}
-		},
-		"holds the membership without inheriting it": func(role, _ string) []string {
-			return []string{"CREATE ROLE " + role + " NOINHERIT", "GRANT pg_execute_server_program TO " + role}
-		},
-		"creates roles": func(role, _ string) []string {
-			return []string{"CREATE ROLE " + role + " CREATEROLE"}
-		},
-	} {
+	for name, prepare := range ownerReachers {
 		site := ownerFresh(t)
 		role, middle := ownerRole(t, site), ownerRole(t, site)
 		for _, statement := range prepare(role, middle) {
@@ -488,6 +526,108 @@ func TestHandOverAndOwnerStepsRefuseARoleThatCanReachTheServer(t *testing.T) {
 		if _, err := ownerLogIn(t, site, role, ownerPassword); err == nil {
 			t.Errorf("a role that %s logs in, want it left as it was", name)
 		}
+	}
+}
+
+func TestReachesServerAnswersTrueOnTheConnectionOfARoleThatCanReachTheServer(t *testing.T) {
+	t.Parallel()
+
+	site := ownerFresh(t)
+	for name, prepare := range ownerReachers {
+		role, middle := ownerRole(t, site), ownerRole(t, site)
+		for _, statement := range prepare(role, middle) {
+			migrateAdminExec(t, site.admin, statement)
+		}
+
+		reaches, err := postgres.ReachesServer(t.Context(), ownerPool(t, site, role))
+
+		if err != nil || !reaches {
+			t.Errorf("a role that %s: ReachesServer() = %v, %v, want true", name, reaches, err)
+		}
+	}
+}
+
+func TestReachesServerAnswersTrueForASuperuser(t *testing.T) {
+	t.Parallel()
+
+	site := ownerFresh(t)
+
+	reaches, err := postgres.ReachesServer(t.Context(), site.db)
+
+	if err != nil || !reaches {
+		t.Errorf("ReachesServer() as a superuser = %v, %v, want true", reaches, err)
+	}
+}
+
+func TestReachesServerAnswersFalseForARoleThatCannotReachTheServer(t *testing.T) {
+	t.Parallel()
+
+	site := ownerFresh(t)
+	for name, attributes := range map[string]string{
+		"holds no rights":                "",
+		"creates databases":              " CREATEDB",
+		"belongs to a role off the list": " IN ROLE pg_monitor",
+	} {
+		role := ownerRole(t, site)
+		migrateAdminExec(t, site.admin, "CREATE ROLE "+role+attributes)
+
+		reaches, err := postgres.ReachesServer(t.Context(), ownerPool(t, site, role))
+
+		if err != nil || reaches {
+			t.Errorf("a role that %s: ReachesServer() = %v, %v, want false", name, reaches, err)
+		}
+	}
+}
+
+func TestReachesServerAnswersFalseForTheRoleAHandOverLeaves(t *testing.T) {
+	t.Parallel()
+
+	site := ownerFresh(t, ownerFixture...)
+	role := ownerRole(t, site)
+	ownerMust(t, site, postgres.Owner{Role: role, Password: ownerPassword})
+
+	reaches, err := postgres.ReachesServer(t.Context(), ownerPool(t, site, role))
+
+	if err != nil || reaches {
+		t.Errorf("ReachesServer() as the new owner = %v, %v, want false", reaches, err)
+	}
+}
+
+func TestReachesServerAnswersForTheLoginAndNotARoleTheConnectionSet(t *testing.T) {
+	t.Parallel()
+
+	site := ownerFresh(t)
+	role := ownerRole(t, site)
+	migrateAdminExec(t, site.admin, "CREATE ROLE "+role)
+	server := openServer(t)
+	address := ownerRunsAs(t, ownerAddress(t, site.address, server.User, server.Password), role)
+	db := mustOpen(t, address, openSmallestCap).DB
+	var running string
+	if err := db.QueryRowContext(t.Context(), "SELECT current_user").Scan(&running); err != nil || running != role {
+		t.Fatalf("the connection runs as %q, %v, want %q", running, err, role)
+	}
+
+	reaches, err := postgres.ReachesServer(t.Context(), db)
+
+	if err != nil || !reaches {
+		t.Errorf("ReachesServer() on a superuser login that set a plain role = %v, %v, want true", reaches, err)
+	}
+}
+
+func TestReachesServerReportsAContextThatEnded(t *testing.T) {
+	t.Parallel()
+
+	site := ownerFresh(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	reaches, err := postgres.ReachesServer(ctx, site.db)
+
+	if !errors.Is(err, context.Canceled) || !strings.HasPrefix(err.Error(), "dbkit: read what the role can reach: ") {
+		t.Errorf("ReachesServer() = %v, want the failed read wrapping context.Canceled", err)
+	}
+	if reaches {
+		t.Error("ReachesServer() answered true on a failed read, want false")
 	}
 }
 
