@@ -21,6 +21,18 @@ var (
 	ErrRoleName = errors.New("dbkit: the role name is empty or longer than the server keeps")
 )
 
+// reachCondition holds for a row r of pg_roles whose role can reach the database server.
+const reachCondition = `EXISTS (
+	SELECT FROM pg_roles m
+	WHERE pg_has_role(r.oid, m.oid, 'MEMBER') AND (
+		m.rolsuper OR m.rolcreaterole
+		OR m.rolname IN ('pg_execute_server_program', 'pg_read_server_files', 'pg_write_server_files')
+	)
+)`
+
+// reachQuery reads whether the session user of the connection can reach the database server.
+const reachQuery = `SELECT EXISTS (SELECT FROM pg_roles r WHERE r.rolname = session_user AND ` + reachCondition + `)`
+
 // ownerQuery reads whether the connection may hand over and role $1 may take over, its steps and its password step.
 const ownerQuery = `
 WITH site AS (
@@ -76,15 +88,7 @@ WITH site AS (
 SELECT
 	(SELECT rolsuper FROM pg_roles WHERE rolname = current_user),
 	octet_length($1::text) NOT BETWEEN 1 AND current_setting('max_identifier_length')::integer,
-	EXISTS (
-		SELECT FROM pg_roles r
-		WHERE r.rolname = $1::text AND (
-			r.rolcreaterole
-			OR pg_has_role(r.oid, 'pg_execute_server_program', 'MEMBER')
-			OR pg_has_role(r.oid, 'pg_read_server_files', 'MEMBER')
-			OR pg_has_role(r.oid, 'pg_write_server_files', 'MEMBER')
-		)
-	),
+	EXISTS (SELECT FROM pg_roles r WHERE r.rolname = $1::text AND ` + reachCondition + `),
 	ARRAY(SELECT step FROM steps ORDER BY place, step COLLATE "C"),
 	CASE WHEN $2::text = '' THEN '{}'::text[] ELSE ARRAY[format('ALTER ROLE %I PASSWORD %L', $1::text, $2::text)] END`
 
@@ -100,6 +104,15 @@ type Owner struct {
 type ownerReader interface {
 	// QueryRowContext runs a query that returns at most one row.
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// ReachesServer reports whether the role db logs in as is one HandOver refuses, because it can reach the server.
+func ReachesServer(ctx context.Context, db *sql.DB) (bool, error) {
+	var reaches bool
+	if err := db.QueryRowContext(ctx, reachQuery).Scan(&reaches); err != nil {
+		return false, fmt.Errorf("dbkit: read what the role can reach: %w", err)
+	}
+	return reaches, nil
 }
 
 // OwnerSteps returns the statements HandOver would run for role on the database of db, and changes nothing.
