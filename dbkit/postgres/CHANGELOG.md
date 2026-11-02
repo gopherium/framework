@@ -10,6 +10,8 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-02
+
 ### Added
 
 - `HandOver`, which gives a plain role a database and what it holds, and `OwnerSteps`, which lists the steps first.
@@ -91,6 +93,7 @@ Releases of this module are tagged `dbkit/postgres/vX.Y.Z`.
 - Requires `golang.org/x/text` v0.41.0, which fixes GO-2026-6629.
 - Requires Go 1.27.2, which fixes GO-2026-6607 in `crypto/tls`.
 
+[0.4.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fpostgres%2Fv0.4.0
 [0.3.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fpostgres%2Fv0.3.0
 [0.2.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fpostgres%2Fv0.2.0
 [0.1.0]: https://github.com/gopherium/framework/releases/tag/dbkit%2Fpostgres%2Fv0.1.0
