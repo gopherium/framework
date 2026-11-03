@@ -18,11 +18,28 @@ type Plugin interface {
 	Stop(ctx context.Context) error
 }
 
-// Migrator is implemented by plugins that own database schema, which
-// the host migrates before starting any plugin.
+// Migrator is implemented by plugins that own database schema, which a host migrates before starting any
+// plugin, and which a host with a [MigrationStore] skips while its recorded version is current.
 type Migrator interface {
 	Migrate(ctx context.Context) error
 }
+
+// MigrationVersioner is implemented by a [Migrator] whose schema reports a version a host can compare.
+type MigrationVersioner interface {
+	// MigrationVersion returns the version of the schema, which a host compares as an opaque string.
+	MigrationVersion() (string, error)
+}
+
+// MigrationStore is an application's record of the migration version each plugin last applied.
+type MigrationStore interface {
+	// Versions returns every recorded version, keyed by plugin id, in one read.
+	Versions(ctx context.Context) (map[string]string, error)
+	// Record stores version as the one plugin id has now applied.
+	Record(ctx context.Context, id, version string) error
+}
+
+// MigratorOf returns the [Migrator] that applies a plugin's schema for it, and false when the plugin's own applies.
+type MigratorOf func(Plugin) (Migrator, bool)
 
 // Seeder is implemented by plugins that can fill their own schema with
 // development data, which the host asks for outside the start path.
