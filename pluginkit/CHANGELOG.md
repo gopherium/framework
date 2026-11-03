@@ -10,6 +10,7 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 - An optional `MigratorOf` lookup gives that host the `Migrator` of a plugin that ships its schema as data.
 - `Host.StartEach` migrates and then starts every plugin on its own, goes on past a failure or a panic, and answers a `StartOutcome` naming each plugin that started and each `Failure`.
 - The `Plugin` doc promises that `Stop` may run more than once and that `Start` may run again after it, and asks `Start` to return by the time its context ends.
+- The `Migrator` doc asks `Migrate` to return by the time its context ends, and the `RouteProvider` and `PublicPathProvider` docs ask `Routes` and `PublicPaths` to work whether or not `Start` ran or worked.
 
 ## 0.7.0 - 2026-10-15
 
