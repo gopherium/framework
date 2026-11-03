@@ -1,0 +1,10 @@
+unleash:
+  workers: 3
+  output-statuses: lct
+  exclude-files:
+    - '^graphwire/'
+mutants:
+  invert-logical:
+    enabled: true
+  invert-loopctrl:
+    enabled: true

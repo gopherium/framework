@@ -1,0 +1,65 @@
+name: mutation
+
+on:
+  pull_request:
+    paths:
+      - "pluginkit/**.go"
+      - "pluginkit/.gremlins.yaml"
+      - "!pluginkit/graphwire/**"
+      - ".github/workflows/mutation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pluginkit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: pluginkit
+    env:
+      BASE: origin/${{ github.base_ref }}
+      GIT_CONFIG_COUNT: "3"
+      GIT_CONFIG_KEY_0: diff.relative
+      GIT_CONFIG_VALUE_0: "true"
+      GIT_CONFIG_KEY_1: diff.noprefix
+      GIT_CONFIG_VALUE_1: "false"
+      GIT_CONFIG_KEY_2: diff.context
+      GIT_CONFIG_VALUE_2: "0"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: pluginkit/go.mod
+          cache-dependency-path: pluginkit/go.mod
+      - id: changed
+        run: |
+          changed="$(git diff --merge-base --name-only --diff-filter=d "$BASE" -- . ':(exclude)graphwire' | awk '/\.go$/ && !/_test\.go$/')"
+          if [ -z "$changed" ]; then
+            echo "No Go source changed under pluginkit, so there is nothing to mutate."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          for file in $changed; do
+            test -f "$file" || { echo "The diff names $file, which gremlins cannot find from pluginkit."; exit 1; }
+          done
+          echo "run=true" >> "$GITHUB_OUTPUT"
+      - if: steps.changed.outputs.run == 'false'
+        run: |
+          ulimit -v 12582912
+          go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --config .gremlins.yaml --dry-run .
+      - if: steps.changed.outputs.run == 'true'
+        run: |
+          ulimit -v 12582912
+          go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --config .gremlins.yaml --diff "$BASE" -o gremlins.json .
+      - if: always() && steps.changed.outputs.run == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gremlins-report
+          path: pluginkit/gremlins.json
+          retention-days: 7
+          if-no-files-found: ignore
