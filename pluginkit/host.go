@@ -84,9 +84,9 @@ func (h *Host) Migrate(ctx context.Context) error {
 	if h.store == nil {
 		return h.migrateEvery(ctx)
 	}
-	versions, err := h.store.Versions(ctx)
+	versions, err := h.readVersions(ctx)
 	if err != nil {
-		return fmt.Errorf("pluginkit: read the migration versions: %w", err)
+		return err
 	}
 	for _, p := range h.plugins {
 		if err := h.migrateUnlessCurrent(ctx, p, versions); err != nil {
@@ -96,11 +96,22 @@ func (h *Host) Migrate(ctx context.Context) error {
 	return nil
 }
 
+// readVersions returns every migration version the store records, in one read.
+func (h *Host) readVersions(ctx context.Context) (map[string]string, error) {
+	var versions map[string]string
+	err := guarded(ctx, "read the migration versions", func(ctx context.Context) error {
+		var err error
+		versions, err = h.store.Versions(ctx)
+		return err
+	})
+	return versions, err
+}
+
 // migrateUnlessCurrent applies the schema of p unless versions holds its version, then records the one it applied.
 func (h *Host) migrateUnlessCurrent(ctx context.Context, p Plugin, versions map[string]string) error {
-	migrator, ok := h.migratorFor(p)
-	if !ok {
-		return nil
+	migrator, ok, err := h.migratorFor(ctx, p)
+	if err != nil || !ok {
+		return err
 	}
 	versioner, ok := migrator.(MigrationVersioner)
 	if !ok {
@@ -119,14 +130,18 @@ func (h *Host) migrateUnlessCurrent(ctx context.Context, p Plugin, versions map[
 }
 
 // migratorFor returns the [Migrator] the lookup gives for p, or p itself when the lookup gives none.
-func (h *Host) migratorFor(p Plugin) (Migrator, bool) {
+func (h *Host) migratorFor(ctx context.Context, p Plugin) (migrator Migrator, ok bool, err error) {
 	if h.migratorOf != nil {
-		if migrator, ok := h.migratorOf(p); ok {
-			return migrator, true
+		err = safeCall(ctx, p.ID(), "migrator lookup", func(context.Context) error {
+			migrator, ok = h.migratorOf(p)
+			return nil
+		})
+		if err != nil || ok {
+			return migrator, ok, err
 		}
 	}
-	migrator, ok := p.(Migrator)
-	return migrator, ok
+	migrator, ok = p.(Migrator)
+	return migrator, ok, nil
 }
 
 // migrationVersion returns the migration version versioner reports for the plugin id, refusing an empty one.
@@ -213,14 +228,19 @@ func (h *Host) stopDownFrom(ctx context.Context, index int) error {
 
 // safeCall runs fn, wrapping any returned error and converting any panic into an error tagged with the
 // plugin id and operation.
-func safeCall(ctx context.Context, id, operation string, fn func(context.Context) error) (err error) {
+func safeCall(ctx context.Context, id, operation string, fn func(context.Context) error) error {
+	return guarded(ctx, id+" "+operation, fn)
+}
+
+// guarded runs fn, wrapping any returned error and converting any panic into an error tagged with name.
+func guarded(ctx context.Context, name string, fn func(context.Context) error) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("pluginkit: %s %s panicked: %v", id, operation, recovered)
+			err = fmt.Errorf("pluginkit: %s panicked: %v", name, recovered)
 		}
 	}()
 	if err := fn(ctx); err != nil {
-		return fmt.Errorf("pluginkit: %s %s: %w", id, operation, err)
+		return fmt.Errorf("pluginkit: %s: %w", name, err)
 	}
 	return nil
 }

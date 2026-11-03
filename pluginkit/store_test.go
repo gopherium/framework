@@ -30,6 +30,7 @@ var errStoreOffline = errors.New("store offline")
 type memoryStore struct {
 	versions    map[string]string
 	readErr     error
+	readPanic   bool
 	recordErr   error
 	recordPanic bool
 	calls       *[]string
@@ -38,6 +39,9 @@ type memoryStore struct {
 // Versions returns a copy of the recorded versions.
 func (s *memoryStore) Versions(context.Context) (map[string]string, error) {
 	*s.calls = append(*s.calls, "versions")
+	if s.readPanic {
+		panic("boom")
+	}
 	return maps.Clone(s.versions), s.readErr
 }
 
@@ -329,6 +333,33 @@ func TestHostWithMigrationStoreReportsAStoreReadFailureBeforeAnyMigration(t *tes
 	if !errors.Is(err, errStoreOffline) {
 		t.Errorf("Migrate() error = %v, want %v in its chain", err, errStoreOffline)
 	}
+	wantCalls(t, calls, []string{"versions"})
+}
+
+func TestHostWithMigrationStoreRecoversAStoreReadPanic(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	store := &memoryStore{readPanic: true, calls: &calls}
+	host := storeHost(t, store, nil, versioned("alpha", "1", &calls))
+
+	err := host.Migrate(t.Context())
+
+	wantFailure(t, err, "pluginkit: read the migration versions panicked: boom")
+	wantCalls(t, calls, []string{"versions"})
+}
+
+func TestHostWithMigrationStoreRecoversALookupPanicNamingThePlugin(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	store := &memoryStore{versions: map[string]string{}, calls: &calls}
+	lookup := func(pluginkit.Plugin) (pluginkit.Migrator, bool) { panic("boom") }
+	host := storeHost(t, store, lookup, versioned("alpha", "1", &calls), versioned("beta", "1", &calls))
+
+	err := host.Migrate(t.Context())
+
+	wantFailure(t, err, "pluginkit: alpha migrator lookup panicked: boom")
 	wantCalls(t, calls, []string{"versions"})
 }
 
