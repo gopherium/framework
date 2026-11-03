@@ -6,6 +6,8 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 ## Unreleased
 
 - The module needs Go 1.27.3.
+- `NewHostWithMigrationStore` returns a host whose `Migrate` and `Start` skip each plugin a `MigrationStore` records as current, by the version its `MigrationVersioner` reports.
+- An optional `MigratorOf` lookup gives that host the `Migrator` of a plugin that ships its schema as data.
 
 ## 0.7.0 - 2026-10-15
 
