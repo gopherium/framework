@@ -203,7 +203,7 @@ func checkShape(m manifest) error {
 	)
 }
 
-// Read reads one plugin's manifest from the plugin's own file system, with the checks that need only the manifest.
+// Read reads one plugin's manifest from the plugin's own file system, leaving the folder match and refused ids to Load.
 func Read(plugin fs.FS) (Manifest, error) {
 	data, err := fs.ReadFile(plugin, "plugin.json")
 	if err != nil {

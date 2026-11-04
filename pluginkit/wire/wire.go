@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package wire reads plugin manifests, generates wiring, an optional registry and index, and updates a package.json.
+// Package wire reads plugin manifests and generates wiring, plus an optional registry, index and package.json update.
 package wire
 
 import (
