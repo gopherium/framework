@@ -64,13 +64,20 @@ type Define struct {
 	Fires string `json:"fires,omitempty"`
 }
 
-// UnmarshalJSON reads a plain string as the name of the hook, and an object by its keys.
+// UnmarshalJSON replaces d with a plain string read as the name of the hook, or an object read by its keys.
 func (d *Define) UnmarshalJSON(data []byte) error {
-	if err := json.Unmarshal(data, &d.Hook); err == nil {
+	var hook string
+	if json.Unmarshal(data, &hook) == nil {
+		*d = Define{Hook: hook}
 		return nil
 	}
 	type define Define
-	return json.Unmarshal(data, (*define)(d))
+	var entry define
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return err
+	}
+	*d = Define(entry)
+	return nil
 }
 
 // Job is one scheduled job of a plugin and its default interval.

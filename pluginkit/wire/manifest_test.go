@@ -178,6 +178,48 @@ func TestLoadReadsAStringDefineAsAnEntryWithOnlyAHook(t *testing.T) {
 	assertSame(t, got.Defines, []Define{{Hook: "shop.order-placed"}})
 }
 
+func TestDefineReplacesTheEntryItIsReadInto(t *testing.T) {
+	t.Parallel()
+
+	for name, data := range map[string]string{"a plain string": `"new"`, "an object": `{"hook": "new"}`} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := Define{Hook: "old", Kind: "filter", Fires: "job"}
+
+			err := json.Unmarshal([]byte(data), &got)
+
+			assertErrorFree(t, err)
+			assertSame(t, got, Define{Hook: "new"})
+		})
+	}
+}
+
+func TestDefineKeepsTheEntryItFailsToRead(t *testing.T) {
+	t.Parallel()
+
+	got := Define{Hook: "old", Kind: "filter", Fires: "job"}
+
+	err := json.Unmarshal([]byte(`{"hook": "new", "kind": 5}`), &got)
+
+	assertErrorText(t, err, "json: cannot unmarshal number into Go struct field define.kind of type string")
+	assertSame(t, got, Define{Hook: "old", Kind: "filter", Fires: "job"})
+}
+
+func TestLoadReadsARepeatedDefinesAsTheLastOne(t *testing.T) {
+	t.Parallel()
+
+	for name, last := range map[string]string{"a plain string": `"b"`, "an object": `{"hook": "b"}`} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := feedWith(t, `"defines": [{"hook": "a", "kind": "filter", "fires": "job"}], "defines": [`+last+`]`)
+
+			assertSame(t, got.Defines, []Define{{Hook: "b"}})
+		})
+	}
+}
+
 func TestLoadLeavesAnAbsentFiresEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -279,11 +321,12 @@ func TestLoadReadsANewKeyInAnyCaseAsEncodingJSONDoes(t *testing.T) {
 	t.Parallel()
 
 	got := feedWith(t, `"Version": "2.0.0", "ENGINES": ["sqlite"], "job`+"ſ"+`": [{"NAME": "sweep", "Every": "1h"}], `+
-		`"ver-sion": "a", "ver_sion": "b"`)
+		`"defines": [{"HOOK": "a", "Kind": "b", "FIRES": "c"}], "ver-sion": "a", "ver_sion": "b"`)
 
 	assertSame(t, got.Version, "2.0.0")
 	assertSame(t, got.Engines, []string{"sqlite"})
 	assertSame(t, got.Jobs, []Job{{Name: "sweep", Every: "1h"}})
+	assertSame(t, got.Defines, []Define{{Hook: "a", Kind: "b", Fires: "c"}})
 	assertSame(t, got.Extra, map[string]json.RawMessage{
 		"ver-sion": json.RawMessage(`"a"`),
 		"ver_sion": json.RawMessage(`"b"`),
@@ -437,7 +480,11 @@ func emptyValues() map[string]wrongShape {
 		"an empty string in defines":   {`"defines": [""]`, "defines[0]: hook is required"},
 		"a defines entry with no hook": {`"defines": ["a", {"kind": "filter"}]`, "defines[1]: hook is required"},
 		"a null in defines":            {`"defines": [null]`, "defines[0]: hook is required"},
-		"a job with no name":           {`"jobs": [{"every": "24h"}]`, "jobs[0]: name is required"},
+		"a repeated defines with no hook": {
+			`"defines": [{"hook": "a"}], "defines": [{"kind": "filter"}]`, "defines[0]: hook is required",
+		},
+		"a repeated defines with a null": {`"defines": [{"hook": "a"}], "defines": [null]`, "defines[0]: hook is required"},
+		"a job with no name":             {`"jobs": [{"every": "24h"}]`, "jobs[0]: name is required"},
 		"a job with no interval": {
 			`"jobs": [{"name": "a", "every": "1h"}, {"name": "b"}]`, "jobs[1]: every is required",
 		},
