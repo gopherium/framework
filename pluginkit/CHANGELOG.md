@@ -3,7 +3,7 @@
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
-## Unreleased
+## 0.8.0 - 2026-11-04
 
 - The module needs Go 1.27.3.
 - `NewHostWithMigrationStore` returns a host whose `Migrate`, `Start` and `StartEach` skip each plugin a `MigrationStore` records as current, by the version its `MigrationVersioner` reports.
