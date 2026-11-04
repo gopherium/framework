@@ -15,6 +15,8 @@ var (
 	errNoMigrationStore = errors.New("pluginkit: the migration store is nil")
 	// errEmptyMigrationVersion refuses a migration version that holds nothing to compare.
 	errEmptyMigrationVersion = errors.New("the version is empty")
+	// errNilMigrator refuses a lookup that claims a migrator and gives none.
+	errNilMigrator = errors.New("the lookup gave a nil migrator")
 )
 
 // Host starts and stops a fixed set of plugins.
@@ -33,7 +35,7 @@ func NewHost(plugins ...Plugin) *Host {
 	return &Host{plugins: plugins}
 }
 
-// NewHostWithMigrationStore returns a [Host] whose Migrate skips every plugin store records as current.
+// NewHostWithMigrationStore returns a [Host] whose migrations skip every plugin store records as current.
 func NewHostWithMigrationStore(store MigrationStore, migratorOf MigratorOf, plugins ...Plugin) (*Host, error) {
 	if store == nil {
 		return nil, errNoMigrationStore
@@ -79,26 +81,26 @@ func (h *Host) rollBack(ctx context.Context, stopGrace time.Duration, index int)
 	return h.stopDownFrom(stopping, index)
 }
 
-// Migrate applies the schema of every [Migrator] plugin in order, past those its store records as current.
+// Migrate applies every [Migrator] plugin's schema in order, past those its store records as current, until one fails.
 func (h *Host) Migrate(ctx context.Context) error {
-	if h.store == nil {
-		return h.migrateEvery(ctx)
-	}
 	versions, err := h.readVersions(ctx)
 	if err != nil {
 		return err
 	}
 	for _, p := range h.plugins {
-		if err := h.migrateUnlessCurrent(ctx, p, versions); err != nil {
+		if _, err := h.migrateUnlessCurrent(ctx, p, versions); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// readVersions returns every migration version the store records, in one read.
+// readVersions returns every migration version the store records, in one read, and none on a host with no store.
 func (h *Host) readVersions(ctx context.Context) (map[string]string, error) {
 	var versions map[string]string
+	if h.store == nil {
+		return versions, nil
+	}
 	err := guarded(ctx, "read the migration versions", func(ctx context.Context) error {
 		var err error
 		versions, err = h.store.Versions(ctx)
@@ -107,24 +109,24 @@ func (h *Host) readVersions(ctx context.Context) (map[string]string, error) {
 	return versions, err
 }
 
-// migrateUnlessCurrent applies the schema of p unless versions holds its version, then records the one it applied.
-func (h *Host) migrateUnlessCurrent(ctx context.Context, p Plugin, versions map[string]string) error {
+// migrateUnlessCurrent applies and records p's schema unless versions holds it, answering the step an error came from.
+func (h *Host) migrateUnlessCurrent(ctx context.Context, p Plugin, versions map[string]string) (Step, error) {
 	migrator, ok, err := h.migratorFor(ctx, p)
 	if err != nil || !ok {
-		return err
+		return StepMigrate, err
 	}
 	versioner, ok := migrator.(MigrationVersioner)
-	if !ok {
-		return safeCall(ctx, p.ID(), "migrate", migrator.Migrate)
+	if !ok || h.store == nil {
+		return StepMigrate, safeCall(ctx, p.ID(), "migrate", migrator.Migrate)
 	}
 	version, err := migrationVersion(ctx, p.ID(), versioner)
 	if err != nil || version == versions[p.ID()] {
-		return err
+		return StepMigrate, err
 	}
 	if err := safeCall(ctx, p.ID(), "migrate", migrator.Migrate); err != nil {
-		return err
+		return StepMigrate, err
 	}
-	return safeCall(ctx, p.ID(), "record", func(ctx context.Context) error {
+	return StepRecord, safeCall(ctx, p.ID(), "record", func(ctx context.Context) error {
 		return h.store.Record(ctx, p.ID(), version)
 	})
 }
@@ -134,6 +136,9 @@ func (h *Host) migratorFor(ctx context.Context, p Plugin) (migrator Migrator, ok
 	if h.migratorOf != nil {
 		err = safeCall(ctx, p.ID(), "migrator lookup", func(context.Context) error {
 			migrator, ok = h.migratorOf(p)
+			if ok && migrator == nil {
+				return errNilMigrator
+			}
 			return nil
 		})
 		if err != nil || ok {
@@ -157,28 +162,15 @@ func migrationVersion(ctx context.Context, id string, versioner MigrationVersion
 	return version, err
 }
 
-// migrateEvery applies the schema of every [Migrator] plugin in registration order, stopping at the first failure.
-func (h *Host) migrateEvery(ctx context.Context) error {
-	return callEach(ctx, h.plugins, "migrate", Migrator.Migrate)
-}
-
 // Seed asks every [Seeder] plugin to fill its schema in registration order,
 // stopping at the first failure.
 func (h *Host) Seed(ctx context.Context) error {
-	return callEach(ctx, h.plugins, "seed", Seeder.Seed)
-}
-
-// callEach calls step on every plugin that is a T, in registration order, stopping at the first failure.
-func callEach[T any](
-	ctx context.Context, plugins []Plugin, operation string, step func(T, context.Context) error,
-) error {
-	for _, p := range plugins {
-		capable, ok := p.(T)
+	for _, p := range h.plugins {
+		seeder, ok := p.(Seeder)
 		if !ok {
 			continue
 		}
-		call := func(ctx context.Context) error { return step(capable, ctx) }
-		if err := safeCall(ctx, p.ID(), operation, call); err != nil {
+		if err := safeCall(ctx, p.ID(), "seed", seeder.Seed); err != nil {
 			return err
 		}
 	}
@@ -236,11 +228,19 @@ func safeCall(ctx context.Context, id, operation string, fn func(context.Context
 func guarded(ctx context.Context, name string, fn func(context.Context) error) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("pluginkit: %s panicked: %v", name, recovered)
+			err = panicError(fmt.Sprintf("pluginkit: %s panicked: %v", name, recovered))
 		}
 	}()
 	if err := fn(ctx); err != nil {
 		return fmt.Errorf("pluginkit: %s: %w", name, err)
 	}
 	return nil
+}
+
+// panicError is a panic [guarded] recovered, holding the text that names where it came from.
+type panicError string
+
+// Error returns the text of the panic.
+func (e panicError) Error() string {
+	return string(e)
 }

@@ -85,6 +85,36 @@ func TestHostTagsASeedPanicWithItsPlugin(t *testing.T) {
 	}
 }
 
+// contextSeeder is a seeder that records the caller value its context carries and whether that context can end.
+type contextSeeder struct {
+	fakePlugin
+	seen *[]any
+}
+
+// Seed records the caller value of ctx and whether ctx can end.
+func (c *contextSeeder) Seed(ctx context.Context) error {
+	*c.seen = append(*c.seen, ctx.Value(callerKey{}), ctx.Done() != nil)
+	return nil
+}
+
+func TestHostSeedHandsTheCallerContextToEverySeeder(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	var seen []any
+	host := pluginkit.NewHost(&contextSeeder{fakePlugin: fakePlugin{id: "alpha", calls: &calls}, seen: &seen})
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), callerKey{}, "caller"))
+	defer cancel()
+
+	if err := host.Seed(ctx); err != nil {
+		t.Fatalf("Seed() error = %v, want nil", err)
+	}
+
+	if want := []any{"caller", true}; !slices.Equal(want, seen) {
+		t.Errorf("context seen = %v, want %v", seen, want)
+	}
+}
+
 func TestHostSeedsNothingWithoutASeeder(t *testing.T) {
 	t.Parallel()
 

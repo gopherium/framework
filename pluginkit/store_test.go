@@ -363,6 +363,20 @@ func TestHostWithMigrationStoreRecoversALookupPanicNamingThePlugin(t *testing.T)
 	wantCalls(t, calls, []string{"versions"})
 }
 
+func TestHostWithMigrationStoreRefusesANilMigratorNamingThePlugin(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	store := &memoryStore{versions: map[string]string{}, calls: &calls}
+	lookup := func(pluginkit.Plugin) (pluginkit.Migrator, bool) { return nil, true }
+	host := storeHost(t, store, lookup, plain("alpha", &calls))
+
+	err := host.Migrate(t.Context())
+
+	wantFailure(t, err, "pluginkit: alpha migrator lookup: the lookup gave a nil migrator")
+	wantCalls(t, calls, []string{"versions"})
+}
+
 // contextStore is a migration store that adds the caller value of each context it gets to seen.
 type contextStore struct {
 	seen *[]any
