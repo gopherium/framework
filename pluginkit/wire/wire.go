@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package wire generates plugin wiring and an optional registry from manifests and updates an optional package.json.
+// Package wire reads plugin manifests and generates wiring, plus an optional registry, index and package.json update.
 package wire
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"go/token"
@@ -30,6 +29,9 @@ type Config struct {
 
 	// PackageJSONPath is the optional slash path of a package.json that depends on each frontend, listed in pluginwire.
 	PackageJSONPath string
+
+	// ManifestIndexPath is the optional slash path of a generated JSON list of every manifest, in wiring order.
+	ManifestIndexPath string
 
 	// Reserved lists ids no plugin may take.
 	Reserved []string
@@ -63,13 +65,6 @@ func validateConfig(cfg Config) error {
 	return nil
 }
 
-type manifest struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Backend  string `json:"backend"`
-	Frontend string `json:"frontend"`
-}
-
 var idPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // loadManifests loads and validates the plugin manifest in each subdirectory of dir.
@@ -88,8 +83,8 @@ func loadManifests(dir string) ([]manifest, error) {
 		if err != nil {
 			return nil, fmt.Errorf("pluginwire: %s: %w", path, err)
 		}
-		var m manifest
-		if err := json.Unmarshal(data, &m); err != nil {
+		m, err := parseManifest(data)
+		if err != nil {
 			return nil, fmt.Errorf("pluginwire: %s: %w", path, err)
 		}
 		if err := validate(m, entry.Name()); err != nil {
@@ -154,7 +149,7 @@ func loadRoots(dir string, roots, reserved []string) ([]manifest, error) {
 	return manifests, nil
 }
 
-// validate checks that manifest m has a well-formed id matching dir, a name, and at least one of backend or frontend.
+// validate checks that manifest m has a well-formed id matching dir, a name, a backend or frontend and a sound shape.
 func validate(m manifest, dir string) error {
 	if !idPattern.MatchString(m.ID) {
 		return fmt.Errorf("id %q must match %s", m.ID, idPattern)
@@ -168,7 +163,7 @@ func validate(m manifest, dir string) error {
 	if m.Backend == "" && m.Frontend == "" {
 		return errors.New("at least one of backend or frontend is required")
 	}
-	return nil
+	return checkShape(m)
 }
 
 // goName returns id as a valid Go identifier.
@@ -282,6 +277,13 @@ func outputs(root string, cfg Config, manifests []manifest) ([]output, error) {
 	if cfg.GoRegistryPath != "" {
 		files = append(files, output{path: cfg.GoRegistryPath, data: generateRegistry(cfg, manifests)})
 	}
+	if cfg.ManifestIndexPath != "" {
+		index, err := generateIndex(manifests)
+		if err != nil {
+			return nil, fmt.Errorf("pluginwire: %s: %w", cfg.ManifestIndexPath, err)
+		}
+		files = append(files, output{path: cfg.ManifestIndexPath, data: index})
+	}
 	if cfg.PackageJSONPath == "" {
 		return files, nil
 	}
@@ -292,7 +294,7 @@ func outputs(root string, cfg Config, manifests []manifest) ([]output, error) {
 	return append(files, output{path: cfg.PackageJSONPath, data: packageJSON}), nil
 }
 
-// Run writes the Go and TypeScript wiring, optional registry and optional package.json from the manifests under root.
+// Run writes the Go and TypeScript wiring and any optional registry, index and package.json from the manifests in root.
 func Run(root string, cfg Config) error {
 	if err := validateConfig(cfg); err != nil {
 		return err

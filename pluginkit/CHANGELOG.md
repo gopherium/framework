@@ -3,6 +3,13 @@
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
+## Unreleased
+
+- `wire.Manifest` holds one `plugin.json` as data, reading `version`, `license`, `did`, `requires`, `tested`, `engines`, `uninstall`, `hooks`, `defines`, `jobs` and `settings`, with every other key kept raw in `Extra`.
+- `wire.Read` reads one plugin from its own file system, and `wire.Load` reads every plugin under the roots with the checks `wire.Run` applies.
+- `wire.Config` gains an optional `ManifestIndexPath`, a JSON list of every manifest in wiring order that reads back into `[]wire.Manifest`.
+- `wire.Run` refuses a manifest whose new keys have the wrong shape. A manifest with only today's keys runs as before, with the same bytes and error texts.
+
 ## 0.8.0 - 2026-11-04
 
 - The module needs Go 1.27.3.
