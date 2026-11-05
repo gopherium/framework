@@ -3,7 +3,7 @@
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
-## Unreleased
+## 0.9.0 - 2026-11-05
 
 - `wire.Manifest` holds one `plugin.json` as data, reading `version`, `license`, `did`, `requires`, `tested`, `engines`, `uninstall`, `hooks`, `defines`, `jobs` and `settings`, with every other key kept raw in `Extra`.
 - `wire.Read` reads one plugin from its own file system, and `wire.Load` reads every plugin under the roots with the checks `wire.Run` applies.
