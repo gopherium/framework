@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -60,14 +61,17 @@ func limitOf(n int64) *int64 {
 	return &n
 }
 
+// badOptionCase is one Options value sqlite.Open must refuse.
+type badOptionCase struct {
+	name   string
+	change func(*sqlite.Options)
+	want   string
+}
+
 func TestOpenRefusesABadOption(t *testing.T) {
 	t.Parallel()
 
-	cases := []struct {
-		name   string
-		change func(*sqlite.Options)
-		want   string
-	}{
+	cases := []badOptionCase{
 		{"a missing busy timeout", func(o *sqlite.Options) { o.BusyTimeout = 0 },
 			"dbkit: the option BusyTimeout must be 1ms or more, got 0s"},
 		{"a negative busy timeout", func(o *sqlite.Options) { o.BusyTimeout = -time.Millisecond },
@@ -98,8 +102,6 @@ func TestOpenRefusesABadOption(t *testing.T) {
 			"dbkit: the option CacheSize must stand above zero, got 0"},
 		{"a negative cache size", func(o *sqlite.Options) { o.CacheSize = -1 },
 			"dbkit: the option CacheSize must stand above zero, got -1"},
-		{"a cache size past 32 bits", func(o *sqlite.Options) { o.CacheSize = math.MaxInt32 + 1 },
-			"dbkit: the option CacheSize must be 2147483647 or less, got 2147483648"},
 		{"a missing connection cap", func(o *sqlite.Options) { o.MaxConns = 0 },
 			"dbkit: the option MaxConns must be 2 or more, got 0"},
 		{"a negative connection cap", func(o *sqlite.Options) { o.MaxConns = -2 },
@@ -119,6 +121,18 @@ func TestOpenRefusesABadOption(t *testing.T) {
 		{"a base folder with a question mark", func(o *sqlite.Options) { o.BaseFolder = "/srv/a?b" },
 			`dbkit: the option BaseFolder must hold no ?, got "/srv/a?b"`},
 	}
+
+	// A cache size past 32 bits fits an int only where int is 64 bits wide;
+	// on 32-bit platforms the constant would not compile, so skip the row there.
+	if strconv.IntSize == 64 {
+		past32 := int64(math.MaxInt32) + 1
+		cases = append(cases, badOptionCase{
+			name:   "a cache size past 32 bits",
+			change: func(o *sqlite.Options) { o.CacheSize = int(past32) },
+			want:   "dbkit: the option CacheSize must be 2147483647 or less, got 2147483648",
+		})
+	}
+
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
