@@ -90,6 +90,7 @@ Feature: Calling the plugins that implement a hook
     When the hook fires
     Then the hook is counted 1 overrun
     And no plugin is charged an overrun
+    And the hook is counted 0 timed overruns that no plugin is charged for
 
   Scenario: A timed overrun is charged to the slowest plugin
     Given the plugins "reviews", "analytics" and "feed" implement the hook "public.head-tags"
@@ -116,6 +117,8 @@ Feature: Calling the plugins that implement a hook
       | feed      | 0.9 |
     Then "analytics" is charged 1 overrun
     And "reviews" and "feed" are charged no overrun
+    And the hook is counted 0 timed overruns that no plugin is charged for
+    And the report is counted 1.5 ms in the timed firings
 
   Scenario: A firing that only the report runs over its budget charges no plugin
     Given the plugins "reviews" and "analytics" implement the hook "public.head-tags"
@@ -129,6 +132,8 @@ Feature: Calling the plugins that implement a hook
       | analytics | 0.5 |
     Then the hook is counted 2 overruns
     And no plugin is charged an overrun
+    And the hook is counted 1 timed overrun that no plugin is charged for
+    And the report is counted 3 ms in the timed firings
 
   Scenario: Each plugin is timed only for the firings after an overrun
     Given the plugins "analytics" and "feed" implement the hook "public.head-tags"

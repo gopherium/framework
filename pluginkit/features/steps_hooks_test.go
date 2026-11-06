@@ -175,6 +175,14 @@ func (w *hookWorld) onFakeClock(fn func()) {
 	})
 }
 
+// hookStats returns the counters of the action hook, failing when it never fired.
+func (w *hookWorld) hookStats() (pluginkit.HookStats, error) {
+	if w.actions == nil {
+		return pluginkit.HookStats{}, errors.New("the hook never fired")
+	}
+	return w.actions.Stats(), nil
+}
+
 // statsOf returns the counters of the plugin id in the action hook.
 func (w *hookWorld) statsOf(id string) (pluginkit.PluginStats, error) {
 	if w.actions == nil {
@@ -434,14 +442,34 @@ func countedErrorsAndEnded(ctx context.Context, id string, errs, ended int) erro
 
 // hookOverruns checks the overruns counted on the hook.
 func hookOverruns(ctx context.Context, want int) error {
-	w := worldOf(ctx)
-	if w.actions == nil {
-		return errors.New("the hook never fired")
+	stats, err := worldOf(ctx).hookStats()
+	if err == nil && stats.Overruns != uint64(want) {
+		err = fmt.Errorf("the hook is counted %d overruns, want %d", stats.Overruns, want)
 	}
-	if got := w.actions.Stats().Overruns; got != uint64(want) {
-		return fmt.Errorf("the hook is counted %d overruns, want %d", got, want)
+	return err
+}
+
+// unchargedOverruns checks the timed overruns the hook counted with no plugin charged.
+func unchargedOverruns(ctx context.Context, want int) error {
+	stats, err := worldOf(ctx).hookStats()
+	if err == nil && stats.UnchargedOverruns != uint64(want) {
+		err = fmt.Errorf("the hook is counted %d timed overruns that no plugin is charged for, want %d",
+			stats.UnchargedOverruns, want)
 	}
-	return nil
+	return err
+}
+
+// reportTimed checks the time the report took in the timed firings, text milliseconds such as 1.5.
+func reportTimed(ctx context.Context, text string) error {
+	stats, err := worldOf(ctx).hookStats()
+	if err != nil {
+		return err
+	}
+	want, err := time.ParseDuration(text + "ms")
+	if err == nil && stats.TimedReportTime != want {
+		err = fmt.Errorf("the report is counted %v in the timed firings, want %v", stats.TimedReportTime, want)
+	}
+	return err
 }
 
 // chargedOverruns checks the overruns charged to the plugin id.
@@ -568,6 +596,8 @@ func thenHooks(sc *godog.ScenarioContext) {
 	sc.Step(`^"([^"]*)" is charged (\d+) overruns?$`, chargedOverruns)
 	sc.Step(`^(.+) are charged no overrun$`, chargedNone)
 	sc.Step(`^no plugin is charged an overrun$`, noPluginCharged)
+	sc.Step(`^the hook is counted (\d+) timed overruns? that no plugin is charged for$`, unchargedOverruns)
+	sc.Step(`^the report is counted (\S+) ms in the timed firings$`, reportTimed)
 	sc.Step(`^(.+) are each timed in (\d+) firings$`, timedIn)
 	sc.Step(`^the firing panics with "([^"]*)"$`, firingPanicked)
 	sc.Step(`^the title becomes "([^"]*)"$`, titleBecomes)
