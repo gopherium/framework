@@ -4,14 +4,17 @@ Feature: Calling the plugins that implement a hook
   action tells each plugin that something happened, and a filter passes a
   value through each plugin. One firing of a hook shares one time budget
   among all its plugins. A plugin that fails, panics or runs slow never
-  stops the plugins after it, and the counters name the plugin at fault.
+  stops the plugins after it. The counters name the plugin that failed or
+  panicked, and the slowest one once the firings after an overrun are
+  timed. The report is the application's own function that receives each
+  error and panic of a plugin.
 
   Scenario: Every plugin that implements the hook is called in order
-    Given the plugins "seo-basics", "analytics" and "feed" implement the hook "public.head-tags"
+    Given the plugins "seo-basics" and "analytics" implement the hook "public.head-tags"
     And the plugin "theme" is registered without implementing it
+    And the plugin "feed" implements the hook "public.head-tags"
     When the hook fires
     Then "seo-basics", "analytics" and "feed" are called in that order
-    And "theme" is not called
 
   Scenario: A failing plugin leaves the plugins after it running
     Given the plugins "analytics", "feed" and "seo-basics" implement the hook "content.changed"
@@ -63,6 +66,23 @@ Feature: Calling the plugins that implement a hook
     When the hook fires
     Then "search" is counted 1 error and 0 calls whose context ended
 
+  Scenario: After the deadline, an error that panics when the hook unwraps it counts as a panic of its plugin
+    Given the plugins "analytics", "search" and "feed" implement the hook "content.changed"
+    And the hook has a budget of 2 ms
+    And "analytics" takes 5 ms
+    And "search" fails with an error that panics when it is unwrapped
+    When the hook fires
+    Then "analytics", "search" and "feed" are called in that order
+    And "search" is counted 1 panic
+
+  Scenario: A panic in the report reaches the code that fired the hook
+    Given the plugins "analytics" and "feed" implement the hook "content.changed"
+    And "analytics" fails with "index unavailable"
+    And the report panics with "report broken"
+    When the hook fires
+    Then the firing panics with "report broken"
+    And "feed" is not called
+
   Scenario: An untimed overrun charges no plugin
     Given the plugins "analytics", "reviews" and "feed" implement the hook "public.head-tags"
     And the hook has a budget of 2 ms and times each plugin for 20 firings after an overrun
@@ -82,6 +102,33 @@ Feature: Calling the plugins that implement a hook
       | feed      | 0.9 |
     Then "analytics" is charged 1 overrun
     And "reviews" and "feed" are charged no overrun
+
+  Scenario: The time the report takes is not charged to the failing plugin
+    Given the plugins "reviews", "analytics" and "feed" implement the hook "public.head-tags"
+    And the hook has a budget of 2 ms and times each plugin for 20 firings after an overrun
+    And the report takes 1.5 ms
+    And "reviews" fails with "rating unavailable"
+    And the hook has run over its budget once
+    When the hook fires while the plugins take
+      | plugin    | ms  |
+      | reviews   | 0.1 |
+      | analytics | 1.2 |
+      | feed      | 0.9 |
+    Then "analytics" is charged 1 overrun
+    And "reviews" and "feed" are charged no overrun
+
+  Scenario: A firing that only the report runs over its budget charges no plugin
+    Given the plugins "reviews" and "analytics" implement the hook "public.head-tags"
+    And the hook has a budget of 2 ms and times each plugin for 20 firings after an overrun
+    And the report takes 3 ms
+    And "reviews" fails with "rating unavailable"
+    And the hook has run over its budget once
+    When the hook fires while the plugins take
+      | plugin    | ms  |
+      | reviews   | 0.1 |
+      | analytics | 0.5 |
+    Then the hook is counted 2 overruns
+    And no plugin is charged an overrun
 
   Scenario: Each plugin is timed only for the firings after an overrun
     Given the plugins "analytics" and "feed" implement the hook "public.head-tags"

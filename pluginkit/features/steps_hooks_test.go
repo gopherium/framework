@@ -92,6 +92,19 @@ func (b bystander) ID() string {
 	return b.id
 }
 
+// unwrapPanics is an error whose Unwrap panics.
+type unwrapPanics struct{}
+
+// Error returns the error's text.
+func (unwrapPanics) Error() string {
+	return "index write failed"
+}
+
+// Unwrap panics with the text unwrapped.
+func (unwrapPanics) Unwrap() error {
+	panic("unwrapped")
+}
+
 // hookWorld is the state of one scenario.
 type hookWorld struct {
 	t            *testing.T
@@ -103,6 +116,9 @@ type hookWorld struct {
 	calls        []string
 	late         map[string]bool
 	failures     []pluginkit.HookFailure
+	reportTakes  time.Duration
+	reportPanics string
+	escaped      any
 	actions      *pluginkit.Hook[handler]
 	title        string
 }
@@ -125,9 +141,15 @@ func plugin(ctx context.Context, id string) (*scenePlugin, error) {
 
 // settings returns the hook settings of the scenario, reporting into its failures.
 func (w *hookWorld) settings() pluginkit.HookSettings {
-	return pluginkit.HookSettings{
-		Budget: w.budget, TimedFirings: w.timedFirings,
-		Report: func(failure pluginkit.HookFailure) { w.failures = append(w.failures, failure) },
+	return pluginkit.HookSettings{Budget: w.budget, TimedFirings: w.timedFirings, Report: w.report}
+}
+
+// report records failure, takes the scenario's report time, then panics when the scenario says so.
+func (w *hookWorld) report(failure pluginkit.HookFailure) {
+	w.failures = append(w.failures, failure)
+	time.Sleep(w.reportTakes)
+	if w.reportPanics != "" {
+		panic(w.reportPanics)
 	}
 }
 
@@ -141,9 +163,16 @@ func (w *hookWorld) hook() (*pluginkit.Hook[handler], error) {
 	return hook, err
 }
 
-// onFakeClock runs fn on a fake clock, so the times a scenario names pass in no real time.
+// onFakeClock runs fn on a fake clock, so a scenario's times pass in no real time, keeping a panic that leaves fn.
 func (w *hookWorld) onFakeClock(fn func()) {
-	synctest.Test(w.t, func(*testing.T) { fn() })
+	synctest.Test(w.t, func(*testing.T) {
+		defer func() {
+			if escaped := recover(); escaped != nil {
+				w.escaped = escaped
+			}
+		}()
+		fn()
+	})
 }
 
 // statsOf returns the counters of the plugin id in the action hook.
@@ -159,7 +188,7 @@ func (w *hookWorld) statsOf(id string) (pluginkit.PluginStats, error) {
 	return pluginkit.PluginStats{}, fmt.Errorf("no counters for %s", id)
 }
 
-// implement registers the plugins of list, in order, as implementing the hook name.
+// implement registers the plugins of list, in order after any registered before, as implementing the hook name.
 func implement(ctx context.Context, list, name string) {
 	w := worldOf(ctx)
 	w.name = name
@@ -220,6 +249,23 @@ func failsWithEndedContext(ctx context.Context, id, what string) error {
 		verb = "%v"
 	}
 	return setFailure(ctx, id, func(ctx context.Context) error { return fmt.Errorf("index write: "+verb, ctx.Err()) })
+}
+
+// failsWithPanickyUnwrap makes the plugin id fail with an error whose Unwrap panics.
+func failsWithPanickyUnwrap(ctx context.Context, id string) error {
+	return setFailure(ctx, id, func(context.Context) error { return unwrapPanics{} })
+}
+
+// setReportTakes makes the report take text milliseconds on each failure.
+func setReportTakes(ctx context.Context, text string) error {
+	takes, err := time.ParseDuration(text + "ms")
+	worldOf(ctx).reportTakes = takes
+	return err
+}
+
+// reportPanicsWith makes the report panic with text on each failure.
+func reportPanicsWith(ctx context.Context, text string) {
+	worldOf(ctx).reportPanics = text
 }
 
 // panicsWith makes the plugin id panic with text.
@@ -441,6 +487,24 @@ func timedIn(ctx context.Context, list string, want int) error {
 	return nil
 }
 
+// firingPanicked checks that a firing panicked with want, and takes that panic as expected.
+func firingPanicked(ctx context.Context, want string) error {
+	w := worldOf(ctx)
+	if w.escaped != want {
+		return fmt.Errorf("the firing panicked with %v, want %q", w.escaped, want)
+	}
+	w.escaped = nil
+	return nil
+}
+
+// noPanicLeft fails a scenario whose firing panicked when no step expected it.
+func noPanicLeft(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+	if escaped := worldOf(ctx).escaped; escaped != nil {
+		return ctx, fmt.Errorf("a firing panicked with %v", escaped)
+	}
+	return ctx, nil
+}
+
 // titleBecomes checks the title the filter returned.
 func titleBecomes(ctx context.Context, want string) error {
 	if got := worldOf(ctx).title; got != want {
@@ -458,6 +522,7 @@ func initializeHooks(t *testing.T) func(*godog.ScenarioContext) {
 			}
 			return context.WithValue(ctx, hookWorldKey{}, w), nil
 		})
+		sc.After(noPanicLeft)
 		givenHooks(sc)
 		whenHooks(sc)
 		thenHooks(sc)
@@ -466,7 +531,7 @@ func initializeHooks(t *testing.T) func(*godog.ScenarioContext) {
 
 // givenHooks registers the steps that set a scenario up.
 func givenHooks(sc *godog.ScenarioContext) {
-	sc.Step(`^the plugins (.+) implement the (?:filter )?hook "([^"]*)"$`, implement)
+	sc.Step(`^the plugins? (.+) implements? the (?:filter )?hook "([^"]*)"$`, implement)
 	sc.Step(`^the plugin "([^"]*)" is registered without implementing it$`, registerBystander)
 	sc.Step(`^the hook has a budget of (\S+) ms$`, setBudget)
 	sc.Step(`^the hook has a budget of (\S+) ms and times each plugin for (\d+) firings after an overrun$`, setTiming)
@@ -474,6 +539,9 @@ func givenHooks(sc *godog.ScenarioContext) {
 	sc.Step(`^"([^"]*)" fails with "([^"]*)"$`, failsWith)
 	sc.Step(`^"([^"]*)" fails with the (error|text) of its ended context(?: but not the error itself)?$`,
 		failsWithEndedContext)
+	sc.Step(`^"([^"]*)" fails with an error that panics when it is unwrapped$`, failsWithPanickyUnwrap)
+	sc.Step(`^the report takes (\S+) ms$`, setReportTakes)
+	sc.Step(`^the report panics with "([^"]*)"$`, reportPanicsWith)
 	sc.Step(`^"([^"]*)" panics with "([^"]*)"$`, panicsWith)
 	sc.Step(`^"([^"]*)" puts "([^"]*)" (before|after) the title$`, putsAround)
 	sc.Step(`^the hook has run over its budget once$`, overrunOnce)
@@ -501,5 +569,6 @@ func thenHooks(sc *godog.ScenarioContext) {
 	sc.Step(`^(.+) are charged no overrun$`, chargedNone)
 	sc.Step(`^no plugin is charged an overrun$`, noPluginCharged)
 	sc.Step(`^(.+) are each timed in (\d+) firings$`, timedIn)
+	sc.Step(`^the firing panics with "([^"]*)"$`, firingPanicked)
 	sc.Step(`^the title becomes "([^"]*)"$`, titleBecomes)
 }
