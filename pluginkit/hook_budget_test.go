@@ -266,35 +266,36 @@ func TestTheTimeOfReportIsLeftOutOfThePluginsTime(t *testing.T) {
 		err                error
 		panics             any
 		reviews, analytics time.Duration
+		uncharged          uint64
 		want               []pluginkit.PluginStats
 	}{
 		"so a firing that only Report runs over charges no plugin": {
-			errors.New("rating unavailable"), nil, 0, 500 * time.Microsecond, []pluginkit.PluginStats{
+			errors.New("rating unavailable"), nil, 0, 500 * time.Microsecond, 1, []pluginkit.PluginStats{
 				{ID: "reviews", Errors: 1, TimedCalls: 1},
 				{ID: "analytics", TimedCalls: 1, TimedTime: 500 * time.Microsecond},
 			},
 		},
 		"so plugins that together take exactly the budget charge none": {
-			errors.New("rating unavailable"), nil, budget, 0, []pluginkit.PluginStats{
+			errors.New("rating unavailable"), nil, budget, 0, 1, []pluginkit.PluginStats{
 				{ID: "reviews", Errors: 1, TimedCalls: 1, TimedTime: budget},
 				{ID: "analytics", TimedCalls: 1},
 			},
 		},
 		"so plugins that together run over charge the slowest of their own times": {
-			errors.New("rating unavailable"), nil, 200 * time.Microsecond, 1900 * time.Microsecond,
+			errors.New("rating unavailable"), nil, 200 * time.Microsecond, 1900 * time.Microsecond, 0,
 			[]pluginkit.PluginStats{
 				{ID: "reviews", Errors: 1, TimedCalls: 1, TimedTime: 200 * time.Microsecond},
 				{ID: "analytics", Overruns: 1, TimedCalls: 1, TimedTime: 1900 * time.Microsecond},
 			},
 		},
 		"but the time of the plugin's own error text stays the plugin's": {
-			slowText{}, nil, 0, 500 * time.Microsecond, []pluginkit.PluginStats{
+			slowText{}, nil, 0, 500 * time.Microsecond, 0, []pluginkit.PluginStats{
 				{ID: "reviews", Errors: 1, Overruns: 1, TimedCalls: 1, TimedTime: 3 * time.Millisecond},
 				{ID: "analytics", TimedCalls: 1, TimedTime: 500 * time.Microsecond},
 			},
 		},
 		"and so does the time of the text of its panic": {
-			nil, slowText{}, 0, 500 * time.Microsecond, []pluginkit.PluginStats{
+			nil, slowText{}, 0, 500 * time.Microsecond, 0, []pluginkit.PluginStats{
 				{ID: "reviews", Panics: 1, Overruns: 1, TimedCalls: 1, TimedTime: 3 * time.Millisecond},
 				{ID: "analytics", TimedCalls: 1, TimedTime: 500 * time.Microsecond},
 			},
@@ -316,7 +317,8 @@ func TestTheTimeOfReportIsLeftOutOfThePluginsTime(t *testing.T) {
 				fireTimes(t, hook, 1)
 
 				wantEqual(t, "Stats()", hook.Stats(), pluginkit.HookStats{
-					Name: "content.changed", Firings: 2, Overruns: 2, Plugins: tc.want,
+					Name: "content.changed", Firings: 2, Overruns: 2, UnchargedOverruns: tc.uncharged,
+					TimedReportTime: 3 * time.Millisecond, Plugins: tc.want,
 				})
 			})
 		})
@@ -327,14 +329,17 @@ func TestAFiringThatOnlyReportRunsOverTimesTheFiringsAfterIt(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		timed    bool
-		overruns uint64
-		want     pluginkit.PluginStats
+		timed bool
+		want  pluginkit.HookStats
 	}{
-		"from an untimed firing": {false, 1, pluginkit.PluginStats{ID: "alpha", Errors: 6, TimedCalls: 3}},
-		"from a timed firing, in full again": {
-			true, 2, pluginkit.PluginStats{ID: "alpha", Errors: 6, TimedCalls: 4},
-		},
+		"from an untimed firing, counting no timed overrun or report time": {false, pluginkit.HookStats{
+			Name: "content.changed", Firings: 6, Overruns: 1,
+			Plugins: []pluginkit.PluginStats{{ID: "alpha", Errors: 6, TimedCalls: 3}},
+		}},
+		"from a timed firing, in full again": {true, pluginkit.HookStats{
+			Name: "content.changed", Firings: 7, Overruns: 2, UnchargedOverruns: 1, TimedReportTime: 3 * time.Millisecond,
+			Plugins: []pluginkit.PluginStats{{ID: "alpha", Errors: 6, TimedCalls: 4}},
+		}},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -355,8 +360,7 @@ func TestAFiringThatOnlyReportRunsOverTimesTheFiringsAfterIt(t *testing.T) {
 
 				fireTimes(t, hook, 5)
 
-				wantEqual(t, "Stats().Overruns", hook.Stats().Overruns, tc.overruns)
-				wantEqual(t, "alpha's counters", statsByID(hook)["alpha"], tc.want)
+				wantEqual(t, "Stats()", hook.Stats(), tc.want)
 			})
 		})
 	}

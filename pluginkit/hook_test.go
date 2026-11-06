@@ -508,9 +508,8 @@ func TestConcurrentTimedFiringsCountEveryTimedCallAndCharge(t *testing.T) {
 
 	stats := hook.Stats()
 	charged := stats.Plugins[0].Overruns + stats.Plugins[1].Overruns
-	if stats.Overruns != firings+1 || charged != firings {
-		t.Errorf("Stats() = %+v, want %d overruns and %d charged to a plugin", stats, firings+1, firings)
-	}
+	wantEqual(t, "overruns, charged and uncharged", []uint64{stats.Overruns, charged, stats.UnchargedOverruns},
+		[]uint64{firings + 1, firings, 0})
 	for _, plugin := range stats.Plugins {
 		if plugin.TimedCalls != firings {
 			t.Errorf("%s was timed in %d firings, want %d", plugin.ID, plugin.TimedCalls, firings)

@@ -41,7 +41,11 @@ type HookStats struct {
 	Name     string
 	Firings  uint64
 	Overruns uint64
-	Plugins  []PluginStats
+	// UnchargedOverruns counts the timed firings that ran over their budget while their plugins together kept it.
+	UnchargedOverruns uint64
+	// TimedReportTime is the total time Report took in the timed firings.
+	TimedReportTime time.Duration
+	Plugins         []PluginStats
 }
 
 // PluginStats are the counters of one plugin in one hook.
@@ -74,6 +78,9 @@ type Hook[C any] struct {
 	firings  atomic.Uint64
 	overruns atomic.Uint64
 	timed    atomic.Int64
+
+	uncharged  atomic.Uint64
+	reportTime atomic.Int64
 }
 
 // NewHook returns the hook called name over the plugins that implement C, refusing what it cannot run under.
@@ -146,10 +153,12 @@ func Filter[C, V any](ctx context.Context, hook *Hook[C], value V,
 // Stats returns the counters of the hook and of each of its plugins.
 func (h *Hook[C]) Stats() HookStats {
 	stats := HookStats{
-		Name:     h.name,
-		Firings:  h.firings.Load(),
-		Overruns: h.overruns.Load(),
-		Plugins:  make([]PluginStats, len(h.ids)),
+		Name:              h.name,
+		Firings:           h.firings.Load(),
+		Overruns:          h.overruns.Load(),
+		UnchargedOverruns: h.uncharged.Load(),
+		TimedReportTime:   time.Duration(h.reportTime.Load()),
+		Plugins:           make([]PluginStats, len(h.ids)),
 	}
 	for i, id := range h.ids {
 		c := &h.counters[i]
@@ -172,8 +181,8 @@ func (h *Hook[C]) fire(ctx context.Context, call func(context.Context, C) error)
 	began := time.Now()
 	ctx, cancel := context.WithDeadline(ctx, began.Add(h.settings.Budget))
 	defer cancel()
-	slowest := -1
-	if h.takeTimedFiring() {
+	timed, slowest := h.takeTimedFiring(), -1
+	if timed {
 		slowest = h.callTimed(ctx, call)
 	} else {
 		for i, plugin := range h.plugins {
@@ -186,6 +195,8 @@ func (h *Hook[C]) fire(ctx context.Context, call func(context.Context, C) error)
 	h.overruns.Add(1)
 	if slowest >= 0 {
 		h.counters[slowest].overruns.Add(1)
+	} else if timed {
+		h.uncharged.Add(1)
 	}
 	h.timed.Store(int64(h.settings.TimedFirings))
 }
@@ -216,7 +227,7 @@ func (h *Hook[C]) callTimed(ctx context.Context, call func(context.Context, C) e
 		if took > longest {
 			slowest, longest = i, took
 		}
-		h.report(i, out)
+		h.reportTime.Add(int64(h.report(i, out)))
 	}
 	if total <= h.settings.Budget {
 		return -1
@@ -224,11 +235,15 @@ func (h *Hook[C]) callTimed(ctx context.Context, call func(context.Context, C) e
 	return slowest
 }
 
-// report counts and reports what went wrong in one call of plugin i, if anything did.
-func (h *Hook[C]) report(i int, out *outcome) {
-	if out != nil {
-		h.settings.Report(h.failureOf(i, out))
+// report counts and reports what went wrong in one call of plugin i, if anything did, returning the time Report took.
+func (h *Hook[C]) report(i int, out *outcome) time.Duration {
+	if out == nil {
+		return 0
 	}
+	failure := h.failureOf(i, out)
+	began := time.Now()
+	h.settings.Report(failure)
+	return time.Since(began)
 }
 
 // failureOf counts what went wrong in a call of plugin i and returns it as the failure Report receives.
