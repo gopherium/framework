@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -24,7 +25,7 @@ func timedHook(t *testing.T, timedFirings int, plugins ...identified) (*pluginki
 	return greetHook(t, settingsOf(budget, timedFirings, r), plugins...), r
 }
 
-// overrunOnce fires hook once with a plugin that runs past the budget.
+// overrunOnce fires hook once with every call taking twice the budget.
 func overrunOnce(t *testing.T, hook *pluginkit.Hook[greeter]) {
 	t.Helper()
 	hook.Fire(t.Context(), func(context.Context, greeter) error {
@@ -249,6 +250,164 @@ func TestATimedOverrunIsChargedToTheSlowestOfThatFiringOnly(t *testing.T) {
 	})
 }
 
+// slowText is an error whose text takes 3 ms to build.
+type slowText struct{}
+
+// Error returns the error's text after 3 ms.
+func (slowText) Error() string {
+	time.Sleep(3 * time.Millisecond)
+	return "rating unavailable"
+}
+
+func TestTheTimeOfReportIsLeftOutOfThePluginsTime(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		err                error
+		panics             any
+		reviews, analytics time.Duration
+		want               []pluginkit.PluginStats
+	}{
+		"so a firing that only Report runs over charges no plugin": {
+			errors.New("rating unavailable"), nil, 0, 500 * time.Microsecond, []pluginkit.PluginStats{
+				{ID: "reviews", Errors: 1, TimedCalls: 1},
+				{ID: "analytics", TimedCalls: 1, TimedTime: 500 * time.Microsecond},
+			},
+		},
+		"so plugins that together take exactly the budget charge none": {
+			errors.New("rating unavailable"), nil, budget, 0, []pluginkit.PluginStats{
+				{ID: "reviews", Errors: 1, TimedCalls: 1, TimedTime: budget},
+				{ID: "analytics", TimedCalls: 1},
+			},
+		},
+		"so plugins that together run over charge the slowest of their own times": {
+			errors.New("rating unavailable"), nil, 200 * time.Microsecond, 1900 * time.Microsecond,
+			[]pluginkit.PluginStats{
+				{ID: "reviews", Errors: 1, TimedCalls: 1, TimedTime: 200 * time.Microsecond},
+				{ID: "analytics", Overruns: 1, TimedCalls: 1, TimedTime: 1900 * time.Microsecond},
+			},
+		},
+		"but the time of the plugin's own error text stays the plugin's": {
+			slowText{}, nil, 0, 500 * time.Microsecond, []pluginkit.PluginStats{
+				{ID: "reviews", Errors: 1, Overruns: 1, TimedCalls: 1, TimedTime: 3 * time.Millisecond},
+				{ID: "analytics", TimedCalls: 1, TimedTime: 500 * time.Microsecond},
+			},
+		},
+		"and so does the time of the text of its panic": {
+			nil, slowText{}, 0, 500 * time.Microsecond, []pluginkit.PluginStats{
+				{ID: "reviews", Panics: 1, Overruns: 1, TimedCalls: 1, TimedTime: 3 * time.Millisecond},
+				{ID: "analytics", TimedCalls: 1, TimedTime: 500 * time.Microsecond},
+			},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			synctest.Test(t, func(t *testing.T) {
+				settings := pluginkit.HookSettings{Budget: budget, TimedFirings: 20, Report: func(pluginkit.HookFailure) {
+					time.Sleep(3 * time.Millisecond)
+				}}
+				hook := greetHook(t, settings,
+					&hookPlugin{id: "reviews", takes: tc.reviews, fail: failWith(tc.err), panics: tc.panics, log: &callLog{}},
+					&hookPlugin{id: "analytics", takes: tc.analytics, log: &callLog{}})
+				overrunOnce(t, hook)
+
+				fireTimes(t, hook, 1)
+
+				wantEqual(t, "Stats()", hook.Stats(), pluginkit.HookStats{
+					Name: "content.changed", Firings: 2, Overruns: 2, Plugins: tc.want,
+				})
+			})
+		})
+	}
+}
+
+func TestAFiringThatOnlyReportRunsOverTimesTheFiringsAfterIt(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		timed    bool
+		overruns uint64
+		want     pluginkit.PluginStats
+	}{
+		"from an untimed firing": {false, 1, pluginkit.PluginStats{ID: "alpha", Errors: 6, TimedCalls: 3}},
+		"from a timed firing, in full again": {
+			true, 2, pluginkit.PluginStats{ID: "alpha", Errors: 6, TimedCalls: 4},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			synctest.Test(t, func(t *testing.T) {
+				reportTakes := 3 * time.Millisecond
+				settings := pluginkit.HookSettings{Budget: budget, TimedFirings: 3, Report: func(pluginkit.HookFailure) {
+					time.Sleep(reportTakes)
+				}}
+				hook := greetHook(t, settings,
+					&hookPlugin{id: "alpha", fail: failWith(errors.New("index unavailable")), log: &callLog{}})
+				if tc.timed {
+					overrunOnce(t, hook)
+				}
+				fireTimes(t, hook, 1)
+				reportTakes = 0
+
+				fireTimes(t, hook, 5)
+
+				wantEqual(t, "Stats().Overruns", hook.Stats().Overruns, tc.overruns)
+				wantEqual(t, "alpha's counters", statsByID(hook)["alpha"], tc.want)
+			})
+		})
+	}
+}
+
+func TestAPanicInReportLeavesFire(t *testing.T) {
+	t.Parallel()
+
+	for name, timed := range map[string]bool{"an untimed firing": false, "a timed firing": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			synctest.Test(t, func(t *testing.T) {
+				log := &callLog{}
+				settings := pluginkit.HookSettings{Budget: budget, TimedFirings: 20, Report: func(pluginkit.HookFailure) {
+					panic("report broken")
+				}}
+				hook := greetHook(t, settings,
+					&hookPlugin{id: "alpha", fail: failWith(errors.New("index unavailable")), log: log},
+					&hookPlugin{id: "beta", log: log})
+				if timed {
+					overrunOnce(t, hook)
+				}
+
+				defer func() {
+					if got := recover(); got != "report broken" {
+						t.Errorf("Fire() panicked with %v, want the panic of Report", got)
+					}
+					wantEqual(t, "called", log.called(), []string{"alpha"})
+				}()
+				hook.Fire(t.Context(), greet)
+			})
+		})
+	}
+}
+
+func TestAPluginThatRunsIntoTheDeadlineAndReturnsItsErrorCountsAsContextEnded(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		hook, _ := timedHook(t, 20, &hookPlugin{
+			id: "search", takes: 3 * time.Millisecond, fail: func(ctx context.Context) error { return ctx.Err() },
+			log: &callLog{},
+		})
+
+		hook.Fire(t.Context(), greet)
+
+		wantEqual(t, "search's counters", statsByID(hook)["search"], pluginkit.PluginStats{ID: "search", ContextEnded: 1})
+	})
+}
+
 func TestAFiringAfterAnOverrunKeepsTheOrderTheDeadlineAndTheRecover(t *testing.T) {
 	t.Parallel()
 
@@ -312,6 +471,9 @@ func endedErrorCases() map[string]endedErrorCase {
 			fail:     func(ctx context.Context) error { return fmt.Errorf("index write: %v", ctx.Err()) },
 			counters: failed, failure: failureShape{Err: "index write: context deadline exceeded"},
 		},
+		"another context's error": {
+			fail: failWith(context.Canceled), counters: failed, failure: failureShape{Err: "context canceled"},
+		},
 	}
 }
 
@@ -374,4 +536,40 @@ func TestTheCallersCanceledContextCountsAsContextEnded(t *testing.T) {
 			t.Errorf("Stats().Overruns = %d, want 0, since no time passed", hook.Stats().Overruns)
 		}
 	})
+}
+
+// unwrapPanics is an error whose Unwrap panics.
+type unwrapPanics struct{}
+
+// Error returns the error's text.
+func (unwrapPanics) Error() string {
+	return "index write failed"
+}
+
+// Unwrap panics with the text unwrapped.
+func (unwrapPanics) Unwrap() error {
+	panic("unwrapped")
+}
+
+func TestAnErrorWhoseUnwrapPanicsCountsAsAPanicOfItsPlugin(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	log, r := &callLog{}, &reports{}
+	hook := greetHook(t, settingsOf(time.Hour, 20, r),
+		&hookPlugin{id: "search", fail: failWith(unwrapPanics{}), log: log}, &hookPlugin{id: "feed", log: log})
+
+	hook.Fire(ctx, greet)
+
+	wantEqual(t, "called", log.called(), []string{"search", "feed"})
+	failure := onlyFailure(t, r)
+	wantEqual(t, "reported", shapesOf([]pluginkit.HookFailure{failure}), []failureShape{{
+		Hook: "content.changed", ID: "search", Err: "pluginkit: search content.changed panicked: unwrapped",
+		Panicked: true, Stacked: true,
+	}})
+	if !strings.Contains(failure.Stack, "unwrapPanics.Unwrap") {
+		t.Errorf("reported stack = %q, want the stack of the panic in Unwrap", failure.Stack)
+	}
+	wantEqual(t, "search's counters", statsByID(hook)["search"], pluginkit.PluginStats{ID: "search", Panics: 1})
 }

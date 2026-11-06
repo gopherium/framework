@@ -381,6 +381,55 @@ func TestFireRecoversAPanicCountsItAndReportsItsStack(t *testing.T) {
 	wantEqual(t, "beta's counters", statsByID(hook)["beta"], pluginkit.PluginStats{ID: "beta", Panics: 1})
 }
 
+// selfPanicking is an error and a panic value whose text panics with itself, a panic fmt does not catch.
+type selfPanicking struct{}
+
+// Error panics with the error itself.
+func (selfPanicking) Error() string {
+	panic(selfPanicking{})
+}
+
+func TestAPluginValueWhoseTextPanicsIsReportedByItsType(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		plugin   *hookPlugin
+		failure  failureShape
+		counters pluginkit.PluginStats
+	}{
+		"a returned error": {
+			&hookPlugin{id: "alpha", fail: failWith(selfPanicking{})},
+			failureShape{Err: "pluginkit: alpha content.changed: pluginkit_test.selfPanicking whose text panicked"},
+			pluginkit.PluginStats{ID: "alpha", Errors: 1},
+		},
+		"a panic value": {
+			&hookPlugin{id: "alpha", panics: selfPanicking{}},
+			failureShape{
+				Err:      "pluginkit: alpha content.changed panicked: pluginkit_test.selfPanicking whose text panicked",
+				Panicked: true, Stacked: true,
+			},
+			pluginkit.PluginStats{ID: "alpha", Panics: 1},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			log, r := &callLog{}, &reports{}
+			tc.plugin.log = log
+			hook := greetHook(t, settingsOf(time.Hour, 20, r), tc.plugin, &hookPlugin{id: "beta", log: log})
+
+			hook.Fire(t.Context(), greet)
+
+			wantEqual(t, "called", log.called(), []string{"alpha", "beta"})
+			want := tc.failure
+			want.Hook, want.ID = "content.changed", "alpha"
+			wantEqual(t, "reported", shapesOf(r.all()), []failureShape{want})
+			wantEqual(t, "alpha's counters", statsByID(hook)["alpha"], tc.counters)
+		})
+	}
+}
+
 func TestFilterPassesTheValueThroughEveryPluginPastOnesThatFail(t *testing.T) {
 	t.Parallel()
 
@@ -442,18 +491,50 @@ func TestConcurrentFiringsCountEveryFailure(t *testing.T) {
 	}
 }
 
-func BenchmarkFireWithFiftyPlugins(b *testing.B) {
-	plugins := make([]identified, 50)
-	for i := range plugins {
-		plugins[i] = &hookPlugin{id: fmt.Sprintf("plugin-%02d", i), log: &callLog{}}
-	}
-	hook, err := pluginkit.NewHook[greeter]("content.changed", plugins, settingsOf(time.Hour, 20, &reports{}))
-	if err != nil {
-		b.Fatalf("NewHook() error = %v, want nil", err)
-	}
-	ctx := context.Background()
+func TestConcurrentTimedFiringsCountEveryTimedCallAndCharge(t *testing.T) {
+	t.Parallel()
 
-	for b.Loop() {
-		hook.Fire(ctx, func(context.Context, greeter) error { return nil })
+	const firings = 50
+	hook := greetHook(t, settingsOf(time.Nanosecond, firings+1, &reports{}),
+		&hookPlugin{id: "alpha", takes: time.Microsecond, log: &callLog{}},
+		&hookPlugin{id: "beta", takes: time.Microsecond, log: &callLog{}})
+	hook.Fire(t.Context(), greet)
+
+	var wg sync.WaitGroup
+	for range firings {
+		wg.Go(func() { hook.Fire(context.Background(), greet) })
+	}
+	wg.Wait()
+
+	stats := hook.Stats()
+	charged := stats.Plugins[0].Overruns + stats.Plugins[1].Overruns
+	if stats.Overruns != firings+1 || charged != firings {
+		t.Errorf("Stats() = %+v, want %d overruns and %d charged to a plugin", stats, firings+1, firings)
+	}
+	for _, plugin := range stats.Plugins {
+		if plugin.TimedCalls != firings {
+			t.Errorf("%s was timed in %d firings, want %d", plugin.ID, plugin.TimedCalls, firings)
+		}
+	}
+}
+
+func BenchmarkFireWithTwoHundredPlugins(b *testing.B) {
+	plugins := make([]identified, 200)
+	for i := range plugins {
+		plugins[i] = &hookPlugin{id: fmt.Sprintf("plugin-%03d", i), log: &callLog{}}
+	}
+	for name, limit := range map[string]time.Duration{"untimed": time.Hour, "timed": time.Nanosecond} {
+		b.Run(name, func(b *testing.B) {
+			hook, err := pluginkit.NewHook[greeter]("content.changed", plugins, settingsOf(limit, 1<<30, &reports{}))
+			if err != nil {
+				b.Fatalf("NewHook() error = %v, want nil", err)
+			}
+			ctx := context.Background()
+			hook.Fire(ctx, func(context.Context, greeter) error { return nil })
+
+			for b.Loop() {
+				hook.Fire(ctx, func(context.Context, greeter) error { return nil })
+			}
+		})
 	}
 }

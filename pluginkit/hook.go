@@ -14,11 +14,11 @@ import (
 
 // HookSettings are the values a hook runs under, each one required.
 type HookSettings struct {
-	// Budget is the time one firing gives all its plugins together.
+	// Budget is the time one firing gives all its plugins together, the time of Report included.
 	Budget time.Duration
 	// TimedFirings is how many firings after an overrun time each plugin.
 	TimedFirings int
-	// Report receives every error and panic of a plugin inside the firing, from any goroutine at once.
+	// Report receives every error and panic of a plugin inside the firing, from any goroutine at once, and must not panic.
 	Report func(HookFailure)
 }
 
@@ -30,7 +30,8 @@ type HookFailure struct {
 	Panicked bool
 	// ContextEnded is true for an error that matches the firing's context after that context ended.
 	ContextEnded bool
-	Err          error
+	// Err names the plugin and the hook, and for an error wraps the plugin's error, whose methods are the plugin's code.
+	Err error
 	// Stack is the stack of a panic, and empty for an error.
 	Stack string
 }
@@ -49,11 +50,11 @@ type PluginStats struct {
 	Errors       uint64
 	Panics       uint64
 	ContextEnded uint64
-	// Overruns counts the timed firings that ran over their budget with this plugin as the slowest.
+	// Overruns counts the timed firings whose plugins together ran over the budget, with this plugin as the slowest.
 	Overruns uint64
 	// TimedCalls counts the calls timed while firings were timed after an overrun.
 	TimedCalls uint64
-	// TimedTime is the total time of those calls.
+	// TimedTime is the total time of those calls, without the time Report took.
 	TimedTime time.Duration
 }
 
@@ -165,7 +166,7 @@ func (h *Hook[C]) Stats() HookStats {
 	return stats
 }
 
-// fire runs one firing, counting an overrun and charging it to the slowest plugin when the firing was timed.
+// fire runs one firing, counting an overrun, charged to the slowest plugin when timed plugins ran over together.
 func (h *Hook[C]) fire(ctx context.Context, call func(context.Context, C) error) {
 	h.firings.Add(1)
 	began := time.Now()
@@ -176,7 +177,7 @@ func (h *Hook[C]) fire(ctx context.Context, call func(context.Context, C) error)
 		slowest = h.callTimed(ctx, call)
 	} else {
 		for i, plugin := range h.plugins {
-			h.call(ctx, i, plugin, call)
+			h.report(i, run(ctx, plugin, call))
 		}
 	}
 	if time.Since(began) <= h.settings.Budget {
@@ -202,41 +203,47 @@ func (h *Hook[C]) takeTimedFiring() bool {
 	}
 }
 
-// callTimed calls every plugin in order, timing each, and returns the index of the slowest.
+// callTimed calls and times every plugin in order, returning the slowest, or -1 when together they kept the budget.
 func (h *Hook[C]) callTimed(ctx context.Context, call func(context.Context, C) error) int {
-	slowest, longest := 0, time.Duration(0)
+	slowest, longest, total := 0, time.Duration(0), time.Duration(0)
 	for i, plugin := range h.plugins {
 		began := time.Now()
-		h.call(ctx, i, plugin, call)
+		out := run(ctx, plugin, call)
 		took := time.Since(began)
+		total += took
 		h.counters[i].timedCalls.Add(1)
 		h.counters[i].timedTime.Add(int64(took))
 		if took > longest {
 			slowest, longest = i, took
 		}
+		h.report(i, out)
+	}
+	if total <= h.settings.Budget {
+		return -1
 	}
 	return slowest
 }
 
-// call calls one plugin, then counts and reports its error or panic.
-func (h *Hook[C]) call(ctx context.Context, i int, plugin C, call func(context.Context, C) error) {
-	if out := run(ctx, plugin, call); out.recovered != nil || out.err != nil {
-		h.settings.Report(h.failureOf(ctx, i, out))
+// report counts and reports what went wrong in one call of plugin i, if anything did.
+func (h *Hook[C]) report(i int, out *outcome) {
+	if out != nil {
+		h.settings.Report(h.failureOf(i, out))
 	}
 }
 
 // failureOf counts what went wrong in a call of plugin i and returns it as the failure Report receives.
-func (h *Hook[C]) failureOf(ctx context.Context, i int, out outcome) HookFailure {
+func (h *Hook[C]) failureOf(i int, out *outcome) HookFailure {
 	failure := HookFailure{Hook: h.name, ID: h.ids[i]}
 	counters := &h.counters[i]
-	if out.recovered != nil {
+	named := "pluginkit: " + failure.ID + " " + h.name
+	if out.panicked {
 		failure.Panicked, failure.Stack = true, out.stack
-		failure.Err = panicError(fmt.Sprintf("pluginkit: %s %s panicked: %v", failure.ID, h.name, out.recovered))
+		failure.Err = panicError(named + " panicked: " + out.text)
 		counters.panics.Add(1)
 		return failure
 	}
-	failure.Err = fmt.Errorf("pluginkit: %s %s: %w", failure.ID, h.name, out.err)
-	failure.ContextEnded = ctx.Err() != nil && errors.Is(out.err, ctx.Err())
+	failure.Err = &pluginError{text: named + ": " + out.text, err: out.err}
+	failure.ContextEnded = out.ended
 	if failure.ContextEnded {
 		counters.contextEnded.Add(1)
 	} else {
@@ -245,20 +252,51 @@ func (h *Hook[C]) failureOf(ctx context.Context, i int, out outcome) HookFailure
 	return failure
 }
 
-// outcome is what one call of a plugin did wrong, a panic with its stack or an error, if anything.
+// outcome is what went wrong in one call of a plugin, a panic with its stack or an error, with its text.
 type outcome struct {
-	recovered any
-	stack     string
-	err       error
+	panicked bool
+	stack    string
+	text     string
+	err      error
+	// ended is true for an error that matches the firing's context after that context ended.
+	ended bool
 }
 
-// run calls one plugin inside a recover, answering what it panicked with and its stack, or its error.
-func run[C any](ctx context.Context, plugin C, call func(context.Context, C) error) (out outcome) {
+// run calls one plugin inside a recover, answering nil when the call succeeded, else what went wrong.
+func run[C any](ctx context.Context, plugin C, call func(context.Context, C) error) (out *outcome) {
 	defer func() {
-		if out.recovered = recover(); out.recovered != nil {
-			out.stack = string(debug.Stack())
+		if recovered := recover(); recovered != nil {
+			out = &outcome{panicked: true, stack: string(debug.Stack()), text: describe(recovered)}
 		}
 	}()
-	out.err = call(ctx, plugin)
-	return out
+	if err := call(ctx, plugin); err != nil {
+		return &outcome{err: err, text: describe(err), ended: ctx.Err() != nil && errors.Is(err, ctx.Err())}
+	}
+	return nil
+}
+
+// describe returns v as fmt prints it, or its type when printing it panics.
+func describe(v any) (text string) {
+	defer func() {
+		if recover() != nil {
+			text = fmt.Sprintf("%T whose text panicked", v)
+		}
+	}()
+	return fmt.Sprint(v)
+}
+
+// pluginError is a plugin's error with the plugin and the hook named before its text.
+type pluginError struct {
+	text string
+	err  error
+}
+
+// Error returns the error's text.
+func (e *pluginError) Error() string {
+	return e.text
+}
+
+// Unwrap returns the plugin's own error.
+func (e *pluginError) Unwrap() error {
+	return e.err
 }
