@@ -3,6 +3,12 @@
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
+## Unreleased
+
+- `NewHook` collects the plugins that implement an interface into a `Hook`. `Hook.Fire` calls an action on each in registration order and `Filter` passes a value through each, every call inside its own recover.
+- One firing shares `HookSettings.Budget` as a context deadline. The plugins after a slow one are still called, and an error that matches the ended context counts as `ContextEnded`, not as that plugin's fault.
+- After a firing runs over its budget, the next `TimedFirings` firings time each plugin and charge a timed overrun to the slowest. `Stats` returns every counter, and `HookSettings.Report` receives each error and panic as a `HookFailure`.
+
 ## 0.9.0 - 2026-11-05
 
 - `wire.Manifest` holds one `plugin.json` as data, reading `version`, `license`, `did`, `requires`, `tested`, `engines`, `uninstall`, `hooks`, `defines`, `jobs` and `settings`, with every other key kept raw in `Extra`.

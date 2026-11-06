@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package pluginkit provides compile-time plugin infrastructure: a lifecycle
-// contract, a plugin host, and route guarding for plugin namespaces.
+// contract, a plugin host, hooks that call every plugin implementing an
+// interface, and route guarding for plugin namespaces.
 package pluginkit
 
 import (
