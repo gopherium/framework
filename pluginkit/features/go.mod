@@ -2,7 +2,10 @@ module github.com/gopherium/framework/pluginkit/features
 
 go 1.27.3
 
-require github.com/cucumber/godog v0.16.0
+require (
+	github.com/cucumber/godog v0.16.0
+	github.com/gopherium/framework/pluginkit v0.0.0
+)
 
 require (
 	github.com/cucumber/gherkin/go/v42 v42.0.0 // indirect

@@ -35,5 +35,5 @@ func runFeature(t *testing.T, path string, initialize func(*godog.ScenarioContex
 }
 
 func TestHooks(t *testing.T) {
-	runFeature(t, "hooks.feature", func(*godog.ScenarioContext) {})
+	runFeature(t, "hooks.feature", initializeHooks(t))
 }
