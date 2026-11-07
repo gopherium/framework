@@ -3,7 +3,7 @@
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
-## Unreleased
+## 0.11.0 - 2026-11-07
 
 - `wire.Manifest` reads `menu` as `[]MenuEntry`, and `screens` and `screen_capabilities`, which no longer sit in `Extra`, a breaking change.
 - `wire.Run` refuses a menu entry with no `label`, `screen` or `capability`, a screen name that is not one path segment, two menu entries asking different capabilities for one screen, and a screen capability that is empty or names a screen of the menu, a breaking change for a `menu` that ran before.
