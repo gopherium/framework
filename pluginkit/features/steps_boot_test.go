@@ -36,9 +36,10 @@ func (p *bootPlugin) MigrationVersion() (string, error) {
 	return "1", nil
 }
 
-// Start notes the start, ends the boot's context or fails as the scenario says.
+// Start notes the call, ends the boot's context or fails as the scenario says.
 func (p *bootPlugin) Start(context.Context) error {
-	if p.world.endsOn == p.id {
+	p.world.startCalls = append(p.world.startCalls, p.id)
+	if p.world.endsOn["starts"] == p.id {
 		p.world.cancel()
 	}
 	return p.world.failure(p.world.startFails, p.id)
@@ -109,13 +110,14 @@ type bootWorld struct {
 	startFails   map[string]string
 	recordFails  map[string]string
 	rejected     map[string]bool
-	endsOn       string
+	endsOn       map[string]string
 	readErr      error
 	writeErr     error
 	cancel       context.CancelFunc
 	store        *bootStore
 	booted       bool
 	registered   []string
+	startCalls   []string
 	started      []string
 	err          error
 }
@@ -163,11 +165,6 @@ func (w *bootWorld) rejectRole(id string) {
 	w.rejected[id] = true
 }
 
-// endWhile ends the boot's context while the plugin id starts.
-func (w *bootWorld) endWhile(id string) {
-	w.endsOn = id
-}
-
 // readFails makes the store fail every read with text.
 func (w *bootWorld) readFails(text string) {
 	w.readErr = errors.New(text)
@@ -191,6 +188,9 @@ func (w *bootWorld) entries() []pluginkit.Registration[string, *bootPlugin] {
 func (w *bootWorld) registerOf(id string) func(string) (*bootPlugin, error) {
 	return func(string) (*bootPlugin, error) {
 		w.registered = append(w.registered, id)
+		if w.endsOn["registers"] == id {
+			w.cancel()
+		}
 		if value, ok := w.registerBoom[id]; ok {
 			panic(value)
 		}
@@ -279,10 +279,10 @@ func (w *bootWorld) startedInOrder(list string) error {
 	return nil
 }
 
-// neverStarted checks that the plugin id did not start.
+// neverStarted checks that the Start of the plugin id was not called.
 func (w *bootWorld) neverStarted(id string) error {
-	if slices.Contains(w.started, id) {
-		return fmt.Errorf("%s started", id)
+	if slices.Contains(w.startCalls, id) {
+		return fmt.Errorf("the Start of %s ran", id)
 	}
 	return nil
 }
@@ -349,7 +349,8 @@ func givenBoot(sc *godog.ScenarioContext, w *bootWorld) {
 	sc.Step(`^the migration record of "([^"]*)" fails with "([^"]*)"$`,
 		func(id, text string) { set(w.recordFails, id, text) })
 	sc.Step(`^the application finds that "([^"]*)" declares a role it cannot accept$`, w.rejectRole)
-	sc.Step(`^the context of the boot ends while "([^"]*)" starts$`, w.endWhile)
+	sc.Step(`^the context of the boot ends while "([^"]*)" (starts|registers)$`,
+		func(id, step string) { set(w.endsOn, step, id) })
 	sc.Step(`^the store fails to read with "([^"]*)"$`, w.readFails)
 	sc.Step(`^the store fails to write with "([^"]*)"$`, w.writeFails)
 }
@@ -372,7 +373,7 @@ func initializeBoot(t *testing.T) func(*godog.ScenarioContext) {
 		w := &bootWorld{
 			t: t, seeds: map[string]pluginkit.PluginRecord{}, registerFail: map[string]string{},
 			registerBoom: map[string]string{}, migrateFails: map[string]string{}, startFails: map[string]string{},
-			recordFails: map[string]string{}, rejected: map[string]bool{},
+			recordFails: map[string]string{}, rejected: map[string]bool{}, endsOn: map[string]string{},
 		}
 		givenBoot(sc, w)
 		thenBoot(sc, w)

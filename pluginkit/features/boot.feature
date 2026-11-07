@@ -109,6 +109,15 @@ Feature: Booting plugins and pausing the one that fails
     Then the boot reports that its context ended
     And the store was not written
 
+  Scenario: A boot whose context ends while a plugin registers pauses nothing
+    Given the compiled plugins "events" and "feed"
+    And the store records "events" and "feed" as active
+    And the context of the boot ends while "feed" registers
+    And the Register of "feed" fails with "the boot is shutting down"
+    When the application boots its plugins
+    Then the boot reports that its context ended
+    And the store was not written
+
   Scenario: A store that cannot read its records stops the boot
     Given the compiled plugins "events" and "feed"
     And the store fails to read with "connection dropped"
