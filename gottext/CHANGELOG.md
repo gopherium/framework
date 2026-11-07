@@ -5,6 +5,15 @@ versioning follows [Semantic Versioning](https://semver.org/). While at 0.x,
 minor releases may break. Releases are tagged `gottext/vX.Y.Z` and publish
 from CI.
 
+## [Unreleased]
+
+### Fixed
+
+- `mismatched` reads the tags of each translated form with the pattern
+  `createInterpolateElement` uses and compares them with the tags of its
+  message, so a translation that adds, drops, renames or repeats a tag is
+  named, while one that only moves a tag still passes.
+
 ## [0.8.0] - 2026-11-02
 
 ### Changed

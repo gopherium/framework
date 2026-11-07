@@ -597,6 +597,105 @@ msgstr[1] "%(total)d entradas"
 	expect(mismatched(broken, naming)).toEqual(['%(count)d post'])
 })
 
+test('names a translation adding a tag its message does not carry', () => {
+	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
+	const added = 'msgid "<notes>x</notes> y"\nmsgstr "<notes>x</notes> <extra>y</extra>"\n'
+
+	expect(mismatched(added, naming)).toEqual(['<notes>x</notes> y'])
+})
+
+test('names a translation dropping a tag its message carries', () => {
+	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
+	const dropped = 'msgid "<notes>x</notes> y"\nmsgstr "<notes>x y"\n'
+
+	expect(mismatched(dropped, naming)).toEqual(['<notes>x</notes> y'])
+})
+
+test('names a translation renaming a tag its message carries', () => {
+	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
+	const renamed = 'msgid "<notes>x</notes> y"\nmsgstr "<note>x</note> y"\n'
+
+	expect(mismatched(renamed, naming)).toEqual(['<notes>x</notes> y'])
+})
+
+test('names a translation repeating a tag its message carries', () => {
+	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
+	const repeated = 'msgid "<notes>x</notes> y"\nmsgstr "<notes>x</notes> <notes>y</notes>"\n'
+
+	expect(mismatched(repeated, naming)).toEqual(['<notes>x</notes> y'])
+})
+
+test('names a translation answering an opening and a closing tag with a self closing one', () => {
+	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
+	const selfClosed = 'msgid "<notes>x</notes> y"\nmsgstr "<notes/>x y"\n'
+
+	expect(mismatched(selfClosed, naming)).toEqual(['<notes>x</notes> y'])
+})
+
+test('names a translation opening a tag its message carries self closing', () => {
+	const naming = 'msgid "a <br/> b"\nmsgstr ""\n'
+	const opened = 'msgid "a <br/> b"\nmsgstr "a <br> b"\n'
+
+	expect(mismatched(opened, naming)).toEqual(['a <br/> b'])
+})
+
+test('names a translation whose plural form drops a tag', () => {
+	const naming = `msgid "<notes>one</notes> post"
+msgid_plural "<notes>many</notes> posts"
+msgstr[0] ""
+msgstr[1] ""
+`
+	const broken = `msgid "<notes>one</notes> post"
+msgid_plural "<notes>many</notes> posts"
+msgstr[0] "<notes>uno</notes> entrada"
+msgstr[1] "<notes>muchas entradas"
+`
+
+	expect(mismatched(broken, naming)).toEqual(['<notes>one</notes> post'])
+})
+
+test('names a translation whose singular form repeats a tag', () => {
+	const naming = `msgid "<notes>one</notes> post"
+msgid_plural "<notes>many</notes> posts"
+msgstr[0] ""
+msgstr[1] ""
+`
+	const broken = `msgid "<notes>one</notes> post"
+msgid_plural "<notes>many</notes> posts"
+msgstr[0] "<notes>uno</notes> <notes>uno</notes>"
+msgstr[1] "<notes>muchas</notes> entradas"
+`
+
+	expect(mismatched(broken, naming)).toEqual(['<notes>one</notes> post'])
+})
+
+test('passes a translation moving a tag its message carries', () => {
+	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
+	const moved = 'msgid "<notes>x</notes> y"\nmsgstr "y <notes>x</notes>"\n'
+
+	expect(mismatched(moved, naming)).toEqual([])
+})
+
+test('passes a translation carrying spaces inside a tag', () => {
+	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
+	const spaced = 'msgid "<notes>x</notes> y"\nmsgstr "<notes >x</notes > y"\n'
+
+	expect(mismatched(spaced, naming)).toEqual([])
+})
+
+test('passes an empty form answering a message carrying tags', () => {
+	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
+
+	expect(mismatched(naming, naming)).toEqual([])
+})
+
+test('passes a translation closing a tag before opening it', () => {
+	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
+	const closedFirst = 'msgid "<notes>x</notes> y"\nmsgstr "</notes>x<notes> y"\n'
+
+	expect(mismatched(closedFirst, naming)).toEqual([])
+})
+
 test('passes over the metadata entry rather than reading it as a message', () => {
 	const naming = 'msgid ""\nmsgstr ""\n\nmsgid "Older posts"\nmsgstr ""\n'
 
