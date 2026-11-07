@@ -8,7 +8,6 @@ Feature: Booting plugins and pausing the one that fails
   error, and the others still start. A paused plugin is tried again at
   every boot.
 
-  @wip
   Scenario: The first boot records each compiled plugin as active
     Given the compiled plugins "events" and "feed"
     And the store holds no record
@@ -17,7 +16,6 @@ Feature: Booting plugins and pausing the one that fails
     And the store records "events" as active with no error
     And the store records "feed" as active with no error
 
-  @wip
   Scenario: A boot where nothing changes writes nothing to the store
     Given the compiled plugins "events" and "feed"
     And the store records "events" and "feed" as active
@@ -25,7 +23,6 @@ Feature: Booting plugins and pausing the one that fails
     Then "events" and "feed" started, in that order
     And the store was not written
 
-  @wip
   Scenario: A plugin whose Register fails is paused and the others start
     Given the compiled plugins "events", "feed" and "gallery"
     And the Register of "feed" fails with "the title is too long"
@@ -33,7 +30,6 @@ Feature: Booting plugins and pausing the one that fails
     Then "events" and "gallery" started, in that order
     And the store records "feed" as paused with "pluginkit: feed register: the title is too long"
 
-  @wip
   Scenario: A plugin whose Register panics is paused
     Given the compiled plugins "events" and "feed"
     And the Register of "feed" panics with "boom"
@@ -41,7 +37,6 @@ Feature: Booting plugins and pausing the one that fails
     Then "events" started
     And the store records "feed" as paused with "pluginkit: feed register panicked: boom"
 
-  @wip
   Scenario: A plugin whose migration fails is paused and never starts
     Given the compiled plugins "events" and "feed"
     And the migration of "feed" fails with "schema exploded"
@@ -50,7 +45,6 @@ Feature: Booting plugins and pausing the one that fails
     And "feed" never started
     And the store records "feed" as paused with "pluginkit: feed migrate: schema exploded"
 
-  @wip
   Scenario: A plugin whose Start fails is paused
     Given the compiled plugins "events" and "feed"
     And the Start of "feed" fails with "no route table"
@@ -58,7 +52,6 @@ Feature: Booting plugins and pausing the one that fails
     Then "events" started
     And the store records "feed" as paused with "pluginkit: feed start: no route table"
 
-  @wip
   Scenario: A plugin whose migration record fails still starts and stays active
     Given the compiled plugins "events" and "feed"
     And the store records "events" and "feed" as active
@@ -66,8 +59,8 @@ Feature: Booting plugins and pausing the one that fails
     When the application boots its plugins
     Then "events" and "feed" started, in that order
     And the store records "feed" as active with no error
+    And the store was not written
 
-  @wip
   Scenario Outline: A plugin the store keeps <state> is never registered
     Given the compiled plugins "events" and "feed"
     And the store records "events" as active
@@ -82,7 +75,6 @@ Feature: Booting plugins and pausing the one that fails
       | inactive      |
       | not installed |
 
-  @wip
   Scenario: A paused plugin that now starts is active again with no error
     Given the compiled plugins "events" and "feed"
     And the store records "events" as active
@@ -91,7 +83,6 @@ Feature: Booting plugins and pausing the one that fails
     Then "events" and "feed" started, in that order
     And the store records "feed" as active with no error
 
-  @wip
   Scenario: A paused plugin that fails again stays paused with its new error
     Given the compiled plugins "events" and "feed"
     And the store records "events" as active
@@ -101,7 +92,6 @@ Feature: Booting plugins and pausing the one that fails
     Then "events" started
     And the store records "feed" as paused with "pluginkit: feed start: no route table"
 
-  @wip
   Scenario: The application pauses a plugin for a reason of its own
     Given the compiled plugins "events" and "forum"
     And the store records "events" and "forum" as active
@@ -111,7 +101,6 @@ Feature: Booting plugins and pausing the one that fails
     And "forum" never started
     And the store records "forum" as paused with "forum declares a role it cannot accept"
 
-  @wip
   Scenario: A boot whose context ends pauses nothing
     Given the compiled plugins "events", "feed" and "gallery"
     And the store records "events", "feed" and "gallery" as active
@@ -120,7 +109,6 @@ Feature: Booting plugins and pausing the one that fails
     Then the boot reports that its context ended
     And the store was not written
 
-  @wip
   Scenario: A store that cannot read its records stops the boot
     Given the compiled plugins "events" and "feed"
     And the store fails to read with "connection dropped"
@@ -128,7 +116,6 @@ Feature: Booting plugins and pausing the one that fails
     Then the boot fails with: pluginkit: read the plugin records: connection dropped
     And the Register of "events" never ran
 
-  @wip
   Scenario: A store that cannot write a pause stops the boot
     Given the compiled plugins "events" and "feed"
     And the store records "events" and "feed" as active

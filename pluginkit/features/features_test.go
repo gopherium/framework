@@ -47,5 +47,5 @@ func TestRegistration(t *testing.T) {
 }
 
 func TestBoot(t *testing.T) {
-	runFeature(t, "boot.feature", func(*godog.ScenarioContext) {})
+	runFeature(t, "boot.feature", initializeBoot(t))
 }
