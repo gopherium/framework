@@ -95,13 +95,26 @@ const fullIndex = `[
 				"of": "venue"
 			}
 		],
-		"graphql": true,
 		"menu": [
 			{
-				"label": "Reservations"
+				"label": "Reservations",
+				"screen": "reservations",
+				"parent": "content",
+				"position": 30,
+				"capability": "events.manage",
+				"icon": "calendar"
+			},
+			{
+				"label": "Check-in",
+				"screen": "check-in",
+				"capability": "events.checkin"
 			}
 		],
-		"screens": "@myapp/plugin-events/screens"
+		"screens": "@myapp/plugin-events/screens",
+		"screen_capabilities": {
+			"seats": "events.manage"
+		},
+		"graphql": true
 	},
 	{
 		"id": "feed",
@@ -188,6 +201,18 @@ func TestManifestIndexKeepsAZeroLimit(t *testing.T) {
 
 	if !strings.Contains(got, `"min": 0,`) || !strings.Contains(got, `"max": 0`) {
 		t.Errorf("index = %s, want both limits kept at zero", got)
+	}
+}
+
+func TestManifestIndexKeepsAZeroPosition(t *testing.T) {
+	t.Parallel()
+
+	got := runForIndex(t, map[string]string{
+		"feed": withKeys(feedManifest, `"menu": [{"label": "a", "screen": "b", "capability": "c", "position": 0}]`),
+	})
+
+	if !strings.Contains(got, `"position": 0,`) {
+		t.Errorf("index = %s, want the position kept at zero", got)
 	}
 }
 

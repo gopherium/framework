@@ -12,7 +12,7 @@ import (
 	"testing/fstest"
 )
 
-// fullManifest names every key a manifest can hold, its last three only as raw extras.
+// fullManifest names every key a manifest can hold, its last one only as a raw extra.
 const fullManifest = `{
 	"id": "events",
 	"name": "Events",
@@ -33,13 +33,25 @@ const fullManifest = `{
 		{"key": "tone", "type": "choice", "options": ["calm", "loud"]},
 		{"key": "venue", "type": "picker", "of": "venue"}
 	],
-	"graphql": true,
-	"menu": [{"label": "Reservations"}],
-	"screens": "@myapp/plugin-events/screens"
+	"menu": [
+		{
+			"label": "Reservations", "screen": "reservations", "parent": "content", "position": 30,
+			"capability": "events.manage", "icon": "calendar"
+		},
+		{"label": "Check-in", "screen": "check-in", "capability": "events.checkin"}
+	],
+	"screens": "@myapp/plugin-events/screens",
+	"screen_capabilities": {"seats": "events.manage"},
+	"graphql": true
 }`
 
 // number returns a pointer to value, as a setting's limits hold it.
 func number(value float64) *float64 {
+	return &value
+}
+
+// position returns a pointer to value, as a menu entry's position holds it.
+func position(value int) *int {
 	return &value
 }
 
@@ -71,11 +83,16 @@ func fullManifestRead() Manifest {
 			{Key: "tone", Type: "choice", Options: []string{"calm", "loud"}},
 			{Key: "venue", Type: "picker", Of: "venue"},
 		},
-		Extra: map[string]json.RawMessage{
-			"graphql": json.RawMessage(`true`),
-			"menu":    json.RawMessage(`[{"label": "Reservations"}]`),
-			"screens": json.RawMessage(`"@myapp/plugin-events/screens"`),
+		Menu: []MenuEntry{
+			{
+				Label: "Reservations", Screen: "reservations", Parent: "content", Position: position(30),
+				Capability: "events.manage", Icon: "calendar",
+			},
+			{Label: "Check-in", Screen: "check-in", Capability: "events.checkin"},
 		},
+		Screens:            "@myapp/plugin-events/screens",
+		ScreenCapabilities: map[string]string{"seats": "events.manage"},
+		Extra:              map[string]json.RawMessage{"graphql": json.RawMessage(`true`)},
 	}
 }
 
@@ -236,6 +253,18 @@ func TestLoadKeepsAZeroLimitApartFromAnAbsentOne(t *testing.T) {
 	assertSame(t, got.Settings, []Setting{{Key: "seats", Type: "count", Min: number(0)}})
 }
 
+func TestLoadKeepsAZeroPositionApartFromAnAbsentOne(t *testing.T) {
+	t.Parallel()
+
+	got := feedWith(t, `"menu": [{"label": "a", "screen": "b", "capability": "c", "position": 0}, `+
+		`{"label": "d", "screen": "e", "capability": "f"}]`)
+
+	assertSame(t, got.Menu, []MenuEntry{
+		{Label: "a", Screen: "b", Capability: "c", Position: position(0)},
+		{Label: "d", Screen: "e", Capability: "f"},
+	})
+}
+
 func TestLoadKeepsAnUnknownKeyInExtra(t *testing.T) {
 	t.Parallel()
 
@@ -252,7 +281,7 @@ func TestLoadReadsANullAsAnAbsentKey(t *testing.T) {
 	t.Parallel()
 
 	got := feedWith(t, `"version": null, "requires": null, "engines": null, "uninstall": null, "hooks": null, `+
-		`"defines": null, "jobs": null, "settings": null`)
+		`"defines": null, "jobs": null, "settings": null, "menu": null, "screens": null, "screen_capabilities": null`)
 
 	want, err := loadOne(t, "feed", feedManifest)
 	assertErrorFree(t, err)
@@ -271,11 +300,13 @@ func TestLoadDropsAKeyAnEntryHasNoFieldFor(t *testing.T) {
 	t.Parallel()
 
 	got := feedWith(t, `"defines": [{"hook": "a", "note": 1}], "jobs": [{"name": "b", "every": "1h", "note": 1}], `+
-		`"settings": [{"key": "c", "type": "d", "note": 1}]`)
+		`"settings": [{"key": "c", "type": "d", "note": 1}], "menu": [{"label": "e", "screen": "f", "capability": "g", `+
+		`"note": 1}]`)
 
 	assertSame(t, got.Defines, []Define{{Hook: "a"}})
 	assertSame(t, got.Jobs, []Job{{Name: "b", Every: "1h"}})
 	assertSame(t, got.Settings, []Setting{{Key: "c", Type: "d"}})
+	assertSame(t, got.Menu, []MenuEntry{{Label: "e", Screen: "f", Capability: "g"}})
 	assertSame(t, got.Extra, map[string]json.RawMessage(nil))
 }
 
@@ -507,10 +538,109 @@ func emptyValues() map[string]wrongShape {
 	}
 }
 
+// wrongScreenTypes lists menu and screen keys of the wrong JSON type, and what the decoder says of each.
+func wrongScreenTypes() map[string]wrongShape {
+	return map[string]wrongShape{
+		"an object for menu": {
+			`"menu": {"label": "a"}`,
+			"json: cannot unmarshal object into Go struct field manifest.menu of type []wire.MenuEntry",
+		},
+		"a number for a menu label": {
+			`"menu": [{"label": 5, "screen": "a", "capability": "b"}]`,
+			"json: cannot unmarshal number into Go struct field manifest.menu.0.label of type string",
+		},
+		"a number for a menu parent": {
+			`"menu": [{"label": "a", "screen": "b", "capability": "c", "parent": 5}]`,
+			"json: cannot unmarshal number into Go struct field manifest.menu.0.parent of type string",
+		},
+		"a string for a menu position": {
+			`"menu": [{"label": "a", "screen": "b", "capability": "c", "position": "first"}]`,
+			"json: cannot unmarshal string into Go struct field manifest.menu.0.position of type int",
+		},
+		"a fraction for a menu position": {
+			`"menu": [{"label": "a", "screen": "b", "capability": "c", "position": 1.5}]`,
+			"json: cannot unmarshal number 1.5 into Go struct field manifest.menu.0.position of type int",
+		},
+		"a number for a menu icon": {
+			`"menu": [{"label": "a", "screen": "b", "capability": "c", "icon": 5}]`,
+			"json: cannot unmarshal number into Go struct field manifest.menu.0.icon of type string",
+		},
+		"a list for screens": {
+			`"screens": ["a"]`, "json: cannot unmarshal array into Go struct field manifest.screens of type string",
+		},
+		"a list for screen capabilities": {
+			`"screen_capabilities": ["seats"]`,
+			"json: cannot unmarshal array into Go struct field manifest.screen_capabilities of type map[string]string",
+		},
+		"a number for a screen capability": {
+			`"screen_capabilities": {"seats": 3}`,
+			"json: cannot unmarshal number into Go struct field manifest.screen_capabilities.seats of type string",
+		},
+	}
+}
+
+// emptyScreenValues lists menu entries and screen capabilities wire refuses, and the text it gives for each.
+func emptyScreenValues() map[string]wrongShape {
+	return map[string]wrongShape{
+		"a menu entry with no label":      {`"menu": [{"screen": "a", "capability": "b"}]`, "menu[0]: label is required"},
+		"a menu entry with no screen":     {`"menu": [{"label": "a", "capability": "b"}]`, "menu[0]: screen is required"},
+		"a null in menu":                  {`"menu": [null]`, "menu[0]: label is required"},
+		"an empty menu before its screen": {`"menu": [{"label": "", "screen": ""}]`, "menu[0]: label is required"},
+		"a menu entry with no capability": {
+			`"menu": [{"label": "a", "screen": "b", "capability": "c"}, {"label": "d", "screen": "e"}]`,
+			"menu[1]: capability is required",
+		},
+		"a menu screen with a slash": {
+			`"menu": [{"label": "a", "screen": "list/all", "capability": "b"}]`,
+			`menu[0]: the screen "list/all" must be one path segment`,
+		},
+		"a menu screen that is only a slash": {
+			`"menu": [{"label": "a", "screen": "/", "capability": "b"}]`, `menu[0]: the screen "/" must be one path segment`,
+		},
+		"a menu screen with a slash and no capability": {
+			`"menu": [{"label": "a", "screen": "list/all"}]`, "menu[0]: capability is required",
+		},
+		"a screen capability that is empty": {
+			`"screen_capabilities": {"seats": ""}`, `screen_capabilities: the screen "seats" needs a capability`,
+		},
+		"a screen capability that is null": {
+			`"screen_capabilities": {"seats": null}`, `screen_capabilities: the screen "seats" needs a capability`,
+		},
+		"an empty screen name": {
+			`"screen_capabilities": {"": "a"}`, `screen_capabilities: the screen "" must be one path segment`,
+		},
+		"a screen name with a slash": {
+			`"screen_capabilities": {"seats/all": "a"}`, `screen_capabilities: the screen "seats/all" must be one path segment`,
+		},
+		"a screen name with a slash and no capability": {
+			`"screen_capabilities": {"seats/all": ""}`,
+			`screen_capabilities: the screen "seats/all" must be one path segment`,
+		},
+		"the first wrong screen in name order": {
+			`"screen_capabilities": {"b/c": "d", "a": ""}`, `screen_capabilities: the screen "a" needs a capability`,
+		},
+		"a screen capability for a screen of the menu": {
+			`"menu": [{"label": "a", "screen": "list", "capability": "b"}, {"label": "c", "screen": "seats", ` +
+				`"capability": "d"}], "screen_capabilities": {"seats": "e"}`,
+			`screen_capabilities: the screen "seats" takes the capability of menu[1]`,
+		},
+		"a screen capability for the first screen of the menu": {
+			`"menu": [{"label": "a", "screen": "list", "capability": "b"}], "screen_capabilities": {"list": "c"}`,
+			`screen_capabilities: the screen "list" takes the capability of menu[0]`,
+		},
+		"an empty setting before a menu entry": {`"settings": [{}], "menu": [{}]`, "settings[0]: key is required"},
+		"an empty menu entry before a screen capability": {
+			`"menu": [{}], "screen_capabilities": {"": "a"}`, "menu[0]: label is required",
+		},
+	}
+}
+
 // eachWrongShape runs check in a parallel subtest for every wrong shape.
 func eachWrongShape(t *testing.T, check func(t *testing.T, tc wrongShape)) {
 	t.Helper()
-	for _, shapes := range []map[string]wrongShape{wrongTypes(), wrongEntryTypes(), wrongDefines(), emptyValues()} {
+	for _, shapes := range []map[string]wrongShape{
+		wrongTypes(), wrongEntryTypes(), wrongDefines(), emptyValues(), wrongScreenTypes(), emptyScreenValues(),
+	} {
 		for name, tc := range shapes {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()

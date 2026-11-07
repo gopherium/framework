@@ -32,6 +32,11 @@ type Manifest struct {
 	Defines   []Define          `json:"defines,omitempty"`
 	Jobs      []Job             `json:"jobs,omitempty"`
 	Settings  []Setting         `json:"settings,omitempty"`
+	Menu      []MenuEntry       `json:"menu,omitempty"`
+	// Screens is the address of the module the admin imports only when one of the plugin's screens opens.
+	Screens string `json:"screens,omitempty"`
+	// ScreenCapabilities maps each screen no menu entry names to the capability it needs.
+	ScreenCapabilities map[string]string `json:"screen_capabilities,omitempty"`
 
 	// Extra holds every other key of the manifest as raw JSON, for the application to check and read.
 	Extra map[string]json.RawMessage `json:"-"`
@@ -99,13 +104,23 @@ type Setting struct {
 	Of      string   `json:"of,omitempty"`
 }
 
+// MenuEntry is one admin menu entry of a plugin, opening one of its screens for a viewer with its capability.
+type MenuEntry struct {
+	Label      string `json:"label"`
+	Screen     string `json:"screen"`
+	Parent     string `json:"parent,omitempty"`
+	Position   *int   `json:"position,omitempty"`
+	Capability string `json:"capability"`
+	Icon       string `json:"icon,omitempty"`
+}
+
 // manifest is a Manifest with no JSON methods, so decoding it stays plain and its errors name manifest.
 type manifest Manifest
 
 // typedKeys are the manifest keys Manifest has a field for.
 var typedKeys = []string{
 	"id", "name", "backend", "frontend", "version", "license", "did", "requires", "tested", "engines", "uninstall",
-	"hooks", "defines", "jobs", "settings",
+	"hooks", "defines", "jobs", "settings", "menu", "screens", "screen_capabilities",
 }
 
 // isTypedKey reports whether encoding/json reads key into a field of Manifest.
@@ -192,6 +207,42 @@ func checkSettings(settings []Setting) error {
 	return nil
 }
 
+// checkMenu refuses a menu entry with no label, no screen or no capability, or a screen that is not one segment.
+func checkMenu(menu []MenuEntry) error {
+	for i, entry := range menu {
+		if entry.Label == "" {
+			return fmt.Errorf("menu[%d]: label is required", i)
+		}
+		if entry.Screen == "" {
+			return fmt.Errorf("menu[%d]: screen is required", i)
+		}
+		if entry.Capability == "" {
+			return fmt.Errorf("menu[%d]: capability is required", i)
+		}
+		if strings.Contains(entry.Screen, "/") {
+			return fmt.Errorf("menu[%d]: the screen %q must be one path segment", i, entry.Screen)
+		}
+	}
+	return nil
+}
+
+// checkScreenCapabilities refuses a screen that is not one segment, an empty capability or a screen of the menu.
+func checkScreenCapabilities(capabilities map[string]string, menu []MenuEntry) error {
+	for _, screen := range slices.Sorted(maps.Keys(capabilities)) {
+		if screen == "" || strings.Contains(screen, "/") {
+			return fmt.Errorf("screen_capabilities: the screen %q must be one path segment", screen)
+		}
+		if capabilities[screen] == "" {
+			return fmt.Errorf("screen_capabilities: the screen %q needs a capability", screen)
+		}
+		named := slices.IndexFunc(menu, func(entry MenuEntry) bool { return entry.Screen == screen })
+		if named >= 0 {
+			return fmt.Errorf("screen_capabilities: the screen %q takes the capability of menu[%d]", screen, named)
+		}
+	}
+	return nil
+}
+
 // checkShape refuses an empty string where the shape of a manifest asks for one, naming the first such entry.
 func checkShape(m manifest) error {
 	return cmp.Or(
@@ -200,6 +251,8 @@ func checkShape(m manifest) error {
 		checkDefines(m.Defines),
 		checkJobs(m.Jobs),
 		checkSettings(m.Settings),
+		checkMenu(m.Menu),
+		checkScreenCapabilities(m.ScreenCapabilities, m.Menu),
 	)
 }
 
