@@ -228,7 +228,7 @@ func safeCall(ctx context.Context, id, operation string, fn func(context.Context
 func guarded(ctx context.Context, name string, fn func(context.Context) error) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = panicError(fmt.Sprintf("pluginkit: %s panicked: %v", name, recovered))
+			err = panicError("pluginkit: " + name + " panicked: " + describe(recovered))
 		}
 	}()
 	if err := fn(ctx); err != nil {
