@@ -56,6 +56,13 @@ func cases() map[string]func(t *testing.T, store pluginkit.PluginStore) {
 			act(t, store.Activate(t.Context(), "events"))
 			want(t, store, map[string]pluginkit.PluginRecord{"events": active("events")})
 		},
+		"activating a plugin keeps every other record": func(t *testing.T, store pluginkit.PluginStore) {
+			act(t, store.Pause(t.Context(), "feed", "no route table"))
+			act(t, store.Activate(t.Context(), "events"))
+			want(t, store, map[string]pluginkit.PluginRecord{
+				"events": active("events"), "feed": paused("feed", "no route table"),
+			})
+		},
 		"one read answers every plugin by its id": func(t *testing.T, store pluginkit.PluginStore) {
 			act(t, store.Activate(t.Context(), "events"))
 			act(t, store.Pause(t.Context(), "feed", "no route table"))
