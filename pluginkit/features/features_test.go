@@ -45,3 +45,7 @@ func TestScreens(t *testing.T) {
 func TestRegistration(t *testing.T) {
 	runFeature(t, "registration.feature", initializeRegistration(t))
 }
+
+func TestBoot(t *testing.T) {
+	runFeature(t, "boot.feature", initializeBoot(t))
+}

@@ -3,6 +3,13 @@
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
+## Unreleased
+
+- `PluginStore`, with `Records`, `Activate` and `Pause`, is an application's record of each plugin's state: not installed, inactive, active or paused, with the text of the failure that paused it.
+- `NewBoot`, `Register`, `Boot.Pause` and `Boot.Started` carry one boot from the records to the start: a plugin seen for the first time is recorded active, inactive and not installed plugins are never registered, a plugin that fails to register, migrate or start is paused, and a paused plugin that starts again is active with no error.
+- A boot whose context ends pauses nothing, and a store read or write that fails is returned to the application.
+- `pluginstoretest.Run` checks any `PluginStore` against the contract, and `pluginstoretest.NewMemory` is a store in memory that keeps it.
+
 ## 0.12.0 - 2026-11-07
 
 - `RegisterEach` calls each `Registration` with the dependencies `depsFor` builds for its id, each inside its own recover, goes on past an error or a panic, and answers a `RegisterOutcome` naming each failure at the new `StepRegister`.
