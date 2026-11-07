@@ -132,6 +132,20 @@ Feature: Admin menus and lazy screens from the manifest
     When the plugins are wired
     Then the wiring is refused with: pluginwire: plugins/events/plugin.json: screen_capabilities: the screen "reservations" takes the capability of menu[0]
 
+  Scenario: Two menu entries that ask different capabilities for one screen are refused
+    Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
+    And "events" has the menu entry {"label": "Reservations", "screen": "reservations", "capability": "events.manage"}
+    And "events" has the menu entry {"label": "Bookings", "screen": "reservations", "parent": "content", "capability": "events.view"}
+    When the plugins are wired
+    Then the wiring is refused with: pluginwire: plugins/events/plugin.json: menu[1]: the screen "reservations" asks for "events.view" but menu[0] asks for "events.manage"
+
+  Scenario: Two menu entries can open one screen that asks for one capability
+    Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
+    And "events" has the menu entry {"label": "Reservations", "screen": "reservations", "capability": "events.manage"}
+    And "events" has the menu entry {"label": "Bookings", "screen": "reservations", "parent": "content", "capability": "events.manage"}
+    When the manifests are read
+    Then the manifest of "events" has the menu entry {"label": "Bookings", "screen": "reservations", "parent": "content", "capability": "events.manage"}
+
   Scenario: The manifest index writes the menu, the screens module and the screen capabilities
     Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
     And "events" has the menu entry {"label": "Reservations", "screen": "reservations", "parent": "content", "capability": "events.manage"}
