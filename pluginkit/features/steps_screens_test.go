@@ -54,43 +54,50 @@ func (w *screensWorld) plugin(id string) map[string]any {
 	return m
 }
 
-// declare gives the plugin id a backend when asked, and the frontend and screens module it names.
-func (w *screensWorld) declare(id string, backend bool, frontend, screens string) {
+// pluginParts are the code a scenario gives a plugin besides its id and name.
+type pluginParts struct {
+	backend  bool
+	frontend string
+	screens  string
+}
+
+// declare gives the plugin id its parts.
+func (w *screensWorld) declare(id string, parts pluginParts) {
 	m := w.plugin(id)
-	if backend {
+	if parts.backend {
 		m["backend"] = "example.com/plugins/" + id
 	}
-	if frontend != "" {
-		m["frontend"] = frontend
+	if parts.frontend != "" {
+		m["frontend"] = parts.frontend
 	}
-	if screens != "" {
-		m["screens"] = screens
+	if parts.screens != "" {
+		m["screens"] = parts.screens
 	}
 }
 
 // hasBackend gives the plugin id a backend.
 func (w *screensWorld) hasBackend(id string) {
-	w.declare(id, true, "", "")
+	w.declare(id, pluginParts{backend: true})
 }
 
 // hasBackendAndScreens gives the plugin id a backend and a screens module.
 func (w *screensWorld) hasBackendAndScreens(id, screens string) {
-	w.declare(id, true, "", screens)
+	w.declare(id, pluginParts{backend: true, screens: screens})
 }
 
 // hasFrontend gives the plugin id a frontend.
 func (w *screensWorld) hasFrontend(id, frontend string) {
-	w.declare(id, false, frontend, "")
+	w.declare(id, pluginParts{frontend: frontend})
 }
 
 // hasFrontendAndScreens gives the plugin id a frontend and a screens module.
 func (w *screensWorld) hasFrontendAndScreens(id, frontend, screens string) {
-	w.declare(id, false, frontend, screens)
+	w.declare(id, pluginParts{frontend: frontend, screens: screens})
 }
 
 // hasOnlyScreens gives the plugin id a screens module and nothing else.
 func (w *screensWorld) hasOnlyScreens(id, screens string) {
-	w.declare(id, false, "", screens)
+	w.declare(id, pluginParts{screens: screens})
 }
 
 // hasMenuEntry adds the menu entry written as JSON to the plugin id.
