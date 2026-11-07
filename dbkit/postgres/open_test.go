@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -240,20 +241,34 @@ func openFreshHandle(t *testing.T, maxConns int) *postgres.Handle {
 	return mustOpen(t, openFresh(t), maxConns)
 }
 
+// openCapCase is one connection cap Open refuses and the error it returns.
+type openCapCase struct {
+	// name names the case.
+	name string
+	// maxConns is the connection cap Open is given.
+	maxConns int
+	// want is the error Open returns.
+	want string
+}
+
 func TestOpenRefusesABadOption(t *testing.T) {
 	t.Parallel()
 
-	cases := []struct {
-		name     string
-		maxConns int
-		want     string
-	}{
+	cases := []openCapCase{
 		{"a missing connection cap", 0, "dbkit: the option MaxConns must be 2 or more, got 0"},
 		{"a connection cap of one", 1, "dbkit: the option MaxConns must be 2 or more, got 1"},
 		{"a negative connection cap", -1, "dbkit: the option MaxConns must be 2 or more, got -1"},
-		{"a connection cap past 32 bits", math.MaxInt32 + 1,
-			"dbkit: the option MaxConns must be 2147483647 or less, got 2147483648"},
 	}
+
+	if strconv.IntSize == 64 {
+		past32 := int64(math.MaxInt32) + 1
+		cases = append(cases, openCapCase{
+			name:     "a connection cap past 32 bits",
+			maxConns: int(past32),
+			want:     "dbkit: the option MaxConns must be 2147483647 or less, got 2147483648",
+		})
+	}
+
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
