@@ -43,5 +43,5 @@ func TestScreens(t *testing.T) {
 }
 
 func TestRegistration(t *testing.T) {
-	runFeature(t, "registration.feature", func(*godog.ScenarioContext) {})
+	runFeature(t, "registration.feature", initializeRegistration(t))
 }
