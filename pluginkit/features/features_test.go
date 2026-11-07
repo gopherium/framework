@@ -37,3 +37,7 @@ func runFeature(t *testing.T, path string, initialize func(*godog.ScenarioContex
 func TestHooks(t *testing.T) {
 	runFeature(t, "hooks.feature", initializeHooks(t))
 }
+
+func TestScreens(t *testing.T) {
+	runFeature(t, "screens.feature", initializeScreens(t))
+}

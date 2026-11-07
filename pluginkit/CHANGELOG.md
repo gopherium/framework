@@ -3,6 +3,13 @@
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
+## Unreleased
+
+- `wire.Manifest` reads `menu` as `[]MenuEntry`, and `screens` and `screen_capabilities`, which no longer sit in `Extra`, a breaking change.
+- `wire.Run` refuses a menu entry with no `label`, `screen` or `capability`, a screen name that is not one path segment, two menu entries asking different capabilities for one screen, and a screen capability that is empty or names a screen of the menu, a breaking change for a `menu` that ran before.
+- `wire.Config` gains an optional `TSScreensPath`, a generated TypeScript map from each plugin id to a lazy import of its `screens` module, in wiring order.
+- With `PackageJSONPath` set, the package a `screens` module names joins the workspace dependencies, and a `screens` module that names no package is refused.
+
 ## 0.10.0 - 2026-11-07
 
 - `NewHook` collects the plugins that implement an interface into a `Hook`. `Hook.Fire` calls an action on each in registration order and `Filter` passes a value through each, every call inside its own recover.
