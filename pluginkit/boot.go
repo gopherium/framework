@@ -53,8 +53,11 @@ func admitted[D, P any](ctx context.Context, boot *Boot, entries []Registration[
 	return wanted, nil
 }
 
-// pauseEach pauses each failed plugin but one whose migration record failed, stopping at a write that fails.
+// pauseEach pauses each failed plugin but one whose migration record failed, and none once ctx ended.
 func (b *Boot) pauseEach(ctx context.Context, failures []Failure) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("pluginkit: the boot's context ended: %w", err)
+	}
 	for _, failure := range failures {
 		if failure.Step == StepRecord {
 			continue
@@ -88,9 +91,6 @@ func (b *Boot) activate(ctx context.Context, id string) error {
 
 // Started pauses each plugin that failed to migrate or start, and activates each paused plugin that started.
 func (b *Boot) Started(ctx context.Context, outcome StartOutcome) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("pluginkit: the boot's context ended: %w", err)
-	}
 	if err := b.pauseEach(ctx, outcome.Failed); err != nil {
 		return err
 	}

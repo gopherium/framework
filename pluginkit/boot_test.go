@@ -239,6 +239,27 @@ func TestRegisterNamesAStoreThatCannotWrite(t *testing.T) {
 	}
 }
 
+func TestRegisterPausesNothingWhenTheContextEnded(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	store := storeOf(record("feed", pluginkit.PluginActive))
+	boot := newBoot(t, store)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	outcome, err := pluginkit.Register(ctx, boot, []pluginkit.Registration[listedDeps, *listedPlugin]{
+		entry("feed", &calls, answers(errors.New("the boot is shutting down"))),
+	}, depsOf(&calls))
+
+	assertErrorText(t, err, "pluginkit: the boot's context ended: context canceled")
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Register() error = %v, want it to wrap the context's error", err)
+	}
+	wantEqual(t, "failed", len(outcome.Failed), 1)
+	wantEqual(t, "writes", store.writes, []string(nil))
+}
+
 func TestBootPausePausesAPluginForTheApplicationsReason(t *testing.T) {
 	t.Parallel()
 
