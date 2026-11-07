@@ -8,7 +8,6 @@ Feature: Admin menus and lazy screens from the manifest
   plugin's screens at once. A screens module does not replace the
   frontend, so a plugin can carry both while it moves.
 
-  @wip
   Scenario: The menu, the screens module and the screen capabilities are read as data
     Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
     And "events" has the menu entry {"label": "Reservations", "screen": "reservations", "capability": "events.manage"}
@@ -19,7 +18,6 @@ Feature: Admin menus and lazy screens from the manifest
     And the manifest of "events" names "events.manage" for the screen "seats"
     And the manifest of "events" keeps no extra key
 
-  @wip
   Scenario: The lazy screens file imports each plugin's screens module in wiring order
     Given the plugin "billing" has a backend
     And the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
@@ -31,7 +29,6 @@ Feature: Admin menus and lazy screens from the manifest
       | events  | @example/plugin-events/screens  |
       | gallery | @example/plugin-gallery/screens |
 
-  @wip
   Scenario: A plugin that keeps its frontend loads as before beside one that moved
     Given the plugin "events" has the frontend "@example/plugin-events" and the screens module "@example/plugin-events/screens"
     And the plugin "gallery" has the frontend "@example/plugin-gallery"
@@ -42,26 +39,22 @@ Feature: Admin menus and lazy screens from the manifest
       | plugin | module                         |
       | events | @example/plugin-events/screens |
 
-  @wip
   Scenario: The lazy screens file is an empty map when no plugin names a screens module
     Given the plugin "gallery" has the frontend "@example/plugin-gallery"
     And the application asks for a lazy screens file
     When the plugins are wired
     Then the lazy screens file maps no plugin
 
-  @wip
   Scenario: Without a lazy screens file the generator writes only today's files
     Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
     When the plugins are wired
     Then the generator writes only the Go and the TypeScript wiring
 
-  @wip
   Scenario: A screens module does not count as a frontend
     Given the plugin "events" has only the screens module "@example/plugin-events/screens"
     When the plugins are wired
     Then the wiring is refused with: pluginwire: plugins/events/plugin.json: at least one of backend or frontend is required
 
-  @wip
   Scenario Outline: A plugin with a screens module keeps its package in the package.json
     Given the application keeps its plugin packages in a package.json
     And the plugin "events" has a backend and the screens module "<module>"
@@ -75,14 +68,12 @@ Feature: Admin menus and lazy screens from the manifest
       | plugin-events/screens          | plugin-events          |
       | plugin-events                  | plugin-events          |
 
-  @wip
   Scenario: A frontend and a screens module from one package are one dependency
     Given the application keeps its plugin packages in a package.json
     And the plugin "events" has the frontend "@example/plugin-events" and the screens module "@example/plugin-events/screens"
     When the plugins are wired
     Then the package.json depends only on "@example/plugin-events" as a workspace package
 
-  @wip
   Scenario Outline: A screens module that names no package is refused while a package.json is kept
     Given the application keeps its plugin packages in a package.json
     And the plugin "events" has a backend and the screens module "<module>"
@@ -97,7 +88,6 @@ Feature: Admin menus and lazy screens from the manifest
       | @example                      |
       | https://example.com/events.js |
 
-  @wip
   Scenario: A screens module with no package is kept when the application keeps no package.json
     Given the plugin "events" has a backend and the screens module "./screens"
     And the application asks for a lazy screens file
@@ -106,7 +96,6 @@ Feature: Admin menus and lazy screens from the manifest
       | plugin | module    |
       | events | ./screens |
 
-  @wip
   Scenario Outline: A menu entry with a wrong shape is refused
     Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
     And "events" has the menu entry <entry>
@@ -123,7 +112,6 @@ Feature: Admin menus and lazy screens from the manifest
       | {"label": "Reservations", "screen": "list/all", "capability": "events.manage"}                          | menu[0]: the screen "list/all" must be one path segment                                 |
       | {"label": "Reservations", "screen": "reservations", "capability": "events.manage", "position": "first"} | json: cannot unmarshal string into Go struct field manifest.menu.0.position of type int |
 
-  @wip
   Scenario Outline: A screen capability with a wrong shape is refused
     Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
     And "events" has the screen capabilities <capabilities>
@@ -137,7 +125,6 @@ Feature: Admin menus and lazy screens from the manifest
       | {"seats/all": "events.manage"} | screen_capabilities: the screen "seats/all" must be one path segment                                |
       | {"seats": 3}                   | json: cannot unmarshal number into Go struct field manifest.screen_capabilities.seats of type string |
 
-  @wip
   Scenario: A screen capability for a screen a menu entry names is refused
     Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
     And "events" has the menu entry {"label": "Reservations", "screen": "reservations", "capability": "events.manage"}
@@ -145,7 +132,6 @@ Feature: Admin menus and lazy screens from the manifest
     When the plugins are wired
     Then the wiring is refused with: pluginwire: plugins/events/plugin.json: screen_capabilities: the screen "reservations" takes the capability of menu[0]
 
-  @wip
   Scenario: The manifest index writes the menu, the screens module and the screen capabilities
     Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
     And "events" has the menu entry {"label": "Reservations", "screen": "reservations", "parent": "content", "capability": "events.manage"}

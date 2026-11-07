@@ -39,5 +39,5 @@ func TestHooks(t *testing.T) {
 }
 
 func TestScreens(t *testing.T) {
-	runFeature(t, "screens.feature", func(*godog.ScenarioContext) {})
+	runFeature(t, "screens.feature", initializeScreens(t))
 }
