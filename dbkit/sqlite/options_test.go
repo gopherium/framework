@@ -61,17 +61,20 @@ func limitOf(n int64) *int64 {
 	return &n
 }
 
-// badOptionCase is one Options value sqlite.Open must refuse.
-type badOptionCase struct {
-	name   string
+// optionsCase is one bad change to valid options and the error Open returns.
+type optionsCase struct {
+	// name names the case.
+	name string
+	// change makes the one bad change to valid options.
 	change func(*sqlite.Options)
-	want   string
+	// want is the error Open returns.
+	want string
 }
 
 func TestOpenRefusesABadOption(t *testing.T) {
 	t.Parallel()
 
-	cases := []badOptionCase{
+	cases := []optionsCase{
 		{"a missing busy timeout", func(o *sqlite.Options) { o.BusyTimeout = 0 },
 			"dbkit: the option BusyTimeout must be 1ms or more, got 0s"},
 		{"a negative busy timeout", func(o *sqlite.Options) { o.BusyTimeout = -time.Millisecond },
@@ -122,11 +125,9 @@ func TestOpenRefusesABadOption(t *testing.T) {
 			`dbkit: the option BaseFolder must hold no ?, got "/srv/a?b"`},
 	}
 
-	// A cache size past 32 bits fits an int only where int is 64 bits wide;
-	// on 32-bit platforms the constant would not compile, so skip the row there.
 	if strconv.IntSize == 64 {
 		past32 := int64(math.MaxInt32) + 1
-		cases = append(cases, badOptionCase{
+		cases = append(cases, optionsCase{
 			name:   "a cache size past 32 bits",
 			change: func(o *sqlite.Options) { o.CacheSize = int(past32) },
 			want:   "dbkit: the option CacheSize must be 2147483647 or less, got 2147483648",
