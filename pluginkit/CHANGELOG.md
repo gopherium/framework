@@ -3,6 +3,12 @@
 Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 0.5.1 were tagged `vX.Y.Z` in `github.com/gopherium/pluginkit`.
 
+## Unreleased
+
+- `RegisterEach` calls each `Registration` with the dependencies `depsFor` builds for its id, each inside its own recover, goes on past an error or a panic, and answers a `RegisterOutcome` naming each failure at the new `StepRegister`.
+- `wire.Config` gains an optional `RegistrationList`, which makes each generated Go file hold a list of every backend plugin's id and `Register`, `pluginRegistrations` in the main file and `Registrations` in the registry, in place of `registerPlugins` and `All`.
+- The host's own recovers name a panic whose value panics again while it is printed by its type, where the process used to crash.
+
 ## 0.11.0 - 2026-11-07
 
 - `wire.Manifest` reads `menu` as `[]MenuEntry`, and `screens` and `screen_capabilities`, which no longer sit in `Extra`, a breaking change.
