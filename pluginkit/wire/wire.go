@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package wire reads plugin manifests and generates wiring, plus an optional registry, index and package.json update.
+// Package wire reads plugin manifests and writes wiring, plus optional registry, screens map, index and package.json.
 package wire
 
 import (
@@ -27,8 +27,11 @@ type Config struct {
 	GoRegistryPath    string
 	GoRegistryPackage string
 
-	// PackageJSONPath is the optional slash path of a package.json that depends on each frontend, listed in pluginwire.
+	// PackageJSONPath is the optional slash path of a package.json depending on each plugin package, listed in pluginwire.
 	PackageJSONPath string
+
+	// TSScreensPath is the optional slash path of a generated TypeScript map from each plugin id to its screens import.
+	TSScreensPath string
 
 	// ManifestIndexPath is the optional slash path of a generated JSON list of every manifest, in wiring order.
 	ManifestIndexPath string
@@ -262,6 +265,28 @@ func generateTS(cfg Config, manifests []manifest) []byte {
 	return []byte(b.String())
 }
 
+// jsString returns s as a double-quoted JavaScript string literal, its markup characters left readable.
+func jsString(s string) string {
+	quoted, _ := encodeJSON(s, "")
+	return strings.TrimSuffix(string(quoted), "\n")
+}
+
+// generateScreens renders the generated TypeScript map from each plugin id to a lazy import of its screens module.
+func generateScreens(cfg Config, manifests []manifest) []byte {
+	var lines strings.Builder
+	for _, m := range manifests {
+		if m.Screens != "" {
+			fmt.Fprintf(&lines, "\t%s: () => import(%s),\n", jsString(m.ID), jsString(m.Screens))
+		}
+	}
+	body := "{}"
+	if lines.Len() > 0 {
+		body = "{\n" + lines.String() + "}"
+	}
+	return []byte(generatedHeader(cfg.tsLicense()) +
+		"export const screens: Readonly<Record<string, () => Promise<unknown>>> = " + body + "\n")
+}
+
 // output is one file Run writes, its slash path under the root and its contents.
 type output struct {
 	path string
@@ -276,6 +301,9 @@ func outputs(root string, cfg Config, manifests []manifest) ([]output, error) {
 	}
 	if cfg.GoRegistryPath != "" {
 		files = append(files, output{path: cfg.GoRegistryPath, data: generateRegistry(cfg, manifests)})
+	}
+	if cfg.TSScreensPath != "" {
+		files = append(files, output{path: cfg.TSScreensPath, data: generateScreens(cfg, manifests)})
 	}
 	if cfg.ManifestIndexPath != "" {
 		index, err := generateIndex(manifests)
@@ -294,7 +322,7 @@ func outputs(root string, cfg Config, manifests []manifest) ([]output, error) {
 	return append(files, output{path: cfg.PackageJSONPath, data: packageJSON}), nil
 }
 
-// Run writes the Go and TypeScript wiring and any optional registry, index and package.json from the manifests in root.
+// Run writes the Go and TypeScript wiring and any optional registry, screens map, index and package.json from root.
 func Run(root string, cfg Config) error {
 	if err := validateConfig(cfg); err != nil {
 		return err
