@@ -3,6 +3,9 @@
 package wire
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -163,6 +166,7 @@ func TestSyncPackageJSONRefusesMalformedInput(t *testing.T) {
 	}{
 		"empty file":                 {input: ``, want: "the top level is empty"},
 		"only whitespace":            {input: " \r\n\t", want: "the top level is empty"},
+		"bad first character":        {input: `x`, want: "invalid character 'x'"},
 		"bad syntax":                 {input: `{"name": }`, want: "invalid character '}'"},
 		"unclosed object":            {input: `{"name": "a"`, want: "unexpected EOF"},
 		"trailing comma":             {input: `{"name": "a",}`, want: "invalid character ','"},
@@ -468,18 +472,128 @@ func TestSyncPackageJSONAddsDependenciesLastWhenMissing(t *testing.T) {
 	}
 }
 
-func TestFrontendPackagesSortsEveryNameOnce(t *testing.T) {
+func TestPluginPackagesSortsEveryNameOnce(t *testing.T) {
 	t.Parallel()
 
-	got := frontendPackages([]manifest{
+	got, err := pluginPackages([]manifest{
 		{ID: "gallery", Name: "Gallery", Frontend: "@myapp/plugin-gallery"},
 		{ID: "headless", Name: "Headless", Backend: "example.com/headless"},
 		{ID: "audit", Name: "Audit", Frontend: "@myapp/plugin-audit"},
 		{ID: "audit-copy", Name: "Audit copy", Frontend: "@myapp/plugin-audit"},
+		{ID: "events", Name: "Events", Backend: "example.com/events", Screens: "@myapp/plugin-events/screens"},
+		{ID: "slides", Name: "Slides", Frontend: "@myapp/plugin-gallery", Screens: "@myapp/plugin-gallery/screens"},
 	})
 
-	want := []string{"@myapp/plugin-audit", "@myapp/plugin-gallery"}
+	assertErrorFree(t, err)
+	want := []string{"@myapp/plugin-audit", "@myapp/plugin-events", "@myapp/plugin-gallery"}
 	if !slices.Equal(got, want) {
-		t.Errorf("frontendPackages() = %q, want %q", got, want)
+		t.Errorf("pluginPackages() = %q, want %q", got, want)
+	}
+}
+
+func TestPluginPackagesCutsThePackageOutOfAScreensModule(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"@myapp/plugin-events/screens":       "@myapp/plugin-events",
+		"@myapp/plugin-events/admin/screens": "@myapp/plugin-events",
+		"@myapp/plugin-events":               "@myapp/plugin-events",
+		"plugin-events/screens":              "plugin-events",
+		"plugin-events":                      "plugin-events",
+		"@My-App/Plugin.Events_2~x/screens":  "@My-App/Plugin.Events_2~x",
+	}
+	for address, want := range tests {
+		t.Run(address, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := pluginPackages([]manifest{{ID: "events", Name: "Events", Backend: "a", Screens: address}})
+
+			assertErrorFree(t, err)
+			assertSame(t, got, []string{want})
+		})
+	}
+}
+
+func TestPluginPackagesKeepsAFrontendWhole(t *testing.T) {
+	t.Parallel()
+
+	got, err := pluginPackages([]manifest{{ID: "events", Name: "Events", Frontend: "@myapp/plugin-events/admin"}})
+
+	assertErrorFree(t, err)
+	assertSame(t, got, []string{"@myapp/plugin-events/admin"})
+}
+
+func TestPluginPackagesRefusesAScreensModuleThatNamesNoPackage(t *testing.T) {
+	t.Parallel()
+
+	addresses := []string{
+		"./screens", "../screens", "/admin/screens/events.js", "@myapp", "@myapp/", "@myapp//screens", "@/screens",
+		"https://example.com/events.js", "node:fs", ".hidden/screens", "_private/screens", "-dash/screens",
+	}
+	for _, address := range addresses {
+		t.Run(address, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := pluginPackages([]manifest{
+				{ID: "audit", Name: "Audit", Frontend: "@myapp/plugin-audit"},
+				{ID: "events", Name: "Events", Backend: "a", Screens: address},
+			})
+
+			assertErrorText(t, err, fmt.Sprintf("events: the screens module %q names no package", address))
+			assertSame(t, got, []string(nil))
+		})
+	}
+}
+
+func TestRunWritesTheScreensPackageIntoThePackageJSON(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig
+	cfg.PackageJSONPath = "frontend/package.json"
+
+	files := generate(t, cfg, map[string]string{
+		"events": `{"id": "events", "name": "Events", "backend": "example.com/myapp/plugins/events", ` +
+			`"screens": "@myapp/plugin-events/screens"}`,
+	})
+
+	want := `{
+	"name": "@myapp/frontend",
+	"dependencies": {
+		"@myapp/frontend-sdk": "workspace:*",
+		"@myapp/plugin-events": "workspace:*"
+	},
+	"pluginwire": {
+		"dependencies": [
+			"@myapp/plugin-events"
+		]
+	}
+}
+`
+	if got := files[cfg.PackageJSONPath]; got != want {
+		t.Errorf("package.json = %q, want %q", got, want)
+	}
+}
+
+func TestRunRefusesAScreensModuleThatNamesNoPackageBeforeAnyWrite(t *testing.T) {
+	t.Parallel()
+
+	cfg := withIndex(withScreens(testConfig))
+	cfg.PackageJSONPath = "frontend/package.json"
+	root := writeBeside(t, cfg, "beta",
+		`{"id": "beta", "name": "Beta", "backend": "example.com/myapp/plugins/beta", "screens": "./screens"}`)
+	writeFile(t, root, cfg.PackageJSONPath, appPackageJSON)
+	makeDirs(t, root, "internal/plugins")
+
+	err := Run(root, cfg)
+
+	assertErrorText(t, err, "pluginwire: "+filepath.Join(root, "frontend", "package.json")+
+		`: beta: the screens module "./screens" names no package`)
+	assertWiringKept(t, cfg, root)
+	if kept := readFile(t, root, cfg.PackageJSONPath); kept != appPackageJSON {
+		t.Errorf("package.json after the refusal = %q, want it untouched", kept)
+	}
+	assertNoIndex(t, root)
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(screensPath))); !os.IsNotExist(err) {
+		t.Errorf("the screens map exists after the refusal, stat error = %v", err)
 	}
 }

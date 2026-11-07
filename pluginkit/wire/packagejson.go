@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -35,23 +36,50 @@ func (m member) name() string {
 	return m.key.String()
 }
 
-// frontendPackages returns the sorted unique frontend package names of manifests.
-func frontendPackages(manifests []manifest) []string {
-	names := make([]string, 0, len(manifests))
-	for _, m := range withFrontend(manifests) {
-		names = append(names, m.Frontend)
+// packageName matches a package name, scoped or not, that starts with a letter or a digit.
+var packageName = regexp.MustCompile(`^(@[a-zA-Z0-9][a-zA-Z0-9._~-]*/)?[a-zA-Z0-9][a-zA-Z0-9._~-]*$`)
+
+// screensPackage returns the package the screens module of m names, with its scope, and whether it names one.
+func (m manifest) screensPackage() (string, bool) {
+	segments := strings.SplitN(m.Screens, "/", 3)
+	name := segments[0]
+	if strings.HasPrefix(name, "@") && len(segments) > 1 {
+		name += "/" + segments[1]
 	}
-	slices.Sort(names)
-	return slices.Compact(names)
+	return name, packageName.MatchString(name)
 }
 
-// syncedPackageJSON reads the package.json at path and syncs it to the frontends of manifests.
+// pluginPackages returns the sorted unique packages of the frontends and screens modules of manifests.
+func pluginPackages(manifests []manifest) ([]string, error) {
+	names := make([]string, 0, len(manifests))
+	for _, m := range manifests {
+		if m.Frontend != "" {
+			names = append(names, m.Frontend)
+		}
+		if m.Screens == "" {
+			continue
+		}
+		name, ok := m.screensPackage()
+		if !ok {
+			return nil, fmt.Errorf("%s: the screens module %q names no package", m.ID, m.Screens)
+		}
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return slices.Compact(names), nil
+}
+
+// syncedPackageJSON reads the package.json at path and syncs it to the frontend and screens packages of manifests.
 func syncedPackageJSON(path string, manifests []manifest) ([]byte, error) {
+	want, err := pluginPackages(manifests)
+	if err != nil {
+		return nil, fmt.Errorf("pluginwire: %s: %w", path, err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("pluginwire: %s: %w", path, err)
 	}
-	synced, err := syncPackageJSON(data, frontendPackages(manifests))
+	synced, err := syncPackageJSON(data, want)
 	if err != nil {
 		return nil, fmt.Errorf("pluginwire: %s: %w", path, err)
 	}
