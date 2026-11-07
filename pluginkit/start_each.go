@@ -17,6 +17,8 @@ const (
 	StepRecord Step = "record"
 	// StepStart is a plugin's Start.
 	StepStart Step = "start"
+	// StepRegister is a plugin's Register, called by [RegisterEach].
+	StepRegister Step = "register"
 )
 
 // Failure is one step one plugin failed, or was still waiting for when the context ended.

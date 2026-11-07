@@ -67,6 +67,19 @@ func TestStartEachStartsEveryPluginInRegistrationOrder(t *testing.T) {
 	wantCalls(t, calls, []string{"alpha start", "beta start", "gamma start"})
 }
 
+func TestStartEachNamesAStartErrorWhoseTextPanicsTwiceByItsType(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	host := pluginkit.NewHost(&fakePlugin{id: "beta", startErr: selfPanicking{}, calls: &calls}, plain("gamma", &calls))
+
+	outcome := startEach(t.Context(), t, host)
+
+	wantOutcome(t, outcome, []string{"gamma"}, []failureWant{{
+		"beta", pluginkit.StepStart, true, "pluginkit: beta start panicked: pluginkit_test.selfPanicking whose text panicked",
+	}})
+}
+
 func TestStartEachMigratesEveryPluginBeforeStartingAny(t *testing.T) {
 	t.Parallel()
 

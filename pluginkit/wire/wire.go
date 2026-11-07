@@ -33,6 +33,9 @@ type Config struct {
 	// TSScreensPath is the optional slash path of a generated TypeScript map from each plugin id to its screens import.
 	TSScreensPath string
 
+	// RegistrationList makes each generated Go file list every backend plugin's id and Register in place of its function.
+	RegistrationList bool
+
 	// ManifestIndexPath is the optional slash path of a generated JSON list of every manifest, in wiring order.
 	ManifestIndexPath string
 
@@ -182,6 +185,9 @@ func generatedHeader(license string) string {
 
 // generateGo renders the generated Go plugin-wiring file.
 func generateGo(cfg Config, manifests []manifest) []byte {
+	if cfg.RegistrationList {
+		return renderRegistrationList(cfg, manifests, listTarget{pkg: "main", name: "pluginRegistrations"})
+	}
 	doc := "// registerPlugins registers every compiled plugin, answering the ones that registered and an error naming " +
 		"each failure.\n"
 	return renderRegistration(cfg, manifests, "main", doc, "registerPlugins")
@@ -189,8 +195,60 @@ func generateGo(cfg Config, manifests []manifest) []byte {
 
 // generateRegistry renders the generated importable plugin registry file.
 func generateRegistry(cfg Config, manifests []manifest) []byte {
+	if cfg.RegistrationList {
+		return renderRegistrationList(cfg, manifests, listTarget{pkg: cfg.GoRegistryPackage, name: "Registrations"})
+	}
 	doc := "// All registers every plugin, answering the ones that registered and an error naming each failure.\n"
 	return renderRegistration(cfg, manifests, cfg.GoRegistryPackage, doc, "All")
+}
+
+// pluginkitImport is the import path of the package that declares Registration.
+const pluginkitImport = "github.com/gopherium/framework/pluginkit"
+
+// registrationEntry is one entry of a generated registration list, formatted with a plugin's id and import name.
+const registrationEntry = `	{ID: %q, Register: func(deps sdk.Deps) (sdk.Plugin, error) {
+		plugin, err := %s.Register(deps)
+		if err != nil {
+			return nil, err
+		}
+		return plugin, nil
+	}},
+`
+
+// listTarget is the package and the variable name of one generated registration list.
+type listTarget struct {
+	pkg, name string
+}
+
+// renderRegistrationList renders one Go file holding target's variable, a list of every backend plugin's Register.
+func renderRegistrationList(cfg Config, manifests []manifest, target listTarget) []byte {
+	backends := slices.DeleteFunc(slices.Clone(manifests), func(m manifest) bool { return m.Backend == "" })
+	var b strings.Builder
+	b.WriteString(generatedHeader(cfg.License))
+	fmt.Fprintf(&b, "package %s\n\nimport (\n", target.pkg)
+	byPath := slices.SortedStableFunc(slices.Values(backends), func(a, b manifest) int {
+		return strings.Compare(a.Backend, b.Backend)
+	})
+	for _, m := range byPath {
+		fmt.Fprintf(&b, "\t%s %q\n", goName(m.ID), m.Backend)
+	}
+	if len(backends) > 0 {
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "\tpluginKit %q\n\n\tsdk %q\n)\n\n", pluginkitImport, cfg.SDKImport)
+	fmt.Fprintf(&b, "// %s lists every compiled backend plugin's manifest id and Register function, "+
+		"in wiring order.\n", target.name)
+	fmt.Fprintf(&b, "var %s = []pluginKit.Registration[sdk.Deps, sdk.Plugin]{", target.name)
+	if len(backends) == 0 {
+		b.WriteString("}\n")
+		return []byte(b.String())
+	}
+	b.WriteString("\n")
+	for _, m := range backends {
+		fmt.Fprintf(&b, registrationEntry, m.ID, goName(m.ID))
+	}
+	b.WriteString("}\n")
+	return []byte(b.String())
 }
 
 // renderRegistration renders one Go file registering every backend plugin through the named function.

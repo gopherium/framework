@@ -41,3 +41,7 @@ func TestHooks(t *testing.T) {
 func TestScreens(t *testing.T) {
 	runFeature(t, "screens.feature", initializeScreens(t))
 }
+
+func TestRegistration(t *testing.T) {
+	runFeature(t, "registration.feature", initializeRegistration(t))
+}
