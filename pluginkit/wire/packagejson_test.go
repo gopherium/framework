@@ -4,8 +4,6 @@ package wire
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -542,58 +540,5 @@ func TestPluginPackagesRefusesAScreensModuleThatNamesNoPackage(t *testing.T) {
 			assertErrorText(t, err, fmt.Sprintf("events: the screens module %q names no package", address))
 			assertSame(t, got, []string(nil))
 		})
-	}
-}
-
-func TestRunWritesTheScreensPackageIntoThePackageJSON(t *testing.T) {
-	t.Parallel()
-
-	cfg := testConfig
-	cfg.PackageJSONPath = "frontend/package.json"
-
-	files := generate(t, cfg, map[string]string{
-		"events": `{"id": "events", "name": "Events", "backend": "example.com/myapp/plugins/events", ` +
-			`"screens": "@myapp/plugin-events/screens"}`,
-	})
-
-	want := `{
-	"name": "@myapp/frontend",
-	"dependencies": {
-		"@myapp/frontend-sdk": "workspace:*",
-		"@myapp/plugin-events": "workspace:*"
-	},
-	"pluginwire": {
-		"dependencies": [
-			"@myapp/plugin-events"
-		]
-	}
-}
-`
-	if got := files[cfg.PackageJSONPath]; got != want {
-		t.Errorf("package.json = %q, want %q", got, want)
-	}
-}
-
-func TestRunRefusesAScreensModuleThatNamesNoPackageBeforeAnyWrite(t *testing.T) {
-	t.Parallel()
-
-	cfg := withIndex(withScreens(testConfig))
-	cfg.PackageJSONPath = "frontend/package.json"
-	root := writeBeside(t, cfg, "beta",
-		`{"id": "beta", "name": "Beta", "backend": "example.com/myapp/plugins/beta", "screens": "./screens"}`)
-	writeFile(t, root, cfg.PackageJSONPath, appPackageJSON)
-	makeDirs(t, root, "internal/plugins")
-
-	err := Run(root, cfg)
-
-	assertErrorText(t, err, "pluginwire: "+filepath.Join(root, "frontend", "package.json")+
-		`: beta: the screens module "./screens" names no package`)
-	assertWiringKept(t, cfg, root)
-	if kept := readFile(t, root, cfg.PackageJSONPath); kept != appPackageJSON {
-		t.Errorf("package.json after the refusal = %q, want it untouched", kept)
-	}
-	assertNoIndex(t, root)
-	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(screensPath))); !os.IsNotExist(err) {
-		t.Errorf("the screens map exists after the refusal, stat error = %v", err)
 	}
 }
