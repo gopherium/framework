@@ -253,6 +253,27 @@ func TestLoadKeepsAZeroLimitApartFromAnAbsentOne(t *testing.T) {
 	assertSame(t, got.Settings, []Setting{{Key: "seats", Type: "count", Min: number(0)}})
 }
 
+func TestLoadKeepsTwoMenuEntriesThatAskOneCapabilityForOneScreen(t *testing.T) {
+	t.Parallel()
+
+	got := feedWith(t, `"menu": [{"label": "a", "screen": "list", "capability": "b"}, `+
+		`{"label": "c", "screen": "list", "parent": "content", "capability": "b"}]`)
+
+	assertSame(t, got.Menu, []MenuEntry{
+		{Label: "a", Screen: "list", Capability: "b"},
+		{Label: "c", Screen: "list", Parent: "content", Capability: "b"},
+	})
+}
+
+func TestLoadReadsANullInsideAMenuEntryAsAnAbsentKey(t *testing.T) {
+	t.Parallel()
+
+	got := feedWith(t, `"menu": [{"label": "a", "screen": "b", "capability": "c", "parent": null, "position": null, `+
+		`"icon": null}]`)
+
+	assertSame(t, got.Menu, []MenuEntry{{Label: "a", Screen: "b", Capability: "c"}})
+}
+
 func TestLoadKeepsAZeroPositionApartFromAnAbsentOne(t *testing.T) {
 	t.Parallel()
 
@@ -599,6 +620,23 @@ func emptyScreenValues() map[string]wrongShape {
 		},
 		"a menu screen with a slash and no capability": {
 			`"menu": [{"label": "a", "screen": "list/all"}]`, "menu[0]: capability is required",
+		},
+		"a null label in a menu entry": {
+			`"menu": [{"label": null, "screen": "a", "capability": "b"}]`, "menu[0]: label is required",
+		},
+		"two capabilities for one menu screen": {
+			`"menu": [{"label": "a", "screen": "list", "capability": "b"}, {"label": "c", "screen": "list", ` +
+				`"capability": "d"}]`,
+			`menu[1]: the screen "list" asks for "d" but menu[0] asks for "b"`,
+		},
+		"a later capability for one menu screen": {
+			`"menu": [{"label": "a", "screen": "list", "capability": "b"}, {"label": "c", "screen": "list", ` +
+				`"capability": "b"}, {"label": "e", "screen": "list", "capability": "f"}]`,
+			`menu[2]: the screen "list" asks for "f" but menu[0] asks for "b"`,
+		},
+		"an incomplete entry for a menu screen asked before": {
+			`"menu": [{"label": "a", "screen": "list", "capability": "b"}, {"label": "c", "screen": "list"}]`,
+			"menu[1]: capability is required",
 		},
 		"a screen capability that is empty": {
 			`"screen_capabilities": {"seats": ""}`, `screen_capabilities: the screen "seats" needs a capability`,

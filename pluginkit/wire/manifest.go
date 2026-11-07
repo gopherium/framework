@@ -207,20 +207,38 @@ func checkSettings(settings []Setting) error {
 	return nil
 }
 
-// checkMenu refuses a menu entry with no label, no screen or no capability, or a screen that is not one segment.
+// checkMenuEntry refuses menu entry i with no label, no screen or no capability, or a screen that is not one segment.
+func checkMenuEntry(i int, entry MenuEntry) error {
+	if entry.Label == "" {
+		return fmt.Errorf("menu[%d]: label is required", i)
+	}
+	if entry.Screen == "" {
+		return fmt.Errorf("menu[%d]: screen is required", i)
+	}
+	if entry.Capability == "" {
+		return fmt.Errorf("menu[%d]: capability is required", i)
+	}
+	if strings.Contains(entry.Screen, "/") {
+		return fmt.Errorf("menu[%d]: the screen %q must be one path segment", i, entry.Screen)
+	}
+	return nil
+}
+
+// checkMenu refuses an incomplete menu entry, or one asking another capability for a screen an earlier entry names.
 func checkMenu(menu []MenuEntry) error {
+	first := make(map[string]int, len(menu))
 	for i, entry := range menu {
-		if entry.Label == "" {
-			return fmt.Errorf("menu[%d]: label is required", i)
+		if err := checkMenuEntry(i, entry); err != nil {
+			return err
 		}
-		if entry.Screen == "" {
-			return fmt.Errorf("menu[%d]: screen is required", i)
+		earlier, named := first[entry.Screen]
+		if !named {
+			first[entry.Screen] = i
+			continue
 		}
-		if entry.Capability == "" {
-			return fmt.Errorf("menu[%d]: capability is required", i)
-		}
-		if strings.Contains(entry.Screen, "/") {
-			return fmt.Errorf("menu[%d]: the screen %q must be one path segment", i, entry.Screen)
+		if asked := menu[earlier].Capability; asked != entry.Capability {
+			return fmt.Errorf("menu[%d]: the screen %q asks for %q but menu[%d] asks for %q",
+				i, entry.Screen, entry.Capability, earlier, asked)
 		}
 	}
 	return nil
