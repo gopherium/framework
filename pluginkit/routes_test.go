@@ -3,6 +3,7 @@
 package pluginkit_test
 
 import (
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
@@ -97,17 +98,28 @@ func TestRoutesEachFailsAPluginWhoseRoutesFailToLoad(t *testing.T) {
 			if len(outcome.PublicPaths) != 0 {
 				t.Errorf("PublicPaths = %v, want none", outcome.PublicPaths)
 			}
-			if len(outcome.Failed) != 1 {
-				t.Fatalf("Failed = %+v, want one failure", outcome.Failed)
+			shapes, texts := splitFailures(outcome.Failed)
+			want := []pluginkit.Failure{{ID: "feed", Step: pluginkit.StepRoutes, Panicked: test.panicked}}
+			if !slices.Equal(shapes, want) {
+				t.Errorf("Failed = %+v, want %+v", outcome.Failed, want)
 			}
-			got := outcome.Failed[0]
-			if got.ID != "feed" || got.Step != pluginkit.StepRoutes || got.Panicked != test.panicked ||
-				got.Err.Error() != test.want {
-				t.Errorf("Failed = %+v, want feed at %s with %q panicked %t", got, pluginkit.StepRoutes, test.want,
-					test.panicked)
+			if !slices.Equal(texts, []string{test.want}) {
+				t.Errorf("Failed reads %q, want %q", texts, test.want)
 			}
 		})
 	}
+}
+
+// splitFailures returns each failure without its error, then the text of each error, in the order of failures.
+func splitFailures(failures []pluginkit.Failure) ([]pluginkit.Failure, []string) {
+	shapes := make([]pluginkit.Failure, 0, len(failures))
+	texts := make([]string, 0, len(failures))
+	for _, failure := range failures {
+		texts = append(texts, fmt.Sprint(failure.Err))
+		failure.Err = nil
+		shapes = append(shapes, failure)
+	}
+	return shapes, texts
 }
 
 func TestRoutesEachListsTheFailuresInTheOrderOfThePlugins(t *testing.T) {
@@ -129,10 +141,10 @@ func TestRoutesEachAnswersEmptyMapsForNoPlugins(t *testing.T) {
 
 	outcome := pluginkit.RoutesEach[pluginkit.Plugin](nil)
 
-	if outcome.Routes == nil || outcome.PublicPaths == nil || len(outcome.Routes)+len(outcome.PublicPaths) != 0 {
-		t.Errorf("RoutesEach(nil) = %+v, want two empty maps", outcome)
+	if outcome.Routes == nil || outcome.PublicPaths == nil {
+		t.Errorf("RoutesEach(nil) = %+v, want two maps", outcome)
 	}
-	if outcome.Failed != nil {
-		t.Errorf("Failed = %+v, want none", outcome.Failed)
+	if len(outcome.Routes)+len(outcome.PublicPaths) != 0 || outcome.Failed != nil {
+		t.Errorf("RoutesEach(nil) = %+v, want nothing in it", outcome)
 	}
 }
