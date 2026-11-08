@@ -31,25 +31,20 @@ type recovered struct {
 	settings RouteSettings
 }
 
-// ServeHTTP serves the plugin's handler through a writer that notes whether the answer began, before or in it.
+// middlewareWriter is the context key of the writer Protect hands the application's middleware.
+type middlewareWriter struct{}
+
+// ServeHTTP serves the plugin's handler through a writer that notes whether the plugin's answer began.
 func (h *recovered) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	writer := &routeWriter{ResponseWriter: w, http1: r.ProtoMajor == 1, begun: begunUnder(w)}
+	writer := &routeWriter{ResponseWriter: w, http1: r.ProtoMajor == 1}
 	defer h.finish(writer, w.Header().Clone(), r)
 	h.handler.ServeHTTP(writer, r)
 }
 
-// begunUnder reports whether the answer under w already began, as seen by the route writer w unwraps to.
-func begunUnder(w http.ResponseWriter) bool {
-	for {
-		switch under := w.(type) {
-		case *routeWriter:
-			return under.begun
-		case interface{ Unwrap() http.ResponseWriter }:
-			w = under.Unwrap()
-		default:
-			return false
-		}
-	}
+// begunBefore reports whether the writer Protect handed the middleware serving r saw the answer begin.
+func begunBefore(r *http.Request) bool {
+	under, ok := r.Context().Value(middlewareWriter{}).(*routeWriter)
+	return ok && under.begun
 }
 
 // finish recovers a panic of the plugin's handler, reports it, then answers it or cuts the answer the plugin began.
@@ -64,11 +59,12 @@ func (h *recovered) finish(writer *routeWriter, header http.Header, r *http.Requ
 	if caught == http.ErrAbortHandler {
 		panic(caught)
 	}
+	begun := writer.begun || begunBefore(r)
 	h.settings.Report(RouteFailure{
-		ID: h.id, Method: r.Method, Path: r.URL.Path, Answered: !writer.begun,
+		ID: h.id, Method: r.Method, Path: r.URL.Path, Answered: !begun,
 		Err: panicError("pluginkit: " + h.id + " route panicked: " + describe(caught)), Stack: string(debug.Stack()),
 	})
-	if writer.begun {
+	if begun {
 		panic(http.ErrAbortHandler)
 	}
 	clear(writer.Header())

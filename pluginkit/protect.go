@@ -2,7 +2,10 @@
 
 package pluginkit
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 // RouteSettings are what every plugin's routes are protected under, one value an application reuses for each plugin.
 type RouteSettings struct {
@@ -31,7 +34,8 @@ func Protect(id string, handler http.Handler, publicPaths []string, settings Rou
 			plugin.ServeHTTP(w, r)
 			return
 		}
-		protected.ServeHTTP(&routeWriter{ResponseWriter: w, http1: r.ProtoMajor == 1}, r)
+		outer := &routeWriter{ResponseWriter: w, http1: r.ProtoMajor == 1}
+		protected.ServeHTTP(outer, r.WithContext(context.WithValue(r.Context(), middlewareWriter{}, outer)))
 	})
 }
 

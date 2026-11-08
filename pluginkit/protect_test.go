@@ -192,8 +192,9 @@ func TestProtectCutsAPanicAfterTheMiddlewareBeganTheAnswer(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]func(http.ResponseWriter) http.ResponseWriter{
-		"on the writer it was given": func(w http.ResponseWriter) http.ResponseWriter { return w },
-		"on a writer of its own":     func(w http.ResponseWriter) http.ResponseWriter { return unwrapping{w} },
+		"on the writer it was given":     func(w http.ResponseWriter) http.ResponseWriter { return w },
+		"on a writer of its own":         func(w http.ResponseWriter) http.ResponseWriter { return unwrapping{w} },
+		"on a writer that hides another": func(w http.ResponseWriter) http.ResponseWriter { return opaque{w} },
 	}
 
 	for name, writerOf := range tests {
