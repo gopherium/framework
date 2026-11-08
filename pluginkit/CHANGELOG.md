@@ -10,6 +10,9 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 - A boot whose context ends pauses nothing, and a store read or write that fails is returned to the application.
 - `pluginstoretest.Run` checks any `PluginStore` against the contract, and `pluginstoretest.NewMemory` is a store in memory that keeps it.
 - `RegisterEach` and `Register` take only plugins with an `ID() string` method, and fail at `StepRegister` a plugin whose `ID` is not its entry's id, or a `Register` that answers no plugin, a breaking change.
+- `Protect` takes the plugin's id and a `RouteSettings`, which holds the middleware as `Wrap`, a breaking change.
+- `Protect` recovers each panic of a plugin's handler, on its public paths too. While nothing went out, `RouteSettings.Answer` answers it, else the connection is cut, and `RouteSettings.Report` receives a `RouteFailure` with the stack.
+- `RoutesEach` reads each plugin's routes and public paths inside a recover, and fails at the new `StepRoutes` a plugin whose `Routes` or `PublicPaths` panics, or whose `Routes` answers no handler.
 
 ## 0.12.0 - 2026-11-07
 
