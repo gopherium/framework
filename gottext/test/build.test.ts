@@ -639,6 +639,27 @@ test('names a translation opening a tag its message carries self closing', () =>
 	expect(mismatched(opened, naming)).toEqual(['a <br/> b'])
 })
 
+test('names a translation answering a closing tag with an opening one', () => {
+	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
+	const reopened = 'msgid "<notes>x</notes> y"\nmsgstr "<notes>x<notes> y"\n'
+
+	expect(mismatched(reopened, naming)).toEqual(['<notes>x</notes> y'])
+})
+
+test('names a translation closing a tag its message carries self closing', () => {
+	const naming = 'msgid "a <br/> b"\nmsgstr ""\n'
+	const closed = 'msgid "a <br/> b"\nmsgstr "a </br> b"\n'
+
+	expect(mismatched(closed, naming)).toEqual(['a <br/> b'])
+})
+
+test('names a translation dropping a tag whose name carries capitals and digits', () => {
+	const naming = 'msgid "<Link2>x</Link2> y"\nmsgstr ""\n'
+	const dropped = 'msgid "<Link2>x</Link2> y"\nmsgstr "x y"\n'
+
+	expect(mismatched(dropped, naming)).toEqual(['<Link2>x</Link2> y'])
+})
+
 test('names a translation whose plural form drops a tag', () => {
 	const naming = `msgid "<notes>one</notes> post"
 msgid_plural "<notes>many</notes> posts"
@@ -669,16 +690,31 @@ msgstr[1] "<notes>muchas</notes> entradas"
 	expect(mismatched(broken, naming)).toEqual(['<notes>one</notes> post'])
 })
 
+test('reads the tags of each plural form against the form it answers', () => {
+	const naming = `msgid "one post"
+msgid_plural "<notes>many</notes> posts"
+msgstr[0] ""
+msgstr[1] ""
+`
+	const answered = `msgid "one post"
+msgid_plural "<notes>many</notes> posts"
+msgstr[0] "una entrada"
+msgstr[1] "<notes>muchas</notes> entradas"
+`
+
+	expect(mismatched(answered, naming)).toEqual([])
+})
+
 test('passes a translation moving a tag its message carries', () => {
-	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
-	const moved = 'msgid "<notes>x</notes> y"\nmsgstr "y <notes>x</notes>"\n'
+	const naming = 'msgid "<notes>x</notes> <link>y</link>"\nmsgstr ""\n'
+	const moved = 'msgid "<notes>x</notes> <link>y</link>"\nmsgstr "<link>y</link> <notes>x</notes>"\n'
 
 	expect(mismatched(moved, naming)).toEqual([])
 })
 
 test('passes a translation carrying spaces inside a tag', () => {
 	const naming = 'msgid "<notes>x</notes> y"\nmsgstr ""\n'
-	const spaced = 'msgid "<notes>x</notes> y"\nmsgstr "<notes >x</notes > y"\n'
+	const spaced = 'msgid "<notes>x</notes> y"\nmsgstr "<notes  >x</notes  > y"\n'
 
 	expect(mismatched(spaced, naming)).toEqual([])
 })
