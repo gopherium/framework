@@ -9,10 +9,7 @@ from CI.
 
 ### Fixed
 
-- `mismatched` reads the tags of each translated form with the pattern
-  `createInterpolateElement` uses and compares them with the tags of its
-  message, so a translation that adds, drops, renames or repeats a tag is
-  named, while one that only moves a tag still passes.
+- `mismatched` reads the tags a message carries, so a translation that adds, drops, renames or repeats one is named.
 
 ## [0.8.0] - 2026-11-02
 

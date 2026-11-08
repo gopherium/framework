@@ -100,7 +100,7 @@ function bare(message: string): string[] {
 }
 
 /**
- * Returns whether two placeholder lists hold the same members.
+ * Returns whether two lists hold the same members.
  * @param left - The list on the left.
  * @param right - The list on the right.
  * @returns Whether both hold the same members.
@@ -127,7 +127,6 @@ const TAG = /<(\/)?(\w+)\s*(\/)?>/g
 
 /**
  * Returns the tags a message carries, each whole and once per use, in a settled order.
- * An opening, a closing and a self closing tag read as different tags, and spaces inside a tag do not count.
  * @param message - The message to read.
  * @returns The tags, sorted.
  */
