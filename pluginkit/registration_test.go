@@ -3,6 +3,7 @@
 package pluginkit_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -68,7 +69,7 @@ func registeredIDs(outcome pluginkit.RegisterOutcome[*listedPlugin]) []string {
 }
 
 // failures returns the failures of outcome with their errors as text.
-func failures(outcome pluginkit.RegisterOutcome[*listedPlugin]) []failureWant {
+func failures[P any](outcome pluginkit.RegisterOutcome[P]) []failureWant {
 	got := []failureWant{}
 	for _, failure := range outcome.Failed {
 		got = append(got, failureWant{failure.ID, failure.Step, failure.Panicked, failure.Err.Error()})
@@ -155,9 +156,7 @@ func TestRegisterEachFailsAPluginWhoseIDIsNotItsEntrys(t *testing.T) {
 	}{
 		"another id": {&listedPlugin{id: "news"}, false, `pluginkit: feed register: the plugin calls itself "news"`},
 		"no id":      {&listedPlugin{}, false, `pluginkit: feed register: the plugin calls itself ""`},
-		"no plugin": {
-			nil, true, "pluginkit: feed register panicked: runtime error: invalid memory address or nil pointer dereference",
-		},
+		"no plugin":  {nil, false, "pluginkit: feed register: Register answered no plugin"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -177,6 +176,62 @@ func TestRegisterEachFailsAPluginWhoseIDIsNotItsEntrys(t *testing.T) {
 			})
 		})
 	}
+}
+
+// steadyPlugin is a plugin whose ID reads nothing behind its pointer.
+type steadyPlugin struct{}
+
+// ID returns the id of the entry that registers it.
+func (*steadyPlugin) ID() string {
+	return "feed"
+}
+
+// valuePlugin is a plugin held by value.
+type valuePlugin struct{}
+
+// ID returns the id of the entry that registers it.
+func (valuePlugin) ID() string {
+	return "feed"
+}
+
+// Start starts nothing.
+func (valuePlugin) Start(context.Context) error {
+	return nil
+}
+
+// Stop stops nothing.
+func (valuePlugin) Stop(context.Context) error {
+	return nil
+}
+
+func TestRegisterEachFailsARegisterThatAnswersANilPlugin(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	want := []failureWant{{"feed", pluginkit.StepRegister, false, "pluginkit: feed register: Register answered no plugin"}}
+
+	pointer := pluginkit.RegisterEach([]pluginkit.Registration[listedDeps, *steadyPlugin]{
+		{ID: "feed", Register: func(listedDeps) (*steadyPlugin, error) { return nil, nil }},
+	}, depsOf(&calls))
+	held := pluginkit.RegisterEach([]pluginkit.Registration[listedDeps, pluginkit.Plugin]{
+		{ID: "feed", Register: func(listedDeps) (pluginkit.Plugin, error) { return nil, nil }},
+	}, depsOf(&calls))
+
+	wantEqual(t, "a nil pointer whose ID reads nothing", failures(pointer), want)
+	wantEqual(t, "a nil interface", failures(held), want)
+}
+
+func TestRegisterEachRegistersAPluginHeldByValue(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+
+	outcome := pluginkit.RegisterEach([]pluginkit.Registration[listedDeps, valuePlugin]{
+		{ID: "feed", Register: func(listedDeps) (valuePlugin, error) { return valuePlugin{}, nil }},
+	}, depsOf(&calls))
+
+	wantEqual(t, "registered", outcome.Registered, []valuePlugin{{}})
+	wantEqual(t, "failed", failures(outcome), []failureWant{})
 }
 
 func TestRegisterEachWrapsTheErrorARegisterAnswered(t *testing.T) {

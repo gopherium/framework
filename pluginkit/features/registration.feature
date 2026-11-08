@@ -67,6 +67,14 @@ Feature: Registering compiled plugins one by one
     And "feed" failed at the step "register" with: pluginkit: feed register: the plugin calls itself "news"
     And the failure of "feed" is not marked as a panic
 
+  Scenario: A plugin whose Register answers no plugin fails alone
+    Given the compiled plugins "events", "feed" and "gallery"
+    And the Register of "feed" answers no plugin
+    When the application registers each plugin
+    Then "events" and "gallery" are registered, in that order
+    And "feed" failed at the step "register" with: pluginkit: feed register: Register answered no plugin
+    And the failure of "feed" is not marked as a panic
+
   Scenario: An error that holds the text of a panic is not marked as a panic
     Given the compiled plugins "events" and "feed"
     And the Register of "feed" answers the error "pluginkit: feed register panicked: boom"

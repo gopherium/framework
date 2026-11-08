@@ -4,8 +4,13 @@ package pluginkit
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 )
+
+// errNoPlugin is the failure of a Register that answered neither a plugin nor an error.
+var errNoPlugin = errors.New("Register answered no plugin")
 
 // Registration is one compiled plugin's manifest id and the function that registers it from its dependencies.
 type Registration[D, P any] struct {
@@ -43,10 +48,26 @@ func register[D any, P interface{ ID() string }](entry Registration[D, P], deps 
 		if registerErr != nil {
 			return registerErr
 		}
+		if isNil(plugin) {
+			return errNoPlugin
+		}
 		if id := plugin.ID(); id != entry.ID {
 			return fmt.Errorf("the plugin calls itself %q", id)
 		}
 		return nil
 	})
 	return plugin, err
+}
+
+// isNil reports whether plugin holds nothing: a nil interface, pointer, map, slice, channel or function.
+func isNil(plugin any) bool {
+	value := reflect.ValueOf(plugin)
+	switch value.Kind() {
+	case reflect.Invalid:
+		return true
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
