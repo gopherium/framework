@@ -8,6 +8,9 @@ let named: string | undefined
 /** CALENDAR_DAY is the shape of a bare calendar day, such as 2026-09-01. */
 const CALENDAR_DAY = /^\d{4}-\d{2}-\d{2}$/
 
+/** WALL_CLOCK is the shape of a bare wall clock time, such as 09:30. */
+const WALL_CLOCK = /^\d{2}:\d{2}$/
+
 /** DAY is how a date is written unless the caller asks otherwise. */
 const DAY: Intl.DateTimeFormatOptions = { day: '2-digit', month: '2-digit', year: 'numeric' }
 
@@ -68,11 +71,17 @@ export function formatDate(at: Date | string, options: Intl.DateTimeFormatOption
 
 /**
  * Returns a moment as a time of day in the format locale.
- * @param at - The moment, or the text a server stored.
+ * @param at - The moment, the text a server stored, or a bare wall clock time.
  * @returns The time, such as 09:05, empty when there is no moment.
  */
 export function formatTime(at: Date | string): string {
-	return at === '' ? '' : new Date(at).toLocaleTimeString(formatLocale(), CLOCK)
+	if (at === '') {
+		return ''
+	}
+	if (typeof at === 'string' && WALL_CLOCK.test(at)) {
+		return new Date(`1970-01-01T${at}Z`).toLocaleTimeString(formatLocale(), { ...CLOCK, timeZone: 'UTC' })
+	}
+	return new Date(at).toLocaleTimeString(formatLocale(), CLOCK)
 }
 
 /**

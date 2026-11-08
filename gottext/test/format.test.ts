@@ -62,6 +62,33 @@ test('writes a time as two digit hours and minutes on the es-ES clock', () => {
 	expect(formatTime('2026-09-30T09:05:00Z')).toBe('09:05')
 })
 
+test('writes a bare wall clock time as the time it names in every time zone', () => {
+	rememberFormatLocale('es-ES')
+	vi.stubEnv('TZ', 'America/Los_Angeles')
+
+	expect(formatTime('09:30')).toBe('09:30')
+	expect(formatTime('21:05')).toBe('21:05')
+	expect(formatTime('00:00')).toBe('00:00')
+	expect(formatTime('23:59')).toBe('23:59')
+})
+
+test('writes a bare wall clock time on the en-US clock as the time it names', () => {
+	rememberFormatLocale('en-US')
+	vi.stubEnv('TZ', 'Asia/Tokyo')
+
+	expect(formatTime('09:30')).toBe('09:30 AM')
+	expect(formatTime('21:05')).toBe('09:05 PM')
+	expect(formatTime('00:00')).toBe('12:00 AM')
+})
+
+test('writes a timestamp a server stored on the reader clock, with or without a zone', () => {
+	rememberFormatLocale('es-ES')
+	vi.stubEnv('TZ', 'America/Los_Angeles')
+
+	expect(formatTime('2026-09-30T09:05:00Z')).toBe('02:05')
+	expect(formatTime('2026-09-30T09:05')).toBe('09:05')
+})
+
 test('writes nothing for an absent moment', () => {
 	rememberFormatLocale('es-ES')
 
