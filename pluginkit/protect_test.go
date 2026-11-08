@@ -162,6 +162,78 @@ func TestProtectLetsAPanicOfTheMiddlewareReachTheServer(t *testing.T) {
 	}
 }
 
+// unwrapping is a writer of the tests' middleware that the server's writer stands under.
+type unwrapping struct {
+	http.ResponseWriter
+}
+
+// Unwrap returns the writer under it.
+func (w unwrapping) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// opaque is a writer of the tests' middleware that hides the writer under it.
+type opaque struct {
+	http.ResponseWriter
+}
+
+// beganFirst returns middleware that writes the status 200 through what writerOf builds, then calls next on it.
+func beganFirst(writerOf func(http.ResponseWriter) http.ResponseWriter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			own := writerOf(w)
+			own.WriteHeader(http.StatusOK)
+			next.ServeHTTP(own, r)
+		})
+	}
+}
+
+func TestProtectCutsAPanicAfterTheMiddlewareBeganTheAnswer(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(http.ResponseWriter) http.ResponseWriter{
+		"on the writer it was given": func(w http.ResponseWriter) http.ResponseWriter { return w },
+		"on a writer of its own":     func(w http.ResponseWriter) http.ResponseWriter { return unwrapping{w} },
+	}
+
+	for name, writerOf := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			report := &routeReport{}
+			settings := routeSettings(report)
+			settings.Wrap = beganFirst(writerOf)
+			plugin := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panicWith("boom") })
+
+			escaped := serveCatching(pluginkit.Protect("feed", plugin, nil, settings), httptest.NewRecorder(), getItems())
+
+			wantCut(t, escaped)
+			if got := onlyRouteFailure(t, report); got.Answered {
+				t.Errorf("reported %+v, want it not answered", got)
+			}
+		})
+	}
+}
+
+func TestProtectAnswersAPanicUnderAWriterItCannotSeeThrough(t *testing.T) {
+	t.Parallel()
+
+	report := &routeReport{}
+	settings := routeSettings(report)
+	settings.Wrap = func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(opaque{w}, r) })
+	}
+	plugin := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panicWith("boom") })
+	recorder := httptest.NewRecorder()
+
+	escaped := serveCatching(pluginkit.Protect("feed", plugin, nil, settings), recorder, getItems())
+
+	wantApplicationAnswer(t, recorder, escaped)
+	if got := onlyRouteFailure(t, report); !got.Answered {
+		t.Errorf("reported %+v, want it answered", got)
+	}
+}
+
 func TestProtectRefusesRouteSettingsItCannotServeWith(t *testing.T) {
 	t.Parallel()
 
@@ -189,6 +261,10 @@ func TestProtectRefusesRouteSettingsItCannotServeWith(t *testing.T) {
 		"nil Report": {
 			id: "feed", change: func(s *pluginkit.RouteSettings) { s.Report = nil },
 			want: "pluginkit: Protect: RouteSettings.Report is nil",
+		},
+		"Wrap answering no handler": {
+			id: "feed", change: func(s *pluginkit.RouteSettings) { s.Wrap = func(http.Handler) http.Handler { return nil } },
+			want: "pluginkit: Protect: RouteSettings.Wrap answered no handler",
 		},
 	}
 

@@ -23,12 +23,15 @@ func Protect(id string, handler http.Handler, publicPaths []string, settings Rou
 	}
 	plugin := &recovered{id: id, handler: handler, settings: settings}
 	protected := settings.Wrap(plugin)
+	if isNil(protected) {
+		panic("pluginkit: Protect: RouteSettings.Wrap answered no handler")
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := public[r.URL.Path]; ok {
 			plugin.ServeHTTP(w, r)
 			return
 		}
-		protected.ServeHTTP(w, r)
+		protected.ServeHTTP(&routeWriter{ResponseWriter: w, http1: r.ProtoMajor == 1}, r)
 	})
 }
 

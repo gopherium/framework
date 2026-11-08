@@ -5,7 +5,9 @@ package pluginkit_test
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +39,63 @@ func protectedFeed(handler http.Handler, report *routeReport) http.Handler {
 // getItems returns a GET request for /items over HTTP/1.1.
 func getItems() *http.Request {
 	return httptest.NewRequest(http.MethodGet, "/items", nil)
+}
+
+// routeShape returns failure without its error and stack, which the tests check on their own.
+func routeShape(failure pluginkit.RouteFailure) pluginkit.RouteFailure {
+	failure.Err, failure.Stack = nil, ""
+	return failure
+}
+
+// onlyRouteFailure returns the one failure report holds, ending the test when it holds another count.
+func onlyRouteFailure(t *testing.T, report *routeReport) pluginkit.RouteFailure {
+	t.Helper()
+	failures := report.held()
+	if len(failures) != 1 {
+		t.Fatalf("reported %+v, want one failure", failures)
+	}
+	return failures[0]
+}
+
+// wantNoFailure checks that report holds no failure.
+func wantNoFailure(t *testing.T, report *routeReport) {
+	t.Helper()
+	if failures := report.held(); len(failures) != 0 {
+		t.Errorf("reported %+v, want nothing", failures)
+	}
+}
+
+// wantRecorded checks the status and the body the recorder holds.
+func wantRecorded(t *testing.T, recorder *httptest.ResponseRecorder, status int, body string) {
+	t.Helper()
+	if recorder.Code != status || recorder.Body.String() != body {
+		t.Errorf("answered %d %q, want %d %q", recorder.Code, recorder.Body.String(), status, body)
+	}
+}
+
+// wantApplicationAnswer checks that the recorder holds the tests' answer to a panic and that no panic reached it.
+func wantApplicationAnswer(t *testing.T, recorder *httptest.ResponseRecorder, escaped any) {
+	t.Helper()
+	if escaped != nil {
+		t.Errorf("the server got the panic %v, want none", escaped)
+	}
+	wantRecorded(t, recorder, http.StatusInternalServerError, "internal error")
+}
+
+// wantCut checks that the server got http.ErrAbortHandler, which cuts the answer.
+func wantCut(t *testing.T, escaped any) {
+	t.Helper()
+	if escaped != http.ErrAbortHandler {
+		t.Errorf("the server got the panic %v, want http.ErrAbortHandler", escaped)
+	}
+}
+
+// wantFailureText checks the text of the failure's error.
+func wantFailureText(t *testing.T, failure pluginkit.RouteFailure, want string) {
+	t.Helper()
+	if got := fmt.Sprint(failure.Err); got != want {
+		t.Errorf("the failure reads %q, want %q", got, want)
+	}
 }
 
 // informedWriter is a recorder that sends a status below 200 aside, as a server sends an informational answer.
@@ -107,8 +166,9 @@ func TestRecoverAnswersAPanicBeforeTheAnswerBegan(t *testing.T) {
 
 	report := &routeReport{}
 	plugin := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-Feed", "plugin")
+		w.Header()["X-Wrapped"][0] = "edited"
 		w.Header().Add("X-Wrapped", "plugin")
+		w.Header().Set("X-Feed", "plugin")
 		http.SetCookie(w, &http.Cookie{Name: "feed", Value: "plugin"})
 		panicWith("boom")
 	})
@@ -116,25 +176,17 @@ func TestRecoverAnswersAPanicBeforeTheAnswerBegan(t *testing.T) {
 
 	escaped := serveCatching(protectedFeed(plugin, report), recorder, httptest.NewRequest(http.MethodPost, "/items", nil))
 
-	answer := recorder.Result()
-	if escaped != nil || answer.StatusCode != http.StatusInternalServerError ||
-		recorder.Body.String() != "internal error" {
-		t.Fatalf("answered %d %q with the panic %v, want the application's answer", answer.StatusCode,
-			recorder.Body.String(), escaped)
+	wantApplicationAnswer(t, recorder, escaped)
+	middlewareOnly := http.Header{"X-Wrapped": {"yes"}}
+	if got := recorder.Result().Header; !maps.EqualFunc(got, middlewareOnly, slices.Equal) {
+		t.Errorf("the answer holds %v, want only the middleware's header %v", got, middlewareOnly)
 	}
-	if answer.Header.Get("X-Feed") != "" || len(answer.Cookies()) != 0 ||
-		!slices.Equal(answer.Header.Values("X-Wrapped"), []string{"yes"}) {
-		t.Errorf("the answer holds %v, want only the middleware's header", answer.Header)
+	got := onlyRouteFailure(t, report)
+	want := pluginkit.RouteFailure{ID: "feed", Method: http.MethodPost, Path: "/items", Answered: true}
+	if routeShape(got) != want {
+		t.Errorf("reported %+v, want %+v", got, want)
 	}
-	failures := report.held()
-	if len(failures) != 1 {
-		t.Fatalf("reported %+v, want one failure", failures)
-	}
-	got := failures[0]
-	if got.ID != "feed" || got.Method != http.MethodPost || got.Path != "/items" || !got.Answered ||
-		got.Err == nil || got.Err.Error() != "pluginkit: feed route panicked: boom" {
-		t.Errorf("reported %+v, want the answered panic of feed for POST /items", got)
-	}
+	wantFailureText(t, got, "pluginkit: feed route panicked: boom")
 	if !strings.Contains(got.Stack, "pluginkit_test.panicWith") {
 		t.Errorf("the stack does not hold the panic:\n%s", got.Stack)
 	}
@@ -165,11 +217,9 @@ func TestRecoverCutsAnAnswerThatBegan(t *testing.T) {
 
 			escaped := serveCatching(protectedFeed(plugin, report), writer, getItems())
 
-			if escaped != http.ErrAbortHandler {
-				t.Errorf("the server got the panic %v, want http.ErrAbortHandler", escaped)
-			}
-			if failures := report.held(); len(failures) != 1 || failures[0].Answered {
-				t.Errorf("reported %+v, want one failure not answered", failures)
+			wantCut(t, escaped)
+			if got := onlyRouteFailure(t, report); got.Answered {
+				t.Errorf("reported %+v, want it not answered", got)
 			}
 		})
 	}
@@ -199,14 +249,12 @@ func TestRecoverAnswersAfterAnInformationalStatus(t *testing.T) {
 
 			escaped := serveCatching(protectedFeed(plugin, report), writer, request)
 
-			if escaped != nil || writer.Code != http.StatusInternalServerError {
-				t.Errorf("answered %d with the panic %v, want the application's answer", writer.Code, escaped)
-			}
+			wantApplicationAnswer(t, writer.ResponseRecorder, escaped)
 			if !slices.Equal(writer.informed, []int{test.status}) {
 				t.Errorf("informed %v, want %d", writer.informed, test.status)
 			}
-			if failures := report.held(); len(failures) != 1 || !failures[0].Answered {
-				t.Errorf("reported %+v, want one answered failure", failures)
+			if got := onlyRouteFailure(t, report); !got.Answered {
+				t.Errorf("reported %+v, want it answered", got)
 			}
 		})
 	}
@@ -221,13 +269,8 @@ func TestRecoverAnswersAStatusTheServerRefused(t *testing.T) {
 
 	escaped := serveCatching(protectedFeed(plugin, report), recorder, getItems())
 
-	if escaped != nil || recorder.Code != http.StatusInternalServerError {
-		t.Errorf("answered %d with the panic %v, want the application's answer", recorder.Code, escaped)
-	}
-	want := "pluginkit: feed route panicked: invalid WriteHeader code 42"
-	if failures := report.held(); len(failures) != 1 || failures[0].Err.Error() != want {
-		t.Errorf("reported %+v, want %q", failures, want)
-	}
+	wantApplicationAnswer(t, recorder, escaped)
+	wantFailureText(t, onlyRouteFailure(t, report), "pluginkit: feed route panicked: invalid WriteHeader code 42")
 }
 
 func TestRecoverClosesAConnectionTheHandlerHijacked(t *testing.T) {
@@ -258,15 +301,14 @@ func TestRecoverClosesAConnectionTheHandlerHijacked(t *testing.T) {
 
 			escaped := serveCatching(protectedFeed(plugin, report), writer, getItems())
 
-			if escaped != http.ErrAbortHandler {
-				t.Errorf("the server got the panic %v, want http.ErrAbortHandler", escaped)
-			}
+			wantCut(t, escaped)
 			_ = client.SetReadDeadline(time.Now().Add(time.Second))
 			if _, err := client.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
 				t.Errorf("reading the hijacked connection answered %v, want io.EOF", err)
 			}
-			if failures := report.held(); len(failures) != test.reported || slices.ContainsFunc(failures,
-				func(failure pluginkit.RouteFailure) bool { return failure.Answered }) {
+			failures := report.held()
+			answered := slices.ContainsFunc(failures, func(failure pluginkit.RouteFailure) bool { return failure.Answered })
+			if len(failures) != test.reported || answered {
 				t.Errorf("reported %+v, want %d failures not answered", failures, test.reported)
 			}
 		})
@@ -287,11 +329,9 @@ func TestRecoverAnswersAPanicAfterAHijackThatFailed(t *testing.T) {
 
 	escaped := serveCatching(protectedFeed(plugin, report), writer, getItems())
 
-	if escaped != nil || writer.Code != http.StatusInternalServerError {
-		t.Errorf("answered %d with the panic %v, want the application's answer", writer.Code, escaped)
-	}
-	if failures := report.held(); len(failures) != 1 || !failures[0].Answered {
-		t.Errorf("reported %+v, want one answered failure", failures)
+	wantApplicationAnswer(t, writer.ResponseRecorder, escaped)
+	if got := onlyRouteFailure(t, report); !got.Answered {
+		t.Errorf("reported %+v, want it answered", got)
 	}
 }
 
@@ -304,15 +344,9 @@ func TestRecoverLeavesAnAbortToTheServer(t *testing.T) {
 
 	escaped := serveCatching(protectedFeed(plugin, report), recorder, getItems())
 
-	if escaped != http.ErrAbortHandler {
-		t.Errorf("the server got the panic %v, want http.ErrAbortHandler", escaped)
-	}
-	if recorder.Body.Len() != 0 || recorder.Result().StatusCode != http.StatusOK {
-		t.Errorf("answered %d %q, want nothing written", recorder.Code, recorder.Body.String())
-	}
-	if failures := report.held(); len(failures) != 0 {
-		t.Errorf("reported %+v, want nothing for an abort", failures)
-	}
+	wantCut(t, escaped)
+	wantRecorded(t, recorder, http.StatusOK, "")
+	wantNoFailure(t, report)
 }
 
 func TestRecoverAnswersAPluginWithNoHandler(t *testing.T) {
@@ -323,13 +357,9 @@ func TestRecoverAnswersAPluginWithNoHandler(t *testing.T) {
 
 	escaped := serveCatching(protectedFeed(nil, report), recorder, getItems())
 
-	if escaped != nil || recorder.Code != http.StatusInternalServerError {
-		t.Errorf("answered %d with the panic %v, want the application's answer", recorder.Code, escaped)
-	}
-	want := "pluginkit: feed route panicked: runtime error: invalid memory address or nil pointer dereference"
-	if failures := report.held(); len(failures) != 1 || failures[0].Err.Error() != want {
-		t.Errorf("reported %+v, want %q", failures, want)
-	}
+	wantApplicationAnswer(t, recorder, escaped)
+	wantFailureText(t, onlyRouteFailure(t, report),
+		"pluginkit: feed route panicked: runtime error: invalid memory address or nil pointer dereference")
 }
 
 func TestRecoverLeavesAnAnswerThatDidNotPanicAlone(t *testing.T) {
@@ -345,14 +375,14 @@ func TestRecoverLeavesAnAnswerThatDidNotPanicAlone(t *testing.T) {
 
 	escaped := serveCatching(protectedFeed(plugin, report), recorder, getItems())
 
-	if escaped != nil || recorder.Code != http.StatusCreated || recorder.Body.String() != "created" ||
-		recorder.Header().Get("X-Feed") != "plugin" {
-		t.Errorf("answered %d %q %v with the panic %v, want the plugin's answer", recorder.Code,
-			recorder.Body.String(), recorder.Header(), escaped)
+	if escaped != nil {
+		t.Errorf("the server got the panic %v, want none", escaped)
 	}
-	if failures := report.held(); len(failures) != 0 {
-		t.Errorf("reported %+v, want nothing", failures)
+	wantRecorded(t, recorder, http.StatusCreated, "created")
+	if got := recorder.Header().Get("X-Feed"); got != "plugin" {
+		t.Errorf("the answer holds X-Feed %q, want the plugin's", got)
 	}
+	wantNoFailure(t, report)
 }
 
 func TestRecoverSetsAReadDeadlineOnTheServersWriter(t *testing.T) {

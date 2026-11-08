@@ -31,11 +31,25 @@ type recovered struct {
 	settings RouteSettings
 }
 
-// ServeHTTP serves the plugin's handler through a writer that notes whether the plugin's answer began.
+// ServeHTTP serves the plugin's handler through a writer that notes whether the answer began, before or in it.
 func (h *recovered) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	writer := &routeWriter{ResponseWriter: w, http1: r.ProtoMajor == 1}
-	defer h.finish(writer, maps.Clone(w.Header()), r)
+	writer := &routeWriter{ResponseWriter: w, http1: r.ProtoMajor == 1, begun: begunUnder(w)}
+	defer h.finish(writer, w.Header().Clone(), r)
 	h.handler.ServeHTTP(writer, r)
+}
+
+// begunUnder reports whether the answer under w already began, as seen by the route writer w unwraps to.
+func begunUnder(w http.ResponseWriter) bool {
+	for {
+		switch under := w.(type) {
+		case *routeWriter:
+			return under.begun
+		case interface{ Unwrap() http.ResponseWriter }:
+			w = under.Unwrap()
+		default:
+			return false
+		}
+	}
 }
 
 // finish recovers a panic of the plugin's handler, reports it, then answers it or cuts the answer the plugin began.
@@ -74,9 +88,17 @@ type routeWriter struct {
 // WriteHeader writes the status, noting that the answer began unless the status is informational.
 func (w *routeWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
-	if status >= http.StatusOK || status == http.StatusSwitchingProtocols && w.http1 {
+	if w.beginsAnswer(status) {
 		w.begun = true
 	}
+}
+
+// beginsAnswer reports whether status begins the answer: a final status, or a 101 over HTTP/1.
+func (w *routeWriter) beginsAnswer(status int) bool {
+	if status >= http.StatusOK {
+		return true
+	}
+	return status == http.StatusSwitchingProtocols && w.http1
 }
 
 // Write writes part of the body, noting that the answer began.
