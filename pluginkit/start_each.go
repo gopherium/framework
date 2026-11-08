@@ -19,6 +19,8 @@ const (
 	StepStart Step = "start"
 	// StepRegister is a plugin's Register, called by [RegisterEach].
 	StepRegister Step = "register"
+	// StepRoutes is a plugin's Routes and PublicPaths, read by [RoutesEach].
+	StepRoutes Step = "routes"
 )
 
 // Failure is one step one plugin failed, or was still waiting for when the context ended.
