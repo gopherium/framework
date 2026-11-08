@@ -91,26 +91,27 @@ func (p publicPlugin) PublicPaths() []string {
 
 // routeWorld is what one scenario of the routes feature serves, reads and finds.
 type routeWorld struct {
-	http2           bool
-	plugins         []servedPlugin
-	middlewarePanic string
-	middlewareRan   atomic.Bool
-	server          *httptest.Server
-	client          *http.Client
-	served          sync.WaitGroup
-	mu              sync.Mutex
-	failures        []pluginkit.RouteFailure
-	calls           []error
-	last            answered
-	failure         pluginkit.RouteFailure
-	protectPanic    any
-	registered      []string
-	hasRoutes       map[string]bool
-	publicPath      map[string]string
-	routesPanic     map[string]string
-	pathsPanic      map[string]string
-	noHandler       map[string]bool
-	outcome         pluginkit.RoutesOutcome
+	http2            bool
+	plugins          []servedPlugin
+	middlewarePanic  string
+	middlewareBegins bool
+	middlewareRan    atomic.Bool
+	server           *httptest.Server
+	client           *http.Client
+	served           sync.WaitGroup
+	mu               sync.Mutex
+	failures         []pluginkit.RouteFailure
+	calls            []error
+	last             answered
+	failure          pluginkit.RouteFailure
+	protectPanic     any
+	registered       []string
+	hasRoutes        map[string]bool
+	publicPath       map[string]string
+	routesPanic      map[string]string
+	pathsPanic       map[string]string
+	noHandler        map[string]bool
+	outcome          pluginkit.RoutesOutcome
 }
 
 // panicWith panics with value, so the stack of a scenario's panic names it.
@@ -290,6 +291,9 @@ func (w *routeWorld) middleware(next http.Handler) http.Handler {
 		if w.middlewarePanic != "" {
 			panicWith(w.middlewarePanic)
 		}
+		if w.middlewareBegins {
+			writer.WriteHeader(http.StatusOK)
+		}
 		next.ServeHTTP(writer, r)
 	})
 }
@@ -429,10 +433,11 @@ func (w *routeWorld) askingGets(id, path string, status int, body string) error 
 // answerCut checks that the last request failed, or that its 200 answer broke off, and neither for a timeout.
 func (w *routeWorld) answerCut() error {
 	a := w.last
-	if a.err != nil && !timedOut(a.err) {
-		return nil
+	cause := a.err
+	if cause == nil && a.status == http.StatusOK {
+		cause = a.bodyErr
 	}
-	if a.err == nil && a.status == http.StatusOK && a.bodyErr != nil && !timedOut(a.bodyErr) {
+	if cause != nil && !timedOut(cause) {
 		return nil
 	}
 	return fmt.Errorf("the client got %d %q with %v, want the answer cut", a.status, a.body, errors.Join(a.err, a.bodyErr))
@@ -448,10 +453,11 @@ func (w *routeWorld) reportHoldsOne(id, method, path, how string) error {
 	if len(w.failures) != 1 {
 		return fmt.Errorf("the report holds %d failures, want 1: %+v", len(w.failures), w.failures)
 	}
-	got, answeredWanted := w.failures[0], how == "answered"
-	if got.ID != id || got.Method != method || got.Path != path || got.Answered != answeredWanted {
-		return fmt.Errorf("the report holds %s %s %q answered %t, want %s %s %q answered %t",
-			got.ID, got.Method, got.Path, got.Answered, id, method, path, answeredWanted)
+	got := w.failures[0]
+	shape := pluginkit.RouteFailure{ID: got.ID, Method: got.Method, Path: got.Path, Answered: got.Answered}
+	want := pluginkit.RouteFailure{ID: id, Method: method, Path: path, Answered: how == "answered"}
+	if shape != want {
+		return fmt.Errorf("the report holds %+v, want %+v", shape, want)
 	}
 	w.failure = got
 	return nil
@@ -637,9 +643,12 @@ func (w *routeWorld) failedAt(id, step, text, how string) error {
 		return fmt.Errorf("failed %+v, want one failure", w.outcome.Failed)
 	}
 	got := w.outcome.Failed[0]
-	if got.ID != id || string(got.Step) != step || got.Err == nil || got.Err.Error() != text ||
-		got.Panicked != (how == "as a panic") {
-		return fmt.Errorf("failed %+v, want %s at %s with %q %s", got, id, step, text, how)
+	shape := pluginkit.Failure{ID: got.ID, Step: got.Step, Panicked: got.Panicked}
+	if want := (pluginkit.Failure{ID: id, Step: pluginkit.Step(step), Panicked: how == "as a panic"}); shape != want {
+		return fmt.Errorf("failed %+v, want %+v", shape, want)
+	}
+	if read := fmt.Sprint(got.Err); read != text {
+		return fmt.Errorf("the failure reads %q, want %q", read, text)
 	}
 	return nil
 }
@@ -650,6 +659,7 @@ func givenRoutes(sc *godog.ScenarioContext, w *routeWorld) {
 	sc.Step(`^the plugin "([^"]*)" serves no handler$`,
 		func(id string) { w.plugins = append(w.plugins, servedPlugin{id: id, noHandler: true}) })
 	sc.Step(`^the middleware panics with "([^"]*)"$`, func(text string) { w.middlewarePanic = text })
+	sc.Step(`^the middleware writes the status 200 before it calls the plugin$`, func() { w.middlewareBegins = true })
 	sc.Step(`^the server speaks HTTP/2$`, func() { w.http2 = true })
 	sc.Step(`^the registered plugins (.+)$`, func(list string) { w.registered = names(list) })
 	sc.Step(`^"([^"]*)" has routes(?: and the public path "([^"]*)")?$`, w.hasRoutesWith)

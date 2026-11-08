@@ -108,6 +108,13 @@ Feature: Serving each plugin's routes and reading them at boot
     And the middleware did not run
     And the report holds one failure of "feed" for GET "/rss.xml" that the application answered
 
+  Scenario: A route that panics after the middleware began the answer is cut
+    Given the plugin "feed" serves "/items" with a handler that panics with "boom"
+    And the middleware writes the status 200 before it calls the plugin
+    When a client asks "feed" for "/items"
+    Then the client's answer is cut
+    And the report holds one failure of "feed" for GET "/items" that the application did not answer
+
   Scenario: A panic in the application's middleware is never blamed on the plugin
     Given the plugin "feed" serves "/items" with a handler that answers status 200 and "listed"
     And the middleware panics with "session store down"
