@@ -51,5 +51,5 @@ func TestBoot(t *testing.T) {
 }
 
 func TestRoutes(t *testing.T) {
-	runFeature(t, "routes.feature", func(*godog.ScenarioContext) {})
+	runFeature(t, "routes.feature", initializeRoutes())
 }

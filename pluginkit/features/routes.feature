@@ -9,7 +9,6 @@ Feature: Serving each plugin's routes and reading them at boot
   read on their own, so the application can pause a plugin whose routes
   fail to load before it starts.
 
-  @wip
   Scenario: A route that answers normally is served untouched
     Given the plugin "feed" serves "/items" with a handler that answers status 201 and "created"
     When a client asks "feed" for "/items"
@@ -17,7 +16,6 @@ Feature: Serving each plugin's routes and reading them at boot
     And the middleware ran
     And the report holds nothing
 
-  @wip
   Scenario: A route that panics before it answers gets the application's answer
     Given the plugin "feed" serves "/items" with a handler that panics with "boom"
     When a client asks "feed" for "/items"
@@ -25,7 +23,6 @@ Feature: Serving each plugin's routes and reading them at boot
     And the report holds one failure of "feed" for GET "/items" that the application answered
     And that failure reads "pluginkit: feed route panicked: boom" with the stack of the panic
 
-  @wip
   Scenario: Headers the route set before it panicked stay off the application's answer
     Given the plugin "feed" serves "/items" with a handler that sets the header "X-Feed" and a cookie, then panics with "boom"
     When a client asks "feed" for "/items"
@@ -33,14 +30,12 @@ Feature: Serving each plugin's routes and reading them at boot
     And the answer holds no header "X-Feed" and no cookie
     And the answer holds the header the middleware set
 
-  @wip
   Scenario: An informational answer does not begin the answer
     Given the plugin "feed" serves "/items" with a handler that sends 103 Early Hints, then panics with "boom"
     When a client asks "feed" for "/items"
     Then the client gets status 500 and "internal error"
     And the report holds one failure of "feed" for GET "/items" that the application answered
 
-  @wip
   Scenario Outline: A route that panics after its answer began is cut
     Given the plugin "feed" serves "/items" with a handler that <begins>, then panics with "boom"
     When a client asks "feed" for "/items"
@@ -55,7 +50,6 @@ Feature: Serving each plugin's routes and reading them at boot
       | hijacks the connection                        |
       | hijacks the connection through http.Hijacker  |
 
-  @wip
   Scenario Outline: A route that aborts on purpose is left to the server
     Given the plugin "feed" serves "/items" with a handler that <acts>
     When a client asks "feed" for "/items"
@@ -68,7 +62,6 @@ Feature: Serving each plugin's routes and reading them at boot
       | flushes the body "partial", then aborts |
       | hijacks the connection, then aborts     |
 
-  @wip
   Scenario Outline: A route reaches the server's writer through the recover
     Given the plugin "feed" serves "/items" with a handler that <reaches>, then writes the body "done"
     When a client asks "feed" for "/items"
@@ -82,7 +75,6 @@ Feature: Serving each plugin's routes and reading them at boot
       | sets a read deadline through a response controller  |
       | enables full duplex through a response controller   |
 
-  @wip
   Scenario Outline: A route that takes over the connection answers on its own
     Given the plugin "feed" serves "/items" with a handler that <takes>, then answers status 200 and "done" on the connection
     When a client asks "feed" for "/items"
@@ -95,7 +87,6 @@ Feature: Serving each plugin's routes and reading them at boot
       | hijacks the connection                        |
       | hijacks the connection through http.Hijacker  |
 
-  @wip
   Scenario: A panic in one plugin's route leaves the other plugins answering
     Given the plugin "feed" serves "/items" with a handler that panics with "boom"
     And the plugin "events" serves "/list" with a handler that answers status 200 and "listed"
@@ -104,14 +95,12 @@ Feature: Serving each plugin's routes and reading them at boot
     And a client asking "events" for "/list" gets status 200 and "listed"
     And the report holds one failure of "feed" for GET "/items" that the application answered
 
-  @wip
   Scenario: A plugin that gave no handler gets the application's answer
     Given the plugin "feed" serves no handler
     When a client asks "feed" for "/items"
     Then the client gets status 500 and "internal error"
     And the report holds one failure of "feed" for GET "/items" that the application answered
 
-  @wip
   Scenario: A public route that panics gets the application's answer without the middleware
     Given the plugin "feed" serves the public path "/rss.xml" with a handler that panics with "boom"
     When a client asks "feed" for "/rss.xml"
@@ -119,7 +108,6 @@ Feature: Serving each plugin's routes and reading them at boot
     And the middleware did not run
     And the report holds one failure of "feed" for GET "/rss.xml" that the application answered
 
-  @wip
   Scenario: A panic in the application's middleware is never blamed on the plugin
     Given the plugin "feed" serves "/items" with a handler that answers status 200 and "listed"
     And the middleware panics with "session store down"
@@ -127,7 +115,6 @@ Feature: Serving each plugin's routes and reading them at boot
     Then the client's answer is cut
     And the report holds nothing
 
-  @wip
   Scenario: Over HTTP/2, a route that panics before it answers gets the application's answer
     Given the server speaks HTTP/2
     And the plugin "feed" serves "/items" with a handler that panics with "boom"
@@ -136,7 +123,6 @@ Feature: Serving each plugin's routes and reading them at boot
     And the answer came over HTTP/2
     And the report holds one failure of "feed" for GET "/items" that the application answered
 
-  @wip
   Scenario: Over HTTP/2, a route that panics after it flushed is cut
     Given the server speaks HTTP/2
     And the plugin "feed" serves "/items" with a handler that flushes the body "partial", then panics with "boom"
@@ -144,7 +130,6 @@ Feature: Serving each plugin's routes and reading them at boot
     Then the client's answer is cut
     And the report holds one failure of "feed" for GET "/items" that the application did not answer
 
-  @wip
   Scenario Outline: Protect refuses route settings it cannot serve with
     When the application protects a plugin's routes with <missing>
     Then the protect panics with "<text>"
@@ -156,7 +141,6 @@ Feature: Serving each plugin's routes and reading them at boot
       | no answer     | pluginkit: Protect: RouteSettings.Answer is nil |
       | no report     | pluginkit: Protect: RouteSettings.Report is nil |
 
-  @wip
   Scenario: Each plugin's routes and public paths are read on their own
     Given the registered plugins "events", "feed" and "theme"
     And "events" has routes and the public path "/rss.xml"
@@ -166,7 +150,6 @@ Feature: Serving each plugin's routes and reading them at boot
     And the public paths hold "/rss.xml" for "events" only
     And no plugin failed to load its routes
 
-  @wip
   Scenario Outline: A plugin whose routes fail to load fails at the step routes
     Given the registered plugins "events" and "feed"
     And "events" has routes and the public path "/rss.xml"
