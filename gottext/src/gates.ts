@@ -100,7 +100,7 @@ function bare(message: string): string[] {
 }
 
 /**
- * Returns whether two placeholder lists hold the same members.
+ * Returns whether two lists hold the same members.
  * @param left - The list on the left.
  * @param right - The list on the right.
  * @returns Whether both hold the same members.
@@ -120,6 +120,31 @@ function answersPlaceholders(form: string, message: string): boolean {
 		return true
 	}
 	return alike(placeholders(form), placeholders(message)) && alike(bare(form), bare(message))
+}
+
+/** TAG is a tag as createInterpolateElement reads one, with the slashes that mark it closing or self closing. */
+const TAG = /<(\/)?(\w+)\s*(\/)?>/g
+
+/**
+ * Returns the tags a message carries, each whole and once per use, in a settled order.
+ * @param message - The message to read.
+ * @returns The tags, sorted.
+ */
+function tags(message: string): string[] {
+	return [...message.matchAll(TAG)].map((found) => `${found[1] ?? ''}${found[2]}${found[3] ?? ''}`).sort()
+}
+
+/**
+ * Returns whether a translated form answers its message with the tags that message carries.
+ * @param form - The translated form.
+ * @param message - The message the form answers.
+ * @returns Whether the form matches.
+ */
+function answersTags(form: string, message: string): boolean {
+	if (form === '') {
+		return true
+	}
+	return alike(tags(form), tags(message))
 }
 
 /** NUMBER is the conversion a placeholder ends in when it writes a number rather than text. */
@@ -152,7 +177,7 @@ export function unformatted(template: string): string[] {
 }
 
 /**
- * Returns every message whose translation names placeholders its message does not.
+ * Returns every message whose translation names placeholders or tags its message does not.
  * @param source - The catalogue as PO text.
  * @param template - The template naming every message and the placeholders it carries.
  * @returns The keys whose translation would not render.
@@ -167,8 +192,10 @@ export function mismatched(source: string, template: string): string[] {
 				continue
 			}
 			const plural = entry.msgid_plural ?? msgid
-			const matches = answer.msgstr.every((form, at) =>
-				answersPlaceholders(form, at === 0 ? msgid : plural))
+			const matches = answer.msgstr.every((form, at) => {
+				const message = at === 0 ? msgid : plural
+				return answersPlaceholders(form, message) && answersTags(form, message)
+			})
 			if (!matches) {
 				broken.push(keyOf(context, msgid))
 			}
