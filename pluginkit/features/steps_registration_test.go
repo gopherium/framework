@@ -40,6 +40,11 @@ type laneDeps struct{ id string }
 // lanePlugin is a plugin a scenario registered.
 type lanePlugin struct{ id string }
 
+// ID returns the id the plugin calls itself.
+func (p *lanePlugin) ID() string {
+	return p.id
+}
+
 // registrationFailure is one failure of a registration outcome, its error as text.
 type registrationFailure struct {
 	ID       string
@@ -58,7 +63,9 @@ type registrationWorld struct {
 	compiled   []string
 	leftOut    map[string]bool
 	answers    map[string]func() error
+	calledAs   map[string]string
 	depsPanic  map[string]string
+	noPlugin   map[string]bool
 	built      []string
 	received   map[string]laneDeps
 	registered []string
@@ -254,6 +261,16 @@ func (w *registrationWorld) registerFails(id, text string) {
 	w.answers[id] = func() error { return errors.New(text) }
 }
 
+// registerCallsItself makes the Register of id answer a plugin whose ID is name.
+func (w *registrationWorld) registerCallsItself(id, name string) {
+	w.calledAs[id] = name
+}
+
+// registerAnswersNothing makes the Register of id answer no plugin and no error.
+func (w *registrationWorld) registerAnswersNothing(id string) {
+	w.noPlugin[id] = true
+}
+
 // depsPanics makes building the dependencies of id panic with value.
 func (w *registrationWorld) depsPanics(id, value string) {
 	w.depsPanic[id] = value
@@ -279,6 +296,12 @@ func (w *registrationWorld) registerOf(id string) func(laneDeps) (*lanePlugin, e
 			if err := answer(); err != nil {
 				return nil, err
 			}
+		}
+		if w.noPlugin[id] {
+			return nil, nil
+		}
+		if name, ok := w.calledAs[id]; ok {
+			return &lanePlugin{id: name}, nil
 		}
 		return &lanePlugin{id: id}, nil
 	}
@@ -414,6 +437,8 @@ func givenRegistration(sc *godog.ScenarioContext, w *registrationWorld) {
 	sc.Step(`^the application leaves "([^"]*)" out$`, w.leaveOut)
 	sc.Step(`^the Register of "([^"]*)" panics with "([^"]*)"$`, w.registerPanics)
 	sc.Step(`^the Register of "([^"]*)" answers the error "([^"]*)"$`, w.registerFails)
+	sc.Step(`^the Register of "([^"]*)" answers a plugin that calls itself "([^"]*)"$`, w.registerCallsItself)
+	sc.Step(`^the Register of "([^"]*)" answers no plugin$`, w.registerAnswersNothing)
 	sc.Step(`^building the dependencies of "([^"]*)" panics with "([^"]*)"$`, w.depsPanics)
 	givenBuild(sc, w)
 }
@@ -449,7 +474,7 @@ func initializeRegistration(t *testing.T) func(*godog.ScenarioContext) {
 		w := &registrationWorld{
 			t: t, manifests: map[string]map[string]any{}, cfg: registrationConfig, leftOut: map[string]bool{},
 			answers: map[string]func() error{}, depsPanic: map[string]string{}, received: map[string]laneDeps{},
-			sources: map[string]string{},
+			sources: map[string]string{}, calledAs: map[string]string{}, noPlugin: map[string]bool{},
 		}
 		givenRegistration(sc, w)
 		whenRegistration(sc, w)

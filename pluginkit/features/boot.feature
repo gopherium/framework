@@ -37,6 +37,14 @@ Feature: Booting plugins and pausing the one that fails
     Then "events" started
     And the store records "feed" as paused with "pluginkit: feed register panicked: boom"
 
+  Scenario: A plugin that calls itself by another id is paused under its entry's id
+    Given the compiled plugins "events" and "feed"
+    And the Register of "feed" answers a plugin that calls itself "news"
+    When the application boots its plugins
+    Then "events" started
+    And the store records "feed" as paused with "pluginkit: feed register: the plugin calls itself "news""
+    And the store holds no record of "news"
+
   Scenario: A plugin whose migration fails is paused and never starts
     Given the compiled plugins "events" and "feed"
     And the migration of "feed" fails with "schema exploded"

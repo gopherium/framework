@@ -9,6 +9,7 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 - `NewBoot`, `Register`, `Boot.Pause` and `Boot.Started` carry one boot from the records to the start: a plugin seen for the first time is recorded active, inactive and not installed plugins are never registered, a plugin that fails to register, migrate or start is paused, and a paused plugin that starts again is active with no error.
 - A boot whose context ends pauses nothing, and a store read or write that fails is returned to the application.
 - `pluginstoretest.Run` checks any `PluginStore` against the contract, and `pluginstoretest.NewMemory` is a store in memory that keeps it.
+- `RegisterEach` and `Register` take only plugins with an `ID() string` method, and fail at `StepRegister` a plugin whose `ID` is not its entry's id, or a `Register` that answers no plugin, a breaking change.
 
 ## 0.12.0 - 2026-11-07
 

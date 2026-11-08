@@ -106,6 +106,7 @@ type bootWorld struct {
 	seeds        map[string]pluginkit.PluginRecord
 	registerFail map[string]string
 	registerBoom map[string]string
+	calledAs     map[string]string
 	migrateFails map[string]string
 	startFails   map[string]string
 	recordFails  map[string]string
@@ -197,6 +198,9 @@ func (w *bootWorld) registerOf(id string) func(string) (*bootPlugin, error) {
 		if err := w.failure(w.registerFail, id); err != nil {
 			return nil, err
 		}
+		if name, ok := w.calledAs[id]; ok {
+			return &bootPlugin{id: name, world: w}, nil
+		}
 		return &bootPlugin{id: id, world: w}, nil
 	}
 }
@@ -287,6 +291,18 @@ func (w *bootWorld) neverStarted(id string) error {
 	return nil
 }
 
+// noRecordOf checks that the store holds no record of the plugin id.
+func (w *bootWorld) noRecordOf(id string) error {
+	records, err := w.store.inner.Records(w.t.Context())
+	if err != nil {
+		return err
+	}
+	if held, ok := records[id]; ok {
+		return fmt.Errorf("the store holds %+v, want no record of %s", held, id)
+	}
+	return nil
+}
+
 // holds checks that the store holds want.
 func (w *bootWorld) holds(want pluginkit.PluginRecord) error {
 	records, err := w.store.inner.Records(w.t.Context())
@@ -341,9 +357,11 @@ func givenBoot(sc *godog.ScenarioContext, w *bootWorld) {
 	sc.Step(`^the compiled plugins (.+)$`, w.compile)
 	sc.Step(`^the store holds no record$`, w.noRecord)
 	sc.Step(`^the store records (.+) as (active|inactive|not installed)$`, w.seed)
-	sc.Step(`^the store records "([^"]*)" as paused with "([^"]*)"$`, w.pausedWith)
+	sc.Step(`^the store records "([^"]*)" as paused with "(.*)"$`, w.pausedWith)
 	sc.Step(`^the Register of "([^"]*)" fails with "([^"]*)"$`, func(id, text string) { set(w.registerFail, id, text) })
 	sc.Step(`^the Register of "([^"]*)" panics with "([^"]*)"$`, func(id, text string) { set(w.registerBoom, id, text) })
+	sc.Step(`^the Register of "([^"]*)" answers a plugin that calls itself "([^"]*)"$`,
+		func(id, name string) { set(w.calledAs, id, name) })
 	sc.Step(`^the migration of "([^"]*)" fails with "([^"]*)"$`, func(id, text string) { set(w.migrateFails, id, text) })
 	sc.Step(`^the Start of "([^"]*)" fails with "([^"]*)"$`, func(id, text string) { set(w.startFails, id, text) })
 	sc.Step(`^the migration record of "([^"]*)" fails with "([^"]*)"$`,
@@ -362,6 +380,7 @@ func thenBoot(sc *godog.ScenarioContext, w *bootWorld) {
 	sc.Step(`^"([^"]*)" never started$`, w.neverStarted)
 	sc.Step(`^the store records "([^"]*)" as (active|inactive|not installed) with no error$`, w.recordsClean)
 	sc.Step(`^the store was not written$`, w.notWritten)
+	sc.Step(`^the store holds no record of "([^"]*)"$`, w.noRecordOf)
 	sc.Step(`^the Register of "([^"]*)" never ran$`, w.neverRegistered)
 	sc.Step(`^the boot reports that its context ended$`, w.contextEnded)
 	sc.Step(`^the boot fails with: (.+)$`, w.failedWith)
@@ -374,6 +393,7 @@ func initializeBoot(t *testing.T) func(*godog.ScenarioContext) {
 			t: t, seeds: map[string]pluginkit.PluginRecord{}, registerFail: map[string]string{},
 			registerBoom: map[string]string{}, migrateFails: map[string]string{}, startFails: map[string]string{},
 			recordFails: map[string]string{}, rejected: map[string]bool{}, endsOn: map[string]string{},
+			calledAs: map[string]string{},
 		}
 		givenBoot(sc, w)
 		thenBoot(sc, w)

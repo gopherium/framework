@@ -28,7 +28,7 @@ func NewBoot(ctx context.Context, store PluginStore) (*Boot, error) {
 }
 
 // Register records each new entry active, registers the active and paused ones, and pauses each that fails.
-func Register[D, P any](ctx context.Context, boot *Boot, entries []Registration[D, P],
+func Register[D any, P interface{ ID() string }](ctx context.Context, boot *Boot, entries []Registration[D, P],
 	depsFor func(id string) D) (RegisterOutcome[P], error) {
 	wanted, err := admitted(ctx, boot, entries)
 	if err != nil {

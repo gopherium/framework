@@ -3,8 +3,9 @@ Feature: Registering compiled plugins one by one
   every backend plugin's id and Register function, in wiring order, in
   place of one function that registers them all. The application keeps
   the plugins it wants on, builds each one's dependencies from its id,
-  and registers them one by one. A plugin whose Register fails or panics
-  is reported by its id, and the plugins after it still register.
+  and registers them one by one. A plugin whose Register fails or panics,
+  or answers a plugin whose ID is not the entry's id, is reported by the
+  entry's id, and the plugins after it still register.
 
   Scenario: The registration list names each backend plugin in wiring order
     Given the plugin "events" has a backend
@@ -56,6 +57,22 @@ Feature: Registering compiled plugins one by one
     When the application registers each plugin
     Then "events" and "gallery" are registered, in that order
     And "feed" failed at the step "register" with: pluginkit: feed register: the title is too long
+    And the failure of "feed" is not marked as a panic
+
+  Scenario: A plugin that calls itself by another id fails alone
+    Given the compiled plugins "events", "feed" and "gallery"
+    And the Register of "feed" answers a plugin that calls itself "news"
+    When the application registers each plugin
+    Then "events" and "gallery" are registered, in that order
+    And "feed" failed at the step "register" with: pluginkit: feed register: the plugin calls itself "news"
+    And the failure of "feed" is not marked as a panic
+
+  Scenario: A plugin whose Register answers no plugin fails alone
+    Given the compiled plugins "events", "feed" and "gallery"
+    And the Register of "feed" answers no plugin
+    When the application registers each plugin
+    Then "events" and "gallery" are registered, in that order
+    And "feed" failed at the step "register" with: pluginkit: feed register: Register answered no plugin
     And the failure of "feed" is not marked as a panic
 
   Scenario: An error that holds the text of a panic is not marked as a panic
