@@ -59,7 +59,6 @@ Feature: Registering compiled plugins one by one
     And "feed" failed at the step "register" with: pluginkit: feed register: the title is too long
     And the failure of "feed" is not marked as a panic
 
-  @wip
   Scenario: A plugin that calls itself by another id fails alone
     Given the compiled plugins "events", "feed" and "gallery"
     And the Register of "feed" answers a plugin that calls itself "news"

@@ -37,7 +37,6 @@ Feature: Booting plugins and pausing the one that fails
     Then "events" started
     And the store records "feed" as paused with "pluginkit: feed register panicked: boom"
 
-  @wip
   Scenario: A plugin that calls itself by another id is paused under its entry's id
     Given the compiled plugins "events" and "feed"
     And the Register of "feed" answers a plugin that calls itself "news"
