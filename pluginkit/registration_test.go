@@ -18,6 +18,11 @@ type listedPlugin struct {
 	deps listedDeps
 }
 
+// ID returns the id the plugin calls itself.
+func (p *listedPlugin) ID() string {
+	return p.id
+}
+
 // entry is one registration a test lists, its Register noting its call in calls and answering through answer.
 func entry(id string, calls *[]string, answer func() error) pluginkit.Registration[listedDeps, *listedPlugin] {
 	register := func(deps listedDeps) (*listedPlugin, error) {
@@ -135,6 +140,40 @@ func TestRegisterEachGoesOnPastAFailingRegisterAndNamesIt(t *testing.T) {
 			wantEqual(t, "registered", registeredIDs(outcome), []string{"events", "gallery"})
 			wantEqual(t, "failed", failures(outcome), []failureWant{
 				{"feed", pluginkit.StepRegister, tc.panicked, "pluginkit: feed " + tc.text},
+			})
+		})
+	}
+}
+
+func TestRegisterEachFailsAPluginWhoseIDIsNotItsEntrys(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		plugin   *listedPlugin
+		panicked bool
+		text     string
+	}{
+		"another id": {&listedPlugin{id: "news"}, false, `pluginkit: feed register: the plugin calls itself "news"`},
+		"no id":      {&listedPlugin{}, false, `pluginkit: feed register: the plugin calls itself ""`},
+		"no plugin": {
+			nil, true, "pluginkit: feed register panicked: runtime error: invalid memory address or nil pointer dereference",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls []string
+			entries := []pluginkit.Registration[listedDeps, *listedPlugin]{
+				entry("events", &calls, succeeds),
+				{ID: "feed", Register: func(listedDeps) (*listedPlugin, error) { return tc.plugin, nil }},
+			}
+
+			outcome := pluginkit.RegisterEach(entries, depsOf(&calls))
+
+			wantEqual(t, "registered", registeredIDs(outcome), []string{"events"})
+			wantEqual(t, "failed", failures(outcome), []failureWant{
+				{"feed", pluginkit.StepRegister, tc.panicked, tc.text},
 			})
 		})
 	}

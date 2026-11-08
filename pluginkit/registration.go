@@ -2,7 +2,10 @@
 
 package pluginkit
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // Registration is one compiled plugin's manifest id and the function that registers it from its dependencies.
 type Registration[D, P any] struct {
@@ -16,8 +19,10 @@ type RegisterOutcome[P any] struct {
 	Failed     []Failure
 }
 
-// RegisterEach calls each entry's Register with depsFor of its id, each inside its own recover, past any failure.
-func RegisterEach[D, P any](entries []Registration[D, P], depsFor func(id string) D) RegisterOutcome[P] {
+// RegisterEach calls each entry's Register with depsFor of its id inside a recover, past any failure or mismatched ID.
+func RegisterEach[D any, P interface{ ID() string }](
+	entries []Registration[D, P], depsFor func(id string) D,
+) RegisterOutcome[P] {
 	var outcome RegisterOutcome[P]
 	for _, entry := range entries {
 		plugin, err := register(entry, depsFor(entry.ID))
@@ -31,11 +36,17 @@ func RegisterEach[D, P any](entries []Registration[D, P], depsFor func(id string
 }
 
 // register calls entry's Register with deps inside a recover, naming the plugin in any failure.
-func register[D, P any](entry Registration[D, P], deps D) (plugin P, err error) {
+func register[D any, P interface{ ID() string }](entry Registration[D, P], deps D) (plugin P, err error) {
 	err = guarded(context.Background(), entry.ID+" "+string(StepRegister), func(context.Context) error {
 		var registerErr error
 		plugin, registerErr = entry.Register(deps)
-		return registerErr
+		if registerErr != nil {
+			return registerErr
+		}
+		if id := plugin.ID(); id != entry.ID {
+			return fmt.Errorf("the plugin calls itself %q", id)
+		}
+		return nil
 	})
 	return plugin, err
 }
