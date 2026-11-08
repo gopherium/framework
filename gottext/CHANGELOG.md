@@ -11,6 +11,7 @@ from CI.
 
 - `mismatched` reads the tags a message carries, so a translation that adds, drops, renames or repeats one is named.
 - `formatTime` writes a bare wall clock time, such as `09:30`, as the time it names for every reader, instead of Invalid Date.
+- `formatDate` writes a bare calendar day with only the parts it is handed, and keeps its year in a calendar of its own.
 
 ## [0.8.0] - 2026-11-02
 
