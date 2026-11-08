@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gopherium/framework/pluginkit"
 )
@@ -213,6 +214,33 @@ func TestProtectCutsAPanicAfterTheMiddlewareBeganTheAnswer(t *testing.T) {
 				t.Errorf("reported %+v, want it not answered", got)
 			}
 		})
+	}
+}
+
+func TestProtectReportsAPanicAfterTheMiddlewareTimedOut(t *testing.T) {
+	t.Parallel()
+
+	reported := make(chan pluginkit.RouteFailure, 1)
+	settings := routeSettings(&routeReport{})
+	settings.Report = func(failure pluginkit.RouteFailure) { reported <- failure }
+	settings.Wrap = func(next http.Handler) http.Handler { return http.TimeoutHandler(next, time.Millisecond, "too slow") }
+	plugin := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+		panicWith("boom")
+	})
+	recorder := httptest.NewRecorder()
+
+	escaped := serveCatching(pluginkit.Protect("feed", plugin, nil, settings), recorder, getItems())
+
+	if escaped != nil {
+		t.Errorf("the server got the panic %v, want none", escaped)
+	}
+	wantRecorded(t, recorder, http.StatusServiceUnavailable, "too slow")
+	select {
+	case failure := <-reported:
+		wantFailureText(t, failure, "pluginkit: feed route panicked: boom")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the panic after the timeout was never reported")
 	}
 }
 

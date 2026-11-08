@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"sync/atomic"
 )
 
 // RouteFailure is one panic of one plugin's handler while it served one request.
@@ -44,7 +45,7 @@ func (h *recovered) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // begunBefore reports whether the writer Protect handed the middleware serving r saw the answer begin.
 func begunBefore(r *http.Request) bool {
 	under, ok := r.Context().Value(middlewareWriter{}).(*routeWriter)
-	return ok && under.begun
+	return ok && under.begun.Load()
 }
 
 // finish recovers a panic of the plugin's handler, reports it, then answers it or cuts the answer the plugin began.
@@ -59,7 +60,7 @@ func (h *recovered) finish(writer *routeWriter, header http.Header, r *http.Requ
 	if caught == http.ErrAbortHandler {
 		panic(caught)
 	}
-	begun := writer.begun || begunBefore(r)
+	begun := writer.begun.Load() || begunBefore(r)
 	h.settings.Report(RouteFailure{
 		ID: h.id, Method: r.Method, Path: r.URL.Path, Answered: !begun,
 		Err: panicError("pluginkit: " + h.id + " route panicked: " + describe(caught)), Stack: string(debug.Stack()),
@@ -72,12 +73,12 @@ func (h *recovered) finish(writer *routeWriter, header http.Header, r *http.Requ
 	h.settings.Answer.ServeHTTP(writer.ResponseWriter, r)
 }
 
-// routeWriter is the writer a plugin's handler answers through, noting whether its answer began.
+// routeWriter is the writer a plugin's handler, or the middleware before it, answers through, noting when it began.
 type routeWriter struct {
 	http.ResponseWriter
 	// http1 makes a 101 status begin the answer, as only HTTP/1 switches protocols with it.
 	http1    bool
-	begun    bool
+	begun    atomic.Bool
 	hijacked net.Conn
 }
 
@@ -85,7 +86,7 @@ type routeWriter struct {
 func (w *routeWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 	if w.beginsAnswer(status) {
-		w.begun = true
+		w.begun.Store(true)
 	}
 }
 
@@ -99,7 +100,7 @@ func (w *routeWriter) beginsAnswer(status int) bool {
 
 // Write writes part of the body, noting that the answer began.
 func (w *routeWriter) Write(body []byte) (int, error) {
-	w.begun = true
+	w.begun.Store(true)
 	return w.ResponseWriter.Write(body)
 }
 
@@ -110,7 +111,7 @@ func (w *routeWriter) Flush() {
 
 // FlushError sends what the handler wrote so far, writing the status 200 first when nothing began the answer.
 func (w *routeWriter) FlushError() error {
-	if !w.begun {
+	if !w.begun.Load() {
 		w.WriteHeader(http.StatusOK)
 	}
 	return http.NewResponseController(w.ResponseWriter).Flush()
@@ -120,7 +121,8 @@ func (w *routeWriter) FlushError() error {
 func (w *routeWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	conn, buffered, err := http.NewResponseController(w.ResponseWriter).Hijack()
 	if err == nil {
-		w.begun, w.hijacked = true, conn
+		w.begun.Store(true)
+		w.hijacked = conn
 	}
 	return conn, buffered, err
 }
