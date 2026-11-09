@@ -37,10 +37,20 @@ const (
 	snapshotLockFile = ".dbkit-snapshot.lock"
 	// snapshotLockName names the snapshot lock in its errors.
 	snapshotLockName = "snapshot lock"
+	// localFolderAdvice tells the owner of a refused snapshot folder what to do instead.
+	localFolderAdvice = "write snapshots to a local folder, then copy them off the machine"
+	// ownerReadWrite holds the owner's read and write permission bits.
+	ownerReadWrite fs.FileMode = 0o600
 )
 
-// ErrSnapshotRunning is the error of a snapshot into a folder another snapshot is writing into.
-var ErrSnapshotRunning = errors.New("dbkit: another snapshot is writing into this folder")
+var (
+	// ErrSnapshotRunning is the error of a snapshot into a folder another snapshot is writing into.
+	ErrSnapshotRunning = errors.New("dbkit: another snapshot is writing into this folder")
+	// ErrSnapshotExists is the error of a snapshot whose target a file already holds.
+	ErrSnapshotExists = errors.New("dbkit: the snapshot target already exists")
+	// ErrSnapshotUnsynced is the error of a snapshot whose copy is in place but whose folder failed to sync.
+	ErrSnapshotUnsynced = errors.New("dbkit: the snapshot is in place but its folder failed to sync")
+)
 
 var (
 	// syncFile writes the data of an open file to its disk.
@@ -51,15 +61,46 @@ var (
 	errNoSnapshotHandle = errors.New("dbkit: NewSnapshotter needs a database handle, got nil")
 )
 
+// SnapshotOptions configures the snapshots of one Snapshotter.
+type SnapshotOptions struct {
+	// Margin is the bytes a snapshot leaves free in its target folder beside the copy, 0 or more.
+	Margin int64
+	// Mode narrows the permission bits of each copy below the live file's and keeps the owner's read and write, or is 0.
+	Mode fs.FileMode
+}
+
+// check returns the error for options Snapshot refuses.
+func (o SnapshotOptions) check() error {
+	switch {
+	case o.Margin < 0:
+		return fmt.Errorf("dbkit: the snapshot option Margin must be 0 or more, got %d", o.Margin)
+	case o.Mode&^fs.ModePerm != 0:
+		return fmt.Errorf("dbkit: the snapshot option Mode must hold permission bits only, got %v", o.Mode)
+	case o.Mode != 0 && o.Mode&ownerReadWrite != ownerReadWrite:
+		return fmt.Errorf("dbkit: the snapshot option Mode must keep the owner's read and write bits, got %v", o.Mode)
+	}
+	return nil
+}
+
+// copyMode returns the permission bits of a copy of a live file with the mode live.
+func (o SnapshotOptions) copyMode(live fs.FileMode) fs.FileMode {
+	if o.Mode == 0 {
+		return live.Perm()
+	}
+	return live.Perm() & o.Mode
+}
+
 // snapshotter writes snapshots of the database of one handle.
 type snapshotter struct {
 	// db is the handle whose database is copied.
 	db *sql.DB
+	// opts configures each snapshot.
+	opts SnapshotOptions
 }
 
-// NewSnapshotter returns a Snapshotter of the database of db.
-func NewSnapshotter(db *sql.DB) dbkit.Snapshotter {
-	return &snapshotter{db: db}
+// NewSnapshotter returns a Snapshotter of the database of db with opts.
+func NewSnapshotter(db *sql.DB, opts SnapshotOptions) dbkit.Snapshotter {
+	return &snapshotter{db: db, opts: opts}
 }
 
 // Snapshot moves a checked copy of the database to target and checkpoints the log, with Path set once target holds it.
@@ -67,11 +108,14 @@ func (s *snapshotter) Snapshot(ctx context.Context, target string) (dbkit.Snapsh
 	if s.db == nil {
 		return dbkit.Snapshot{}, errNoSnapshotHandle
 	}
+	if err := s.opts.check(); err != nil {
+		return dbkit.Snapshot{}, err
+	}
 	if err := s.copyLocked(ctx, target); err != nil {
 		return dbkit.Snapshot{}, err
 	}
 	if err := syncPath(filepath.Dir(target)); err != nil {
-		return dbkit.Snapshot{Path: target}, fmt.Errorf("dbkit: sync the folder of the snapshot %s: %w", target, err)
+		return dbkit.Snapshot{Path: target}, fmt.Errorf("%w: %s: %w", ErrSnapshotUnsynced, target, err)
 	}
 	c, err := s.checkpoint(ctx)
 	if err != nil {
@@ -98,32 +142,36 @@ func (s *snapshotter) prepare(ctx context.Context, target string) (string, *file
 	if err := checkTarget(target); err != nil {
 		return "", nil, err
 	}
-	if err := checkRootFolder(filepath.Dir(target)); err != nil {
+	folder := filepath.Dir(target)
+	if err := checkFolders(folder); err != nil {
 		return "", nil, err
 	}
 	path, live, err := s.liveFile(ctx)
 	if err != nil {
 		return "", nil, err
 	}
-	folder := filepath.Dir(target)
 	locker := &fileLocker{name: snapshotLockName, path: filepath.Join(folder, snapshotLockFile), database: path}
 	if err := locker.tryLock(ErrSnapshotRunning); err != nil {
 		return "", nil, err
 	}
-	partial, err := startCopy(target, live)
+	partial, err := s.startCopy(ctx, target, live)
 	if err != nil {
 		return "", nil, errors.Join(err, locker.unlock())
 	}
 	return partial, locker, nil
 }
 
-// startCopy clears the stale copies beside target and creates its empty copy, and returns the copy's path.
-func startCopy(target string, live fs.FileInfo) (string, error) {
-	if err := removePartials(filepath.Dir(target), live); err != nil {
+// startCopy clears the stale copies beside target, checks the free space, creates the empty copy and returns its path.
+func (s *snapshotter) startCopy(ctx context.Context, target string, live fs.FileInfo) (string, error) {
+	folder := filepath.Dir(target)
+	if err := removePartials(folder, live); err != nil {
+		return "", err
+	}
+	if err := s.checkSpace(ctx, folder); err != nil {
 		return "", err
 	}
 	partial := target + partialSuffix
-	if err := createEmpty(partial, live.Mode().Perm()); err != nil {
+	if err := createEmpty(partial, s.opts.copyMode(live.Mode())); err != nil {
 		return "", fmt.Errorf("dbkit: create the snapshot copy %s: %w", partial, err)
 	}
 	return partial, nil
@@ -166,6 +214,9 @@ func (s *snapshotter) writeCopy(ctx context.Context, partial, target string) err
 	switch {
 	case errors.Is(err, fs.ErrExist):
 		return existingTarget(target)
+	case errors.Is(err, noReplaceUnsupported):
+		return fmt.Errorf("dbkit: the file system of the snapshot folder %s cannot move a file without replacing one, "+
+			"%s: %w", filepath.Dir(target), localFolderAdvice, err)
 	case err != nil:
 		return fmt.Errorf("dbkit: move the snapshot copy to %s: %w", target, err)
 	}
@@ -174,7 +225,7 @@ func (s *snapshotter) writeCopy(ctx context.Context, partial, target string) err
 
 // existingTarget returns the error for a target a file already holds.
 func existingTarget(target string) error {
-	return fmt.Errorf("dbkit: the snapshot target %s already exists", target)
+	return fmt.Errorf("%w: %s", ErrSnapshotExists, target)
 }
 
 // checkTarget returns the error for a target Snapshot refuses.
@@ -199,6 +250,22 @@ func checkTarget(target string) error {
 		return existingTarget(target)
 	case !errors.Is(err, fs.ErrNotExist):
 		return fmt.Errorf("dbkit: check the snapshot target: %w", err)
+	}
+	return nil
+}
+
+// checkFolders returns the error for a snapshot folder Snapshot refuses, or for a folder above it as root.
+func checkFolders(folder string) error {
+	if err := checkRootFolder(folder); err != nil {
+		return err
+	}
+	name, err := snapshotSystem(folder)
+	switch {
+	case err != nil:
+		return fmt.Errorf("dbkit: read the file system of the snapshot folder %s: %w", folder, err)
+	case name != "":
+		return fmt.Errorf("dbkit: the snapshot folder %s is on a network or FUSE file system (%s), %s",
+			folder, name, localFolderAdvice)
 	}
 	return nil
 }

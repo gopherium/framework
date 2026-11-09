@@ -26,6 +26,8 @@ const (
 	internalLateTarget = "a file written between the copy and the move"
 	// internalCheckpointDeadline is the deadline of a checkpoint behind a held writer.
 	internalCheckpointDeadline = 100 * time.Millisecond
+	// internalWorldReadMode is the mode of a live file its owner reads and writes and everyone reads.
+	internalWorldReadMode fs.FileMode = 0o644
 )
 
 var (
@@ -96,6 +98,36 @@ func internalMustHoldOnly(t *testing.T, folder string, want ...string) {
 	}
 	if !slices.Equal(names, want) {
 		t.Errorf("ReadDir(%s) = %v, want %v", folder, names, want)
+	}
+}
+
+func TestTheEmptyCopyHasTheNarrowedModeBeforeItHoldsData(t *testing.T) {
+	db, folder := internalSnapshotOpen(t)
+	s := &snapshotter{db: db, opts: SnapshotOptions{Mode: ownerReadWrite}}
+	path, _, err := s.liveFile(t.Context())
+	if err != nil {
+		t.Fatalf("liveFile() error = %v, want nil", err)
+	}
+	if err := os.Chmod(path, internalWorldReadMode); err != nil {
+		t.Fatalf("Chmod(%s) error = %v, want nil", path, err)
+	}
+	live, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(%s) error = %v, want nil", path, err)
+	}
+
+	partial, err := s.startCopy(t.Context(), filepath.Join(folder, "copy.db"), live)
+
+	if err != nil {
+		t.Fatalf("startCopy() error = %v, want nil", err)
+	}
+	info, err := os.Lstat(partial)
+	if err != nil {
+		t.Fatalf("Lstat(%s) error = %v, want nil", partial, err)
+	}
+	if info.Mode().Perm() != ownerReadWrite || info.Size() != 0 {
+		t.Errorf("the copy has the mode %v and %d bytes, want the mode %v and none", info.Mode().Perm(), info.Size(),
+			ownerReadWrite)
 	}
 }
 
@@ -212,7 +244,7 @@ type internalAnswer struct {
 // internalSnapshotTo runs a snapshot of db to target and returns what it answered.
 func internalSnapshotTo(t *testing.T, db *sql.DB, target string) internalAnswer {
 	t.Helper()
-	snap, err := NewSnapshotter(db).Snapshot(t.Context(), target)
+	snap, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), target)
 	return internalAnswer{snap: snap, err: err}
 }
 
@@ -255,7 +287,7 @@ func TestSnapshotSyncsTheCopyBeforeTheMoveAndTheFolderAfter(t *testing.T) {
 	}
 	t.Cleanup(func() { syncFile, rename = keptSync, keptRename })
 
-	if _, err := NewSnapshotter(db).Snapshot(t.Context(), target); err != nil {
+	if _, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), target); err != nil {
 		t.Fatalf("Snapshot() error = %v, want nil", err)
 	}
 
@@ -307,7 +339,7 @@ func TestASecondSnapshotInTheFolderKeepsTheFirstCopy(t *testing.T) {
 	t.Cleanup(func() { rename = kept })
 	result := make(chan error, 1)
 	go func() {
-		_, err := NewSnapshotter(db).Snapshot(context.Background(), first)
+		_, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(context.Background(), first)
 		result <- err
 	}()
 	select {
@@ -339,13 +371,16 @@ func TestSnapshotKeepsATargetMadeDuringTheCopy(t *testing.T) {
 	}
 	t.Cleanup(func() { rename = kept })
 
-	got, err := NewSnapshotter(db).Snapshot(t.Context(), target)
+	got, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), target)
 
 	if got != (dbkit.Snapshot{}) {
 		t.Errorf("Snapshot() = %+v, want no snapshot", got)
 	}
-	if read, want := fmt.Sprint(err), "dbkit: the snapshot target "+target+" already exists"; read != want {
+	if read, want := fmt.Sprint(err), "dbkit: the snapshot target already exists: "+target; read != want {
 		t.Errorf("Snapshot() error = %s, want %q", read, want)
+	}
+	if !errors.Is(err, ErrSnapshotExists) {
+		t.Errorf("Snapshot() error = %v, want one matching ErrSnapshotExists", err)
 	}
 	if data, err := os.ReadFile(target); err != nil || string(data) != internalLateTarget {
 		t.Errorf("the target holds %d bytes, %v after the snapshot, want the %d bytes written during the copy",
@@ -362,6 +397,9 @@ func TestAFailedFolderSyncKeepsTheCopy(t *testing.T) {
 	got := internalSnapshotTo(t, db, target)
 
 	internalMustAnswer(t, got, internalAnswer{snap: dbkit.Snapshot{Path: target}, err: errSnapshotSyncFailed},
-		"dbkit: sync the folder of the snapshot "+target+": "+errSnapshotSyncFailed.Error())
+		ErrSnapshotUnsynced.Error()+": "+target+": "+errSnapshotSyncFailed.Error())
+	if !errors.Is(got.err, ErrSnapshotUnsynced) {
+		t.Errorf("Snapshot() error = %v, want one matching ErrSnapshotUnsynced", got.err)
+	}
 	internalMustHoldOnly(t, folder, snapshotLockFile, "copy.db")
 }

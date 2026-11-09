@@ -8,6 +8,26 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- `Fingerprint`, a SHA-256 of the schema and the rows of the main database, read in one read-only transaction, without the rows a `Leave` names.
+- `ErrNoSpace` and `SpaceError`, the error of a snapshot whose target folder has less free space than the copy and the margin.
+- `ErrSnapshotExists`, which a snapshot error matches when a file already holds the target.
+- `ErrSnapshotUnsynced`, which a snapshot error matches when the copy is in place but its folder failed to sync.
+- `SnapshotOptions.Mode`, which narrows the permission bits of each copy below those of the live file and must keep the owner's read and write.
+
+### Changed
+
+- **Breaking.** `NewSnapshotter` takes `SnapshotOptions`. Pass `sqlite.SnapshotOptions{}` for no margin and the live file's mode.
+- **Breaking.** A snapshot fails with `ErrNoSpace` before it writes the copy when the target folder has less free space than the used pages of the database plus `SnapshotOptions.Margin`.
+- **Breaking.** `Snapshot` refuses a target folder on a network file system, or on Linux a FUSE one, before it takes the lock, so a missing folder now fails at that read unless the snapshot runs as root.
+- **Breaking.** `Open` and `Snapshot` also refuse IBRIX, StorNext, Oracle ACFS and the VMware shared folders of the old vmhgfs kernel module on Linux, and every file system macOS does not mark local.
+- A snapshot whose folder cannot move a file without replacing one fails with an error that names the folder and says to write snapshots to a local folder.
+- The error of a target that already exists reads "dbkit: the snapshot target already exists: " and the target.
+- The error of a copy in place whose folder failed to sync reads "dbkit: the snapshot is in place but its folder failed to sync: ", then the target and the cause.
+
 ## [0.4.0] - 2026-10-31
 
 ### Changed

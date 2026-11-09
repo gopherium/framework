@@ -4,6 +4,7 @@ package sqlite
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 	"testing"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/gopherium/framework/dbkit"
 )
 
 // fsReporting returns a statfs that reports the file system magic for every path.
@@ -28,18 +31,27 @@ func fsSetType[T int32 | int64 | uint32](field *T, magic uint32) {
 	*field = T(magic)
 }
 
-// fsLocal is the ext4 magic number.
-const fsLocal = 0xEF53
+const (
+	// fsLocal is the ext4 magic number.
+	fsLocal = 0xEF53
+	// fsLocalAdvice is what the error of a refused snapshot folder tells its owner to do.
+	fsLocalAdvice = "write snapshots to a local folder, then copy them off the machine"
+)
 
-// fsNetworkAt returns a statfs that reports NFS for path and ext4 for every other path.
-func fsNetworkAt(path string) func(string, *unix.Statfs_t) error {
+// fsReportingAt returns a statfs that reports the file system magic for path and ext4 for every other path.
+func fsReportingAt(path string, magic uint32) func(string, *unix.Statfs_t) error {
 	return func(p string, st *unix.Statfs_t) error {
 		fsSetType(&st.Type, fsLocal)
 		if p == path {
-			fsSetType(&st.Type, 0x6969)
+			fsSetType(&st.Type, magic)
 		}
 		return nil
 	}
+}
+
+// fsNetworkAt returns a statfs that reports NFS for path and ext4 for every other path.
+func fsNetworkAt(path string) func(string, *unix.Statfs_t) error {
+	return fsReportingAt(path, 0x6969)
 }
 
 // fsRecording returns a statfs that reports ext4 for every path and records each path it reads.
@@ -121,6 +133,10 @@ func TestNetworkFileSystemsAreRefused(t *testing.T) {
 		{"GFS2", 0x01161970},
 		{"OrangeFS", 0x20030528},
 		{"Panasas", 0xAAD7AAEA},
+		{"vmhgfs", 0xBACBACBC},
+		{"IBRIX", 0x013111A8},
+		{"StorNext", 0xBEEFDEAD},
+		{"ACFS", 0x61636673},
 	}
 	for _, c := range network {
 		if got, ok := networkSystems[c.magic]; !ok || got != c.name {
@@ -226,6 +242,18 @@ func TestOpenChecksAPlainLocalFileAndItsFolder(t *testing.T) {
 	}
 }
 
+func TestOpenAcceptsAFUSEFolder(t *testing.T) {
+	file := fsFile(t)
+	fsSwap(t, fsReporting(0x65735546))
+
+	db, err := Open("sqlite:"+file, internalOptions())
+
+	if err != nil {
+		t.Fatalf("Open() error = %v, want a FUSE folder accepted", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+}
+
 func TestOpenRefusesAFolderItCannotRead(t *testing.T) {
 	t.Parallel()
 
@@ -245,4 +273,42 @@ func TestALocalFolderIsAccepted(t *testing.T) {
 	if err := checkFolder(t.TempDir()); err != nil {
 		t.Errorf("checkFolder() error = %v, want the test's local folder accepted", err)
 	}
+}
+
+func TestASnapshotRefusesANetworkOrFUSEFolderBeforeItsLock(t *testing.T) {
+	for _, tc := range []struct {
+		// name is the name the error gives the file system.
+		name string
+		// magic is the Statfs_t.Type of the file system.
+		magic uint32
+	}{
+		{name: "NFS", magic: 0x6969},
+		{name: "StorNext", magic: 0xBEEFDEAD},
+		{name: "FUSE", magic: 0x65735546},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, folder := internalSnapshotOpen(t)
+			fsSwap(t, fsReportingAt(folder, tc.magic))
+
+			got := internalSnapshotTo(t, db, filepath.Join(folder, "copy.db"))
+
+			want := "dbkit: the snapshot folder " + folder + " is on a network or FUSE file system (" + tc.name + "), " +
+				fsLocalAdvice
+			if got.snap != (dbkit.Snapshot{}) || fmt.Sprint(got.err) != want {
+				t.Errorf("Snapshot() = %+v, %v, want no snapshot and %q", got.snap, got.err, want)
+			}
+			internalMustHoldOnly(t, folder)
+		})
+	}
+}
+
+func TestAFailedSnapshotFolderReadNamesTheFolder(t *testing.T) {
+	db, folder := internalSnapshotOpen(t)
+	fsSwap(t, func(string, *unix.Statfs_t) error { return unix.EIO })
+
+	got := internalSnapshotTo(t, db, filepath.Join(folder, "copy.db"))
+
+	internalMustAnswer(t, got, internalAnswer{err: unix.EIO},
+		"dbkit: read the file system of the snapshot folder "+folder+": "+unix.EIO.Error())
+	internalMustHoldOnly(t, folder)
 }
