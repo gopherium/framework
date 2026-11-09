@@ -54,6 +54,51 @@ test('writes a date with the options it is handed in the format locale', () => {
 	expect(formatDate(new Date(2026, 6, 30), { month: 'long' })).toBe('julio')
 })
 
+test('writes a bare calendar day with only the parts it is handed in the format locale', () => {
+	rememberFormatLocale('es-ES')
+	vi.stubEnv('TZ', 'UTC')
+
+	expect(formatDate('2026-09-30', { month: 'long', year: 'numeric' })).toBe('septiembre de 2026')
+	expect(formatDate('2026-09-30', { month: 'short', year: 'numeric' })).toBe(
+		formatDate('2026-09-30T12:00:00Z', { month: 'short', year: 'numeric' }),
+	)
+})
+
+test('keeps the year of a bare calendar day in a calendar of its own', () => {
+	rememberFormatLocale('es-ES-u-ca-chinese')
+	vi.stubEnv('TZ', 'UTC')
+
+	expect(formatDate('2026-08-20')).toContain('2026')
+	expect(formatDate('2026-08-20')).toBe(formatDate('2026-08-20T12:00:00Z'))
+})
+
+test.each<Intl.DateTimeFormatOptions>([
+	{ calendar: 'chinese' },
+	{ numberingSystem: 'arab' },
+	{ era: 'long', year: 'numeric' },
+	{ weekday: 'long', day: 'numeric' },
+	{ day: 'numeric', hour: 'numeric' },
+	{ day: 'numeric', hour: 'numeric', minute: '2-digit' },
+	{ day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' },
+	{ day: 'numeric', second: '2-digit', fractionalSecondDigits: 3 },
+	{ day: 'numeric', hour: 'numeric', dayPeriod: 'long' },
+	{ day: 'numeric', hour: 'numeric', hour12: false },
+	{ day: 'numeric', hour: 'numeric', hourCycle: 'h23' },
+	{ day: 'numeric', timeZoneName: 'short' },
+])('writes a bare calendar day handed %o as midnight UTC on that day', (options) => {
+	rememberFormatLocale('en-US')
+	vi.stubEnv('TZ', 'UTC')
+
+	expect(formatDate('2026-09-01', options)).toBe(formatDate('2026-09-01T00:00:00Z', options))
+})
+
+test('refuses a time style on a bare calendar day as on a timestamp', () => {
+	rememberFormatLocale('en-US')
+
+	expect(() => formatDate('2026-09-01', { timeStyle: 'short' })).toThrow(TypeError)
+	expect(() => formatDate('2026-09-01T00:00:00Z', { timeStyle: 'short' })).toThrow(TypeError)
+})
+
 test('writes a time as two digit hours and minutes on the es-ES clock', () => {
 	rememberFormatLocale('es-ES')
 	vi.stubEnv('TZ', 'UTC')

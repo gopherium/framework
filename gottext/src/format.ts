@@ -17,6 +17,29 @@ const DAY: Intl.DateTimeFormatOptions = { day: '2-digit', month: '2-digit', year
 /** CLOCK is how a time is written. */
 const CLOCK: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' }
 
+/** DATE_OPTIONS names every option a date format reads, other than its time zone. */
+const DATE_OPTIONS = [
+	'calendar',
+	'dateStyle',
+	'day',
+	'dayPeriod',
+	'era',
+	'formatMatcher',
+	'fractionalSecondDigits',
+	'hour',
+	'hour12',
+	'hourCycle',
+	'localeMatcher',
+	'minute',
+	'month',
+	'numberingSystem',
+	'second',
+	'timeStyle',
+	'timeZoneName',
+	'weekday',
+	'year',
+] as const satisfies readonly (keyof Intl.DateTimeFormatOptions)[]
+
 /**
  * Stores the locale dates, times, numbers and money are written in.
  * @param locale - The locale to write in, or undefined to forget it.
@@ -45,18 +68,17 @@ function writeDay(at: Date | string, locale: string, options: Intl.DateTimeForma
 		return ''
 	}
 	const day = typeof at === 'string' && CALENDAR_DAY.test(at)
-	return new Date(at).toLocaleDateString(locale, day ? inUTC(locale, options) : options)
+	return new Date(at).toLocaleDateString(locale, day ? inUTC(options) : options)
 }
 
 /**
- * Returns the options a caller handed as a date format resolves them, showing UTC.
- * @param locale - The locale the date is written in.
+ * Returns the date options a caller handed, showing UTC.
  * @param options - The options the caller handed.
  * @returns The options a bare calendar day is shown with.
  */
-function inUTC(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
-	const resolved = new Intl.DateTimeFormat(locale, options).resolvedOptions()
-	return { ...resolved, timeZone: 'UTC' } as Intl.DateTimeFormatOptions
+function inUTC(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
+	const handed = Object.fromEntries(DATE_OPTIONS.map((name) => [name, options[name]]))
+	return { ...handed, timeZone: 'UTC' } as Intl.DateTimeFormatOptions
 }
 
 /**
