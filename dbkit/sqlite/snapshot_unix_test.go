@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/gopherium/framework/dbkit"
-	"github.com/gopherium/framework/dbkit/sqlite"
 )
 
 // snapshotListOnlyMode is the mode of a folder its owner may enter and write in but never list.
@@ -52,7 +51,7 @@ func TestSnapshotKeepsTheJournalOfALiveDatabaseNamedAsACopy(t *testing.T) {
 	mustExist(t, journal)
 	target := filepath.Join(folder, "copy.db")
 
-	got, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), target)
+	got, err := snapshotOf(db).Snapshot(t.Context(), target)
 
 	if err != nil || got.Path != target {
 		t.Fatalf("Snapshot() = %+v, %v, want the path %s", got, err, target)
@@ -68,12 +67,12 @@ func TestTheSnapshotLockIsPrivateAndKept(t *testing.T) {
 
 	db, folder := snapshotLockOpen(t)
 	lock := filepath.Join(folder, snapshotLock)
-	if _, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "first.db")); err != nil {
+	if _, err := snapshotOf(db).Snapshot(t.Context(), filepath.Join(folder, "first.db")); err != nil {
 		t.Fatalf("Snapshot() of the first target error = %v, want nil", err)
 	}
 	first := migrateLockInfo(t, lock)
 
-	if _, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "second.db")); err != nil {
+	if _, err := snapshotOf(db).Snapshot(t.Context(), filepath.Join(folder, "second.db")); err != nil {
 		t.Fatalf("Snapshot() of the second target error = %v, want nil", err)
 	}
 
@@ -95,7 +94,7 @@ func TestSnapshotRefusesALockPathItCannotOpen(t *testing.T) {
 		t.Fatalf("Mkdir() error = %v, want nil", err)
 	}
 
-	got, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
+	got, err := snapshotOf(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
 
 	want := "dbkit: open the snapshot lock " + lock + ": "
 	if !errors.Is(err, syscall.EISDIR) || !strings.HasPrefix(err.Error(), want) || got != (dbkit.Snapshot{}) {
@@ -114,7 +113,7 @@ func TestSnapshotNeverFollowsALinkAtTheLockPath(t *testing.T) {
 		t.Fatalf("Symlink() error = %v, want nil", err)
 	}
 
-	got, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
+	got, err := snapshotOf(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
 
 	want := "dbkit: open the snapshot lock " + lock + ": "
 	if !errors.Is(err, syscall.ELOOP) || !strings.HasPrefix(err.Error(), want) || got != (dbkit.Snapshot{}) {
@@ -136,7 +135,7 @@ func TestSnapshotRefusesAFIFOAtTheLockPath(t *testing.T) {
 
 	err := migrateAtOnce(t, func() error {
 		var err error
-		got, err = sqlite.NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
+		got, err = snapshotOf(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
 		return err
 	})
 
@@ -158,7 +157,7 @@ func TestSnapshotTakesALockFileThatAlreadyExists(t *testing.T) {
 	before := migrateLockInfo(t, lock)
 	target := filepath.Join(folder, "copy.db")
 
-	got, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), target)
+	got, err := snapshotOf(db).Snapshot(t.Context(), target)
 
 	if err != nil || got.Path != target {
 		t.Fatalf("Snapshot() = %+v, %v, want the path %s", got, err, target)
@@ -181,7 +180,7 @@ func TestSnapshotRefusesAFolderItCannotList(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(folder, 0o700) })
 
-	got, err := sqlite.NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
+	got, err := snapshotOf(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
 
 	want := "dbkit: list the snapshot folder " + folder + ": "
 	if !errors.Is(err, fs.ErrPermission) || !strings.HasPrefix(err.Error(), want) || got != (dbkit.Snapshot{}) {

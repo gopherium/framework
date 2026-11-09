@@ -5,9 +5,13 @@
 package sqlite
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 )
+
+// noReplaceUnsupported is the error of a file system that cannot move a file without replacing one.
+var noReplaceUnsupported = errors.ErrUnsupported
 
 // renameNoReplace refuses every move outside linux and darwin.
 func renameNoReplace(string, string) error {

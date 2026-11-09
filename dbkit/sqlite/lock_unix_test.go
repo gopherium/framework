@@ -597,7 +597,7 @@ func TestAFailedSnapshotLockCallStopsTheSnapshot(t *testing.T) {
 	flock = func(int, int) error { return unix.ENOLCK }
 	t.Cleanup(func() { flock = kept })
 
-	got, err := NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
+	got, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
 
 	want := "dbkit: take the snapshot lock " + filepath.Join(folder, snapshotLockFile) + ": " + unix.ENOLCK.Error()
 	if !errors.Is(err, unix.ENOLCK) || err.Error() != want || got.Path != "" {
@@ -692,7 +692,7 @@ func TestAHardLinkAtTheSnapshotLockIsRefused(t *testing.T) {
 			lockAs(t, tc.uid)
 			tries := lockTries(t)
 
-			got, err := NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
+			got, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), filepath.Join(folder, "copy.db"))
 
 			want := "dbkit: the snapshot lock " + lock + " must be a regular file with one link"
 			if err == nil || err.Error() != want || got.Path != "" {
@@ -735,7 +735,8 @@ func TestTheSnapshotLockOfARunAsRootBelongsToTheDatabaseOwner(t *testing.T) {
 	folder := internalFolder(t)
 	lockRootChain(t, folder)
 
-	if _, err := NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(folder, "copy.db")); err != nil {
+	target := filepath.Join(folder, "copy.db")
+	if _, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), target); err != nil {
 		t.Fatalf("Snapshot() error = %v, want nil", err)
 	}
 
@@ -781,7 +782,7 @@ func TestARunAsRootKeepsTheOwnerOfALockFileThatExists(t *testing.T) {
 		lockAs(t, lockRootUID)
 		target := filepath.Join(folder, "copy.db")
 
-		if got, err := NewSnapshotter(db).Snapshot(t.Context(), target); err != nil || got.Path != target {
+		if got, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), target); err != nil || got.Path != target {
 			t.Fatalf("Snapshot() = %+v, %v, want the path %s", got, err, target)
 		}
 
@@ -935,7 +936,7 @@ func lockUnixMode(mode fs.FileMode) uint32 {
 func lockMustRefuseAsRoot(t *testing.T, db *sql.DB, target, want string) {
 	t.Helper()
 	tries := lockTries(t)
-	got, err := NewSnapshotter(db).Snapshot(t.Context(), target)
+	got, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), target)
 	if err == nil || err.Error() != want || got.Path != "" {
 		t.Errorf("Snapshot(%q) = %+v, %v, want no snapshot and %q", target, got, err, want)
 	}
@@ -945,7 +946,7 @@ func lockMustRefuseAsRoot(t *testing.T, db *sql.DB, target, want string) {
 // lockMustTakeAsRoot fails the test unless a snapshot of db to target answers the path target.
 func lockMustTakeAsRoot(t *testing.T, db *sql.DB, target string) {
 	t.Helper()
-	if got, err := NewSnapshotter(db).Snapshot(t.Context(), target); err != nil || got.Path != target {
+	if got, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), target); err != nil || got.Path != target {
 		t.Fatalf("Snapshot(%q) = %+v, %v, want the path %s", target, got, err, target)
 	}
 }
@@ -1143,7 +1144,7 @@ func TestALinkRemovedBeforeItIsReadStopsASnapshotAsRoot(t *testing.T) {
 	lockAs(t, lockRootUID)
 	tries := lockTries(t)
 
-	got, err := NewSnapshotter(db).Snapshot(t.Context(), filepath.Join(link, "copy.db"))
+	got, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), filepath.Join(link, "copy.db"))
 
 	want := "dbkit: read the link " + link + ": "
 	if !errors.Is(err, fs.ErrNotExist) || !strings.HasPrefix(err.Error(), want) || got.Path != "" {
@@ -1160,7 +1161,7 @@ func TestASnapshotAsAnotherUserReadsNoFolder(t *testing.T) {
 	lockAs(t, lockServiceUID)
 	target := filepath.Join(folder, "copy.db")
 
-	got, err := NewSnapshotter(db).Snapshot(t.Context(), target)
+	got, err := NewSnapshotter(db, SnapshotOptions{}).Snapshot(t.Context(), target)
 
 	if err != nil || got.Path != target {
 		t.Fatalf("Snapshot() = %+v, %v, want the path %s", got, err, target)
