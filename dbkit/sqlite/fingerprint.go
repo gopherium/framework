@@ -25,11 +25,15 @@ const (
 	// schemaRead reads each object of the main schema, in name order.
 	schemaRead = "SELECT type, name, tbl_name, ifnull(sql, '') FROM main.sqlite_schema WHERE " + notInternal +
 		" ORDER BY name, type"
-	// tableRead reads each table and shadow table of the main schema with whether it has no rowid, in name order.
-	tableRead = "SELECT name, wr FROM pragma_table_list WHERE schema = 'main' AND type IN ('table', 'shadow') AND " +
-		notInternal + " ORDER BY name"
-	// columnRead reads the columns of the table named by its one argument with their key position, in order.
-	columnRead = "SELECT name, pk FROM pragma_table_info(?, 'main') ORDER BY cid"
+	// tableRead reads each table of the main schema with whether it has no rowid and its type, in name order.
+	tableRead = "SELECT name, wr, type FROM pragma_table_list WHERE schema = 'main' " +
+		"AND type IN ('table', 'shadow', 'virtual') AND " + notInternal + " ORDER BY name"
+	// columnRead reads the columns of the table its one argument names with their key position and hidden kind, in order.
+	columnRead = "SELECT name, pk, hidden FROM pragma_table_xinfo(?, 'main') ORDER BY cid"
+	// virtualType is the type pragma_table_list gives a virtual table.
+	virtualType = "virtual"
+	// shadowType is the type pragma_table_list gives a table that holds the data of a virtual table.
+	shadowType = "shadow"
 )
 
 var (
@@ -43,7 +47,7 @@ var (
 
 // Leave names the tables and the rows Fingerprint leaves out, by names whose ASCII letters match in any case.
 type Leave struct {
-	// Tables names the tables whose rows Fingerprint leaves out, while their CREATE text still counts.
+	// Tables names the tables whose rows, not CREATE text, Fingerprint leaves out, a virtual table for its shadow tables.
 	Tables []string
 	// Rows names rows Fingerprint leaves out by the value of one column.
 	Rows []LeaveRows
@@ -51,7 +55,7 @@ type Leave struct {
 
 // LeaveRows names the rows of one table whose column holds one of some values.
 type LeaveRows struct {
-	// Table is the table that holds the rows.
+	// Table is the table that holds the rows, never a virtual table.
 	Table string
 	// Column is the column whose value decides, where a NULL value never matches.
 	Column string
@@ -65,6 +69,10 @@ type fingerprintTable struct {
 	name string
 	// withoutRowid reports that the table has no rowid.
 	withoutRowid bool
+	// virtual reports that the table is a virtual table, whose rows its shadow tables hold.
+	virtual bool
+	// shadow reports that the table holds the data of a virtual table.
+	shadow bool
 }
 
 // fingerprintColumn is one column of a table Fingerprint reads.
@@ -73,6 +81,8 @@ type fingerprintColumn struct {
 	name string
 	// key is the column's position in the primary key, or 0 outside it.
 	key int64
+	// generated reports that the column takes its value from an expression.
+	generated bool
 }
 
 // statement is one query and its arguments.
@@ -113,6 +123,7 @@ func Fingerprint(ctx context.Context, db *sql.DB, leave Leave) (string, error) {
 	if err := leave.check(tables); err != nil {
 		return "", err
 	}
+	tables = slices.DeleteFunc(tables, func(table fingerprintTable) bool { return table.virtual })
 	for _, table := range tables {
 		if err := r.hashTable(ctx, table, leave); err != nil {
 			return "", err
@@ -122,28 +133,57 @@ func Fingerprint(ctx context.Context, db *sql.DB, leave Leave) (string, error) {
 	return hex.EncodeToString(r.h.Sum(nil)), nil
 }
 
-// check returns the error for a table leave names that tables does not hold.
+// check returns the error for a table leave names that tables does not hold, or rows it names in a virtual table.
 func (l Leave) check(tables []fingerprintTable) error {
-	for _, name := range l.names() {
-		if !slices.ContainsFunc(tables, func(table fingerprintTable) bool { return sameName(table.name, name) }) {
-			return fmt.Errorf("dbkit: the fingerprint leaves out the table %q, which the database does not hold", name)
+	for _, name := range l.Tables {
+		if _, err := findTable(tables, name); err != nil {
+			return err
+		}
+	}
+	return l.checkRows(tables)
+}
+
+// checkRows returns the error for rows Rows names in a table tables does not hold, or in a virtual table.
+func (l Leave) checkRows(tables []fingerprintTable) error {
+	for _, rows := range l.Rows {
+		table, err := findTable(tables, rows.Table)
+		if err != nil {
+			return err
+		}
+		if table.virtual {
+			return fmt.Errorf("dbkit: the fingerprint cannot leave out rows of the virtual table %q, "+
+				"leave out the whole table instead", rows.Table)
 		}
 	}
 	return nil
 }
 
-// leavesTable reports whether Tables names the table named table.
-func (l Leave) leavesTable(table string) bool {
+// findTable returns the table of tables named name, or the error that tables holds none.
+func findTable(tables []fingerprintTable, name string) (fingerprintTable, error) {
+	i := slices.IndexFunc(tables, func(table fingerprintTable) bool { return sameName(table.name, name) })
+	if i < 0 {
+		return fingerprintTable{}, fmt.Errorf("dbkit: the fingerprint leaves out the table %q, "+
+			"which the database does not hold", name)
+	}
+	return tables[i], nil
+}
+
+// leavesTable reports whether Tables names table, or the virtual table whose data table holds.
+func (l Leave) leavesTable(table fingerprintTable) bool {
+	if l.namesTable(table.name) {
+		return true
+	}
+	return table.shadow && l.namesTable(shadowOwner(table.name))
+}
+
+// namesTable reports whether Tables names the table named table.
+func (l Leave) namesTable(table string) bool {
 	return slices.ContainsFunc(l.Tables, func(name string) bool { return sameName(name, table) })
 }
 
-// names returns each table leave names.
-func (l Leave) names() []string {
-	names := slices.Clone(l.Tables)
-	for _, rows := range l.Rows {
-		names = append(names, rows.Table)
-	}
-	return names
+// shadowOwner returns the name of the virtual table whose data the shadow table named shadow holds.
+func shadowOwner(shadow string) string {
+	return shadow[:max(strings.LastIndexByte(shadow, '_'), 0)]
 }
 
 // hashSchema writes each object of the main schema to the hash.
@@ -157,23 +197,27 @@ func (r fingerprintRead) hashSchema(ctx context.Context) error {
 	})
 }
 
-// readTables returns each table and shadow table of the main schema, in name order.
+// readTables returns each table, shadow table and virtual table of the main schema, in name order.
 func (r fingerprintRead) readTables(ctx context.Context) ([]fingerprintTable, error) {
 	var tables []fingerprintTable
-	var name string
+	var name, kind string
 	var withoutRowid int64
-	err := r.eachRow(ctx, statement{text: tableRead}, []any{&name, &withoutRowid}, func() {
-		tables = append(tables, fingerprintTable{name: name, withoutRowid: withoutRowid != 0})
+	err := r.eachRow(ctx, statement{text: tableRead}, []any{&name, &withoutRowid, &kind}, func() {
+		tables = append(tables, fingerprintTable{
+			name: name, withoutRowid: withoutRowid != 0, virtual: kind == virtualType, shadow: kind == shadowType,
+		})
 	})
 	return tables, err
 }
 
-// readColumns returns the columns of the table named table, in order.
+// readColumns returns the columns of the table named table, generated ones too, in order.
 func (r fingerprintRead) readColumns(ctx context.Context, table string) ([]fingerprintColumn, error) {
 	var columns []fingerprintColumn
 	var column fingerprintColumn
+	var hidden int64
 	read := statement{text: columnRead, args: []any{table}}
-	err := r.eachRow(ctx, read, []any{&column.name, &column.key}, func() {
+	err := r.eachRow(ctx, read, []any{&column.name, &column.key, &hidden}, func() {
+		column.generated = hidden != 0
 		columns = append(columns, column)
 	})
 	return columns, err
@@ -185,27 +229,39 @@ func (r fingerprintRead) hashTable(ctx context.Context, table fingerprintTable, 
 	if err != nil {
 		return fmt.Errorf("dbkit: read the columns of %q for the fingerprint: %w", table.name, err)
 	}
-	writeTag(r.h, 'T')
-	writeText(r.h, table.name)
-	writeCount(r.h, len(columns))
-	for _, column := range columns {
-		writeText(r.h, column.name)
-	}
+	stored := storedColumns(columns)
+	r.hashColumns(table.name, stored)
 	filter, err := leaveFilter(table.name, columns, leave.Rows)
 	if err != nil {
 		return err
 	}
-	if leave.leavesTable(table.name) {
+	if leave.leavesTable(table) {
 		return nil
 	}
-	read, err := rowRead(table, columns, filter)
+	order, err := rowOrder(table, columns)
 	if err != nil {
 		return err
 	}
-	if err := r.hashRows(ctx, read, len(columns)); err != nil {
+	read, width := rowRead(table, order, stored, filter)
+	if err := r.hashRows(ctx, read, width); err != nil {
 		return fmt.Errorf("dbkit: read the rows of %q for the fingerprint: %w", table.name, err)
 	}
 	return nil
+}
+
+// hashColumns writes the name of the table named table and the names of its columns to the hash.
+func (r fingerprintRead) hashColumns(table string, columns []fingerprintColumn) {
+	writeTag(r.h, 'T')
+	writeText(r.h, table)
+	writeCount(r.h, len(columns))
+	for _, column := range columns {
+		writeText(r.h, column.name)
+	}
+}
+
+// storedColumns returns the columns of columns that take no value from an expression.
+func storedColumns(columns []fingerprintColumn) []fingerprintColumn {
+	return slices.DeleteFunc(slices.Clone(columns), func(c fingerprintColumn) bool { return c.generated })
 }
 
 // hashRows writes each row read reads to the hash, as a storage class and a raw value for each of width columns.
@@ -224,14 +280,14 @@ func (r fingerprintRead) hashRows(ctx context.Context, read statement, width int
 	})
 }
 
-// rowRead returns the statement that reads each row of table filter keeps, as a storage class and raw value per column.
-func rowRead(table fingerprintTable, columns []fingerprintColumn, filter statement) (statement, error) {
-	order, err := rowOrder(table, columns)
-	if err != nil {
-		return statement{}, err
+// rowRead returns the statement that reads each row of table filter keeps in order, and the values it reads per row.
+func rowRead(table fingerprintTable, order string, columns []fingerprintColumn, filter statement) (statement, int) {
+	values, width := rawColumns(columns), len(columns)
+	if !table.withoutRowid {
+		values, width = "typeof("+order+"), "+order+", "+values, width+1
 	}
-	text := "SELECT " + rawColumns(columns) + " FROM main." + quoteName(table.name) + filter.text + " ORDER BY " + order
-	return statement{text: text, args: filter.args}, nil
+	text := "SELECT " + values + " FROM main." + quoteName(table.name) + filter.text + " ORDER BY " + order
+	return statement{text: text, args: filter.args}, width
 }
 
 // rowOrder returns what orders the rows of table, its key columns with no rowid or a rowid alias no column hides.

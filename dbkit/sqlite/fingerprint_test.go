@@ -30,15 +30,20 @@ const (
 	fpSchemaRead = "SELECT type, name, tbl_name, ifnull(sql, '') FROM main.sqlite_schema " +
 		"WHERE (name NOT LIKE 'sqlite\\_%' ESCAPE '\\' OR name = 'sqlite_sequence') ORDER BY name, type"
 	// fpTableRead is the statement Fingerprint reads the table list with.
-	fpTableRead = "SELECT name, wr FROM pragma_table_list WHERE schema = 'main' AND type IN ('table', 'shadow') " +
+	fpTableRead = "SELECT name, wr, type FROM pragma_table_list WHERE schema = 'main' " +
+		"AND type IN ('table', 'shadow', 'virtual') " +
 		"AND (name NOT LIKE 'sqlite\\_%' ESCAPE '\\' OR name = 'sqlite_sequence') ORDER BY name"
 	// fpColumnRead is the statement Fingerprint reads the columns of one table with.
-	fpColumnRead = "SELECT name, pk FROM pragma_table_info(?, 'main') ORDER BY cid"
+	fpColumnRead = "SELECT name, pk, hidden FROM pragma_table_xinfo(?, 'main') ORDER BY cid"
 	// fpOneTable creates a table of one column with no declared type.
 	fpOneTable = "CREATE TABLE fp_one (a)"
 	// fpOneRead is the statement Fingerprint reads the rows of fp_one with.
-	fpOneRead = `SELECT typeof("a"), CASE typeof("a") WHEN 'text' THEN CAST("a" AS BLOB) ELSE "a" END ` +
-		`FROM main."fp_one" ORDER BY rowid`
+	fpOneRead = `SELECT typeof(rowid), rowid, typeof("a"), CASE typeof("a") WHEN 'text' THEN CAST("a" AS BLOB) ` +
+		`ELSE "a" END FROM main."fp_one" ORDER BY rowid`
+	// fpSearchTable creates a full text search table of one column.
+	fpSearchTable = "CREATE VIRTUAL TABLE fp_search USING fts5(body)"
+	// fpGeneratedTable creates a table with a stored and a virtual generated column.
+	fpGeneratedTable = "CREATE TABLE fp_gen (a INTEGER, flag AS (a % 2) STORED, half AS (a / 2) VIRTUAL)"
 )
 
 // fpHex is the form of a fingerprint.
@@ -129,9 +134,59 @@ func TestAWithoutRowidTableHashesInKeyOrder(t *testing.T) {
 func TestAnInsertIntoAVirtualTableMovesTheFingerprint(t *testing.T) {
 	t.Parallel()
 
-	db := fpOpen(t, "CREATE VIRTUAL TABLE fp_search USING fts5(body)")
+	db := fpOpen(t, fpSearchTable)
 
 	fpMustMove(t, db, sqlite.Leave{}, "INSERT INTO fp_search VALUES ('synthetic words')")
+}
+
+func TestAFingerprintNeverReadsAVirtualTable(t *testing.T) {
+	t.Parallel()
+
+	fpOf(t, fpOpen(t, "CREATE VIRTUAL TABLE fp_outside USING fts5(body, content='fp_missing')"), sqlite.Leave{})
+}
+
+func TestALeftOutVirtualTableKeepsTheRowsOfItsShadowTablesOut(t *testing.T) {
+	t.Parallel()
+
+	db := fpOpen(t, fpSearchTable, "CREATE TABLE fp_search_notes (body TEXT)")
+	leave := sqlite.Leave{Tables: []string{"FP_SEARCH"}}
+
+	fpMustStay(t, db, leave, "INSERT INTO fp_search VALUES ('synthetic words')")
+	fpMustMove(t, db, leave, "INSERT INTO fp_search_notes VALUES ('synthetic note')")
+}
+
+func TestLeftOutRowsOfAVirtualTableFail(t *testing.T) {
+	t.Parallel()
+
+	db := fpOpen(t, fpSearchTable)
+
+	fpMustFail(t, db, sqlite.Leave{Rows: []sqlite.LeaveRows{{Table: "fp_search", Column: "body"}}},
+		`dbkit: the fingerprint cannot leave out rows of the virtual table "fp_search", leave out the whole table instead`)
+}
+
+func TestLeftOutRowsMatchAGeneratedColumn(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		// column is the generated column whose value 1 leaves a row out.
+		column string
+		// stay changes a left-out row and keeps it out.
+		stay string
+		// move changes a kept row.
+		move string
+	}{
+		{column: "flag", stay: "UPDATE fp_gen SET a = 3 WHERE a = 1", move: "UPDATE fp_gen SET a = 4 WHERE a = 2"},
+		{column: "half", stay: "UPDATE fp_gen SET a = 3 WHERE a = 2", move: "UPDATE fp_gen SET a = 0 WHERE a = 1"},
+	} {
+		t.Run(tc.column, func(t *testing.T) {
+			t.Parallel()
+			db := fpOpen(t, fpGeneratedTable, "INSERT INTO fp_gen (a) VALUES (1), (2)")
+			leave := sqlite.Leave{Rows: []sqlite.LeaveRows{{Table: "fp_gen", Column: tc.column, Values: []any{1}}}}
+
+			fpMustStay(t, db, leave, tc.stay)
+			fpMustMove(t, db, leave, tc.move)
+		})
+	}
 }
 
 func TestAnIDTakenAndFreedMovesTheFingerprint(t *testing.T) {
@@ -355,6 +410,36 @@ func TestARowidHiddenByOneAliasOrdersByAnother(t *testing.T) {
 	reversed := fpOpen(t, shadowed, "INSERT INTO fp_shadowed VALUES ('a', 'y'), ('b', 'x')")
 
 	fpMustMove(t, db, sqlite.Leave{}, "UPDATE fp_shadowed SET label = 'changed' WHERE label = 'second'")
+	if a, b := fpOf(t, stored, sqlite.Leave{}), fpOf(t, reversed, sqlite.Leave{}); a == b {
+		t.Errorf("Fingerprint() of the same rows stored in two orders = %s, want them apart by the real rowid", a)
+	}
+}
+
+func TestAFingerprintNeverComputesAGeneratedColumn(t *testing.T) {
+	t.Parallel()
+
+	db := fpOpen(t, "CREATE TABLE fp_doc (body TEXT)", "INSERT INTO fp_doc (body) VALUES ('not json')",
+		"ALTER TABLE fp_doc ADD COLUMN title AS (json_extract(body, '$.title')) VIRTUAL")
+
+	fpOf(t, db, sqlite.Leave{})
+}
+
+func TestANewRowidMovesTheFingerprint(t *testing.T) {
+	t.Parallel()
+
+	fpMustMove(t, fpOpen(t, "CREATE TABLE fp_body (body TEXT)", "INSERT INTO fp_body VALUES ('a')"), sqlite.Leave{},
+		"UPDATE fp_body SET rowid = 99")
+	fpMustMove(t, fpOpen(t, "CREATE TABLE fp_shadowed (rowid TEXT, label TEXT)",
+		"INSERT INTO fp_shadowed VALUES ('same', 'first')"), sqlite.Leave{}, "UPDATE fp_shadowed SET _rowid_ = 99")
+}
+
+func TestAGeneratedColumnNamedRowidOrdersByTheRealRowid(t *testing.T) {
+	t.Parallel()
+
+	const generated = "CREATE TABLE fp_genrow (a INTEGER, rowid AS (a * 10))"
+	stored := fpOpen(t, generated, "INSERT INTO fp_genrow (a) VALUES (2), (1)")
+	reversed := fpOpen(t, generated, "INSERT INTO fp_genrow (a) VALUES (1), (2)")
+
 	if a, b := fpOf(t, stored, sqlite.Leave{}), fpOf(t, reversed, sqlite.Leave{}); a == b {
 		t.Errorf("Fingerprint() of the same rows stored in two orders = %s, want them apart by the real rowid", a)
 	}
