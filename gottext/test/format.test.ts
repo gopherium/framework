@@ -56,6 +56,7 @@ test('writes a date with the options it is handed in the format locale', () => {
 
 test('writes a bare calendar day with only the parts it is handed in the format locale', () => {
 	rememberFormatLocale('es-ES')
+	vi.stubEnv('TZ', 'UTC')
 
 	expect(formatDate('2026-09-30', { month: 'long', year: 'numeric' })).toBe('septiembre de 2026')
 	expect(formatDate('2026-09-30', { month: 'short', year: 'numeric' })).toBe(
