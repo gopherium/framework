@@ -10,6 +10,10 @@ Releases of this module are tagged `gonsole/vX.Y.Z`.
 
 ## [Unreleased]
 
+### Changed
+
+- The module needs Go 1.27.4.
+
 ## [0.9.0] - 2026-10-31
 
 ### Added
