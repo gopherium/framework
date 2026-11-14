@@ -12,6 +12,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
 ### Added
 
+- `ErrUnsupportedFileSystem` and `UnsupportedFileSystemError`, the error of a snapshot whose folder is on a network or FUSE file system, or on one that cannot move a file without replacing one.
 - `Fingerprint`, a SHA-256 of the schema and the rows of the main database, read in one read-only transaction, without the rows a `Leave` names.
 - `ErrNoSpace` and `SpaceError`, the error of a snapshot whose target folder has less free space than the copy and the margin.
 - `ErrSnapshotExists`, which a snapshot error matches when a file already holds the target.
