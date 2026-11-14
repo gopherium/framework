@@ -4,7 +4,7 @@ Releases of this module are tagged `goncierge/vX.Y.Z`.
 
 ## Unreleased
 
-- The module needs Go 1.27.3.
+- The module needs Go 1.27.4.
 
 ## 0.1.0 - 2026-10-10
 
