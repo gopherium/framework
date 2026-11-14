@@ -28,6 +28,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - A snapshot whose folder cannot move a file without replacing one fails with an error that names the folder and says to write snapshots to a local folder.
 - The error of a target that already exists reads "dbkit: the snapshot target already exists: " and the target.
 - The error of a copy in place whose folder failed to sync reads "dbkit: the snapshot is in place but its folder failed to sync: ", then the target and the cause.
+- The module needs Go 1.27.4.
 
 ## [0.4.0] - 2026-10-31
 
