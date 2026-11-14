@@ -8,6 +8,12 @@ v0.x, minor releases may contain breaking changes.
 
 Releases of this module are tagged `postgresblob/vX.Y.Z`.
 
+## [Unreleased]
+
+### Changed
+
+- The module needs Go 1.27.4.
+
 ## [0.1.0] - 2026-10-25
 
 ### Added

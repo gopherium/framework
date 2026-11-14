@@ -215,8 +215,7 @@ func (s *snapshotter) writeCopy(ctx context.Context, partial, target string) err
 	case errors.Is(err, fs.ErrExist):
 		return existingTarget(target)
 	case errors.Is(err, noReplaceUnsupported):
-		return fmt.Errorf("dbkit: the file system of the snapshot folder %s cannot move a file without replacing one, "+
-			"%s: %w", filepath.Dir(target), localFolderAdvice, err)
+		return &UnsupportedFileSystemError{Folder: filepath.Dir(target), Err: err}
 	case err != nil:
 		return fmt.Errorf("dbkit: move the snapshot copy to %s: %w", target, err)
 	}
@@ -264,8 +263,7 @@ func checkFolders(folder string) error {
 	case err != nil:
 		return fmt.Errorf("dbkit: read the file system of the snapshot folder %s: %w", folder, err)
 	case name != "":
-		return fmt.Errorf("dbkit: the snapshot folder %s is on a network or FUSE file system (%s), %s",
-			folder, name, localFolderAdvice)
+		return &UnsupportedFileSystemError{Folder: folder, FileSystem: name}
 	}
 	return nil
 }

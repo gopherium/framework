@@ -1,6 +1,6 @@
 module github.com/gopherium/framework/gonsole/auth/sqlite
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/gopherium/framework/dbkit v0.2.0

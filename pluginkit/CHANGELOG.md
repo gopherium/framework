@@ -13,6 +13,7 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 - `Protect` takes the plugin's id and a `RouteSettings`, which holds the middleware as `Wrap`, a breaking change.
 - `Protect` recovers each panic of a plugin's handler, on its public paths too. While nothing went out, `RouteSettings.Answer` answers it, else the connection is cut, and `RouteSettings.Report` receives a `RouteFailure` with the stack.
 - `RoutesEach` reads each plugin's routes and public paths inside a recover, and fails at the new `StepRoutes` a plugin whose `Routes` or `PublicPaths` panics, or whose `Routes` answers no handler.
+- The module needs Go 1.27.4.
 
 ## 0.12.0 - 2026-11-07
 

@@ -321,6 +321,9 @@ func TestAFailedMoveLeavesNoTarget(t *testing.T) {
 
 	internalMustAnswer(t, got, internalAnswer{err: errSnapshotMoveFailed},
 		"dbkit: move the snapshot copy to "+target+": "+errSnapshotMoveFailed.Error())
+	if errors.Is(got.err, ErrUnsupportedFileSystem) {
+		t.Errorf("Snapshot() error = %v, want one that does not match ErrUnsupportedFileSystem", got.err)
+	}
 	internalMustHoldOnly(t, folder, snapshotLockFile)
 }
 

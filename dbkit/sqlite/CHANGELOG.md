@@ -12,6 +12,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
 ### Added
 
+- `ErrUnsupportedFileSystem` and `UnsupportedFileSystemError`, the error of a snapshot whose folder is on a network or FUSE file system, or on one that cannot move a file without replacing one.
 - `Fingerprint`, a SHA-256 of the schema and the rows of the main database, read in one read-only transaction, without the rows a `Leave` names.
 - `ErrNoSpace` and `SpaceError`, the error of a snapshot whose target folder has less free space than the copy and the margin.
 - `ErrSnapshotExists`, which a snapshot error matches when a file already holds the target.
@@ -27,6 +28,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - A snapshot whose folder cannot move a file without replacing one fails with an error that names the folder and says to write snapshots to a local folder.
 - The error of a target that already exists reads "dbkit: the snapshot target already exists: " and the target.
 - The error of a copy in place whose folder failed to sync reads "dbkit: the snapshot is in place but its folder failed to sync: ", then the target and the cause.
+- The module needs Go 1.27.4.
 
 ## [0.4.0] - 2026-10-31
 
