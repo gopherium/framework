@@ -16,7 +16,7 @@ stdlib-only `pluginkit` module so its gqlparser dependency never enters
 
 ### Changed
 
-- The module needs Go 1.27.3.
+- The module needs Go 1.27.4.
 
 ## [0.4.0] - 2026-09-26
 
