@@ -297,6 +297,7 @@ func TestASnapshotRefusesANetworkOrFUSEFolderBeforeItsLock(t *testing.T) {
 			if got.snap != (dbkit.Snapshot{}) || fmt.Sprint(got.err) != want {
 				t.Errorf("Snapshot() = %+v, %v, want no snapshot and %q", got.snap, got.err, want)
 			}
+			fsMustBeUnsupported(t, got.err, UnsupportedFileSystemError{Folder: folder, FileSystem: tc.name})
 			internalMustHoldOnly(t, folder)
 		})
 	}
@@ -310,5 +311,40 @@ func TestAFailedSnapshotFolderReadNamesTheFolder(t *testing.T) {
 
 	internalMustAnswer(t, got, internalAnswer{err: unix.EIO},
 		"dbkit: read the file system of the snapshot folder "+folder+": "+unix.EIO.Error())
+	if errors.Is(got.err, ErrUnsupportedFileSystem) {
+		t.Errorf("Snapshot() error = %v, want one that does not match ErrUnsupportedFileSystem", got.err)
+	}
 	internalMustHoldOnly(t, folder)
+}
+
+func TestTheUnsupportedFileSystemErrorSaysSnapshotsAreNotSupported(t *testing.T) {
+	want := "dbkit: the file system of the snapshot folder does not support snapshots"
+
+	if got := ErrUnsupportedFileSystem.Error(); got != want {
+		t.Errorf("ErrUnsupportedFileSystem.Error() = %q, want %q", got, want)
+	}
+}
+
+// fsMustBeUnsupported fails the test unless err is the UnsupportedFileSystemError want and no other snapshot error.
+func fsMustBeUnsupported(t *testing.T, err error, want UnsupportedFileSystemError) {
+	t.Helper()
+	var unsupported *UnsupportedFileSystemError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("Snapshot() error = %v, want an UnsupportedFileSystemError", err)
+	}
+	if *unsupported != want {
+		t.Errorf("Snapshot() error = %+v, want %+v", *unsupported, want)
+	}
+	if !errors.Is(err, ErrUnsupportedFileSystem) {
+		t.Errorf("Snapshot() error = %v, want one matching ErrUnsupportedFileSystem", err)
+	}
+	for _, other := range []error{ErrNoSpace, ErrSnapshotRunning, ErrSnapshotExists, ErrSnapshotUnsynced} {
+		if errors.Is(err, other) {
+			t.Errorf("Snapshot() error = %v, want one that does not match %v", err, other)
+		}
+	}
+	var space *SpaceError
+	if errors.As(err, &space) {
+		t.Errorf("Snapshot() error = %v, want one that is no SpaceError", err)
+	}
 }
