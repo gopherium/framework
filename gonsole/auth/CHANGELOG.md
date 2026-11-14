@@ -12,7 +12,7 @@ Releases of this module are tagged `gonsole/auth/vX.Y.Z`.
 
 ### Changed
 
-- The module needs Go 1.27.3.
+- The module needs Go 1.27.4.
 
 ## [0.9.0] - 2026-10-18
 
