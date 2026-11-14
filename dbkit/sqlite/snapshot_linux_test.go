@@ -20,5 +20,6 @@ func TestAFolderThatCannotMoveWithoutReplacingSaysSo(t *testing.T) {
 	internalMustAnswer(t, got, internalAnswer{err: unix.EINVAL},
 		"dbkit: the file system of the snapshot folder "+folder+" cannot move a file without replacing one, "+
 			fsLocalAdvice+": "+unix.EINVAL.Error())
+	fsMustBeUnsupported(t, got.err, UnsupportedFileSystemError{Folder: folder, Err: unix.EINVAL})
 	internalMustHoldOnly(t, folder, snapshotLockFile)
 }

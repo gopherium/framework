@@ -82,10 +82,14 @@ func spaceMustFail(t *testing.T, snap dbkit.Snapshot, err error, want SpaceError
 	if !errors.Is(err, ErrNoSpace) {
 		t.Errorf("Snapshot() error = %v, want one matching ErrNoSpace", err)
 	}
-	for _, other := range []error{ErrSnapshotRunning, ErrSnapshotExists, ErrSnapshotUnsynced} {
+	for _, other := range []error{ErrUnsupportedFileSystem, ErrSnapshotRunning, ErrSnapshotExists, ErrSnapshotUnsynced} {
 		if errors.Is(err, other) {
 			t.Errorf("Snapshot() error = %v, want one that does not match %v", err, other)
 		}
+	}
+	var unsupported *UnsupportedFileSystemError
+	if errors.As(err, &unsupported) {
+		t.Errorf("Snapshot() error = %v, want one that is no UnsupportedFileSystemError", err)
 	}
 	if snap != (dbkit.Snapshot{}) {
 		t.Errorf("Snapshot() = %+v, want no snapshot", snap)
