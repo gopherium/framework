@@ -6,6 +6,12 @@
         { "name": "String Heavy Function Arguments", "weight": 0.0 },
         { "name": "Primitive Obsession", "weight": 0.0 }
       ]
+    },
+    {
+      "matching_content_path": "pluginkit/settings/parse.go",
+      "rules": [
+        { "name": "String Heavy Function Arguments", "weight": 0.0 }
+      ]
     }
   ]
 }

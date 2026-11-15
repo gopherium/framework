@@ -13,6 +13,10 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 - `Protect` takes the plugin's id and a `RouteSettings`, which holds the middleware as `Wrap`, a breaking change.
 - `Protect` recovers each panic of a plugin's handler, on its public paths too. While nothing went out, `RouteSettings.Answer` answers it, else the connection is cut, and `RouteSettings.Report` receives a `RouteFailure` with the stack.
 - `RoutesEach` reads each plugin's routes and public paths inside a recover, and fails at the new `StepRoutes` a plugin whose `Routes` or `PublicPaths` panics, or whose `Routes` answers no handler.
+- `settings.Check` checks the settings a plugin declares: seven types (`text`, `count`, `flag`, `duration`, `choice`, `secret`, `lines`), each key lowercase words joined by one underscore and outside the starts the application reserves, whole-number bounds on a count only, the options of a choice, a default for a count, a duration and a choice that its type accepts, a flag default of true or false, no default for a secret, and no `of`. A plugin with settings may not hold two hyphens in a row in its id or end it with one.
+- `settings.Name` names the variable of each setting from the application's prefix, the plugin's id and the key.
+- `Schema.Resolve` works out each value from the environment values the application found, then from the default. An empty value counts as unset, and a value its type rejects is named by its variable.
+- A secret's value is a `settings.Hidden`, which prints, logs and encodes as `set` or `not set`.
 - The module needs Go 1.27.4.
 
 ## 0.12.0 - 2026-11-07

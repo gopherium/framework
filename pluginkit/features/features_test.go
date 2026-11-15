@@ -53,3 +53,11 @@ func TestBoot(t *testing.T) {
 func TestRoutes(t *testing.T) {
 	runFeature(t, "routes.feature", initializeRoutes())
 }
+
+func TestSettings(t *testing.T) {
+	runFeature(t, "settings.feature", initializeSettings())
+}
+
+func TestSettingsDeclarations(t *testing.T) {
+	runFeature(t, "settings-declarations.feature", initializeSettings())
+}
