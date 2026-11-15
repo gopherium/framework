@@ -55,9 +55,9 @@ func TestRoutes(t *testing.T) {
 }
 
 func TestSettings(t *testing.T) {
-	runFeature(t, "settings.feature", func(*godog.ScenarioContext) {})
+	runFeature(t, "settings.feature", initializeSettings())
 }
 
 func TestSettingsDeclarations(t *testing.T) {
-	runFeature(t, "settings-declarations.feature", func(*godog.ScenarioContext) {})
+	runFeature(t, "settings-declarations.feature", initializeSettings())
 }

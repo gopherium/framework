@@ -10,7 +10,6 @@ Feature: Checking the settings a plugin declares
     Given the application names plugin variables under "APP_PLUGIN_"
     And the application reserves the key starts "job_" and "db_"
 
-  @wip
   Scenario: A plugin that declares one setting of each type passes the check
     Given the plugin "notes" declares these settings:
       | key      | type     | default | min | max | options        |
@@ -24,7 +23,6 @@ Feature: Checking the settings a plugin declares
     When the settings of "notes" are checked
     Then the settings pass the check
 
-  @wip
   Scenario Outline: A declaration outside the rules is rejected with its reason
     Given the plugin "notes" declares <declaration>
     When the settings of "notes" are checked
@@ -55,14 +53,12 @@ Feature: Checking the settings a plugin declares
       | a secret "api_key" with the default "key-for-example"               | settings[0] api_key: a secret takes no default, because plugin.json is public                    |
       | a text "title" that names the content type "post"                   | settings[0] title: a text setting takes no of field                                              |
 
-  @wip
   Scenario: The rejection of a secret's default never quotes it
     Given the plugin "notes" declares a secret "api_key" with the default "key-for-example"
     When the settings of "notes" are checked
     Then the check rejects them with "settings[0] api_key: a secret takes no default, because plugin.json is public"
     And the reason does not hold "key-for-example"
 
-  @wip
   Scenario Outline: A plugin with settings keeps its id clear of doubled and trailing hyphens
     Given the plugin "<id>" declares the text setting "title"
     When the settings of "<id>" are checked
@@ -73,7 +69,6 @@ Feature: Checking the settings a plugin declares
       | notes--pro |
       | notes-     |
 
-  @wip
   Scenario: A plugin with no settings keeps any id the wiring takes
     Given the plugin "notes--pro" declares no settings
     When the settings of "notes--pro" are checked
