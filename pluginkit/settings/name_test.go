@@ -27,22 +27,44 @@ func TestNameJoinsThePrefixTheIDAndTheKeyInCapitals(t *testing.T) {
 func TestNameNeverGivesTwoSettingsOneVariable(t *testing.T) {
 	ids := []string{"a", "a-b", "a-b-c", "ab", "hook", "hook-save", "x", "x-a", "x-a-b"}
 	keys := []string{"b", "c", "b_c", "a_b", "budget", "save_budget", "a", "a_b_c", "b2"}
+	acceptIDs(t, ids)
+	acceptKeys(t, keys)
 	seen := map[string][2]string{}
+	for _, id := range ids {
+		for _, key := range keys {
+			claim(t, seen, id, key)
+		}
+	}
+}
+
+// acceptIDs stops the test when checkID rejects one of ids.
+func acceptIDs(t *testing.T, ids []string) {
+	t.Helper()
 	for _, id := range ids {
 		if err := checkID(id); err != nil {
 			t.Fatalf("checkID(%q) = %v, the case needs an id it accepts", id, err)
 		}
-		for _, key := range keys {
-			if err := checkKey(key, nil); err != nil {
-				t.Fatalf("checkKey(%q) = %v, the case needs a key it accepts", key, err)
-			}
-			name := Name("APP_PLUGIN_", id, key)
-			if first, taken := seen[name]; taken {
-				t.Errorf("%s names both %v and [%s %s]", name, first, id, key)
-			}
-			seen[name] = [2]string{id, key}
+	}
+}
+
+// acceptKeys stops the test when checkKey rejects one of keys.
+func acceptKeys(t *testing.T, keys []string) {
+	t.Helper()
+	for _, key := range keys {
+		if err := checkKey(key, nil); err != nil {
+			t.Fatalf("checkKey(%q) = %v, the case needs a key it accepts", key, err)
 		}
 	}
+}
+
+// claim records the variable of id and key in seen, reporting a pair that already took it.
+func claim(t *testing.T, seen map[string][2]string, id, key string) {
+	t.Helper()
+	name := Name("APP_PLUGIN_", id, key)
+	if first, taken := seen[name]; taken {
+		t.Errorf("%s names both %v and [%s %s]", name, first, id, key)
+	}
+	seen[name] = [2]string{id, key}
 }
 
 func TestCheckKeyTakesLowercaseWordsJoinedByOneUnderscore(t *testing.T) {

@@ -30,24 +30,33 @@ type parseCase struct {
 func runParse(t *testing.T, cases []parseCase) {
 	t.Helper()
 	for _, c := range cases {
-		parse, err := parserOf(c.field.Type)
-		if err != nil {
-			t.Fatalf("parserOf(%q) = %v", c.field.Type, err)
-		}
-		got, err := parse(c.field, c.value)
-		if c.err != "" {
-			if err == nil || err.Error() != c.err {
-				t.Errorf("%s %q: error %v, want %q", c.field.Type, c.value, err, c.err)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("%s %q: error %v, want none", c.field.Type, c.value, err)
-			continue
-		}
-		if !sameValue(got, c.want) {
-			t.Errorf("%s %q = %+v, want %+v", c.field.Type, c.value, got, c.want)
-		}
+		checkParse(t, c)
+	}
+}
+
+// checkParse reads one case's value with the parser of its field's type and reports any difference from the case.
+func checkParse(t *testing.T, c parseCase) {
+	t.Helper()
+	parse, err := parserOf(c.field.Type)
+	if err != nil {
+		t.Fatalf("parserOf(%q) = %v", c.field.Type, err)
+	}
+	got, err := parse(c.field, c.value)
+	switch {
+	case c.err != "":
+		wantError(t, c, err)
+	case err != nil:
+		t.Errorf("%s %q: error %v, want none", c.field.Type, c.value, err)
+	case !sameValue(got, c.want):
+		t.Errorf("%s %q = %+v, want %+v", c.field.Type, c.value, got, c.want)
+	}
+}
+
+// wantError reports err when it is not the error the case expects.
+func wantError(t *testing.T, c parseCase, err error) {
+	t.Helper()
+	if err == nil || err.Error() != c.err {
+		t.Errorf("%s %q: error %v, want %q", c.field.Type, c.value, err, c.err)
 	}
 }
 
