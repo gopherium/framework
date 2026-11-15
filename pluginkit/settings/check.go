@@ -153,12 +153,25 @@ func neededDefault(field Field) error {
 	return readDefault(field)
 }
 
-// choiceDefault rejects a choice with no options, then a default that is not one of them.
+// choiceDefault rejects a choice with no options or with an option no value can select, then a default outside them.
 func choiceDefault(field Field) error {
 	if len(field.Options) == 0 {
 		return errors.New("a choice needs options")
 	}
+	if err := trimmedOptions(field.Options); err != nil {
+		return err
+	}
 	return neededDefault(field)
+}
+
+// trimmedOptions rejects the first option that starts or ends with a space.
+func trimmedOptions(options []string) error {
+	for _, option := range options {
+		if option != strings.TrimSpace(option) {
+			return complaint("an option must not start or end with a space", option)
+		}
+	}
+	return nil
 }
 
 // noDefault rejects any default without quoting it.
