@@ -45,6 +45,7 @@ Feature: Checking the settings a plugin declares
       | a lines "tags" with the min 1                                       | settings[0] tags: min and max apply only to a count                                              |
       | a text "title" with the options "a" and "b"                         | settings[0] title: options apply only to a choice                                                |
       | a choice "order" with no options                                    | settings[0] order: a choice needs options                                                        |
+      | a choice "order" of "new " and "oldest" with the default "oldest"   | settings[0] order: an option must not start or end with a space, got "new "                      |
       | a choice "order" of "newest" and "oldest" with no default           | settings[0] order: a choice needs a default                                                      |
       | a choice "order" of "newest" and "oldest" with the default "random" | settings[0] order: the default must be one of newest, oldest, got "random"                       |
       | a duration "keep_for" with no default                               | settings[0] keep_for: a duration needs a default                                                 |
