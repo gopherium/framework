@@ -21,6 +21,7 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 
 ### Changed
 
+- **Breaking.** Requires `modernc.org/sqlite` v1.62.0 and `modernc.org/libc` v1.80.1, and `LibcVersion` is v1.80.1.
 - **Breaking.** `NewSnapshotter` takes `SnapshotOptions`. Pass `sqlite.SnapshotOptions{}` for no margin and the live file's mode.
 - **Breaking.** A snapshot fails with `ErrNoSpace` before it writes the copy when the target folder has less free space than the used pages of the database plus `SnapshotOptions.Margin`.
 - **Breaking.** `Snapshot` refuses a target folder on a network file system, or on Linux a FUSE one, before it takes the lock, so a missing folder now fails at that read unless the snapshot runs as root.
