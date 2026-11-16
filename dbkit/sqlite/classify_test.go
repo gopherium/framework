@@ -29,6 +29,12 @@ CREATE TABLE classify_scanned (a INTEGER);
 CREATE TABLE classify_kept (id INTEGER PRIMARY KEY);
 CREATE TABLE classify_keepers (kept INTEGER REFERENCES classify_kept (id) ON DELETE RESTRICT ON UPDATE RESTRICT);
 CREATE TABLE classify_plain (a INTEGER);
+CREATE TABLE classify_worded (a INTEGER);
+CREATE TRIGGER classify_word BEFORE INSERT ON classify_worded
+BEGIN SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed in the app'); END;
+CREATE TABLE classify_mimic (a INTEGER);
+CREATE TRIGGER classify_mime BEFORE INSERT ON classify_mimic
+BEGIN SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed'); END;
 INSERT INTO classify_parents VALUES (1);
 INSERT INTO classify_rows VALUES (1, 'taken', 1, 0);
 INSERT INTO classify_scanned VALUES (1), (2);
@@ -136,6 +142,9 @@ func TestClassify(t *testing.T) {
 		{"not null", classifyExec("INSERT INTO classify_rows (id, code) VALUES (4, NULL)"), 1299, dbkit.ErrNotNull},
 		{"check", classifyExec("INSERT INTO classify_rows VALUES (5, 'negative', 1, -1)"), 275, dbkit.ErrCheck},
 		{"a trigger abort", classifyExec("INSERT INTO classify_guarded VALUES (1)"), 1811, nil},
+		{"a trigger abort that names a foreign key", classifyExec("INSERT INTO classify_worded VALUES (1)"), 1811, nil},
+		{"a trigger abort in a restrict's own words", classifyExec("INSERT INTO classify_mimic VALUES (1)"), 1811,
+			sqlite.ErrRestrict},
 		{"a syntax error", classifyExec("SELEC 1"), 1, nil},
 	}
 	for _, c := range cases {

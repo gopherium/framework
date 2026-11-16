@@ -5,7 +5,6 @@ package sqlite
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	modernc "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -16,10 +15,10 @@ import (
 // LibcVersion is the modernc.org/libc version the driver is pinned with.
 const LibcVersion = "v1.80.1"
 
-// restrictMessage is the text SQLite gives a foreign key a RESTRICT action stops.
-const restrictMessage = "FOREIGN KEY constraint failed"
+// restrictMessage is the driver's whole text of a change a RESTRICT foreign key stops.
+const restrictMessage = "constraint failed: FOREIGN KEY constraint failed (1811)"
 
-// ErrRestrict is the class of a delete or update a RESTRICT foreign key stops, and it matches dbkit.ErrForeignKey.
+// ErrRestrict matches dbkit.ErrForeignKey and classes a change a RESTRICT key, or a trigger in its words, stops.
 var ErrRestrict = fmt.Errorf("%w: another row still refers to the row", dbkit.ErrForeignKey)
 
 // constraintClasses maps each extended constraint result code that has a class to that class.
@@ -51,7 +50,7 @@ func classOf(driverErr *modernc.Error) error {
 	if primary := code & 0xff; primary == sqlite3.SQLITE_BUSY || primary == sqlite3.SQLITE_LOCKED {
 		return dbkit.ErrBusy
 	}
-	if code == sqlite3.SQLITE_CONSTRAINT_TRIGGER && strings.Contains(driverErr.Error(), restrictMessage) {
+	if code == sqlite3.SQLITE_CONSTRAINT_TRIGGER && driverErr.Error() == restrictMessage {
 		return ErrRestrict
 	}
 	return constraintClasses[code]
