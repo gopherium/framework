@@ -29,6 +29,12 @@ CREATE TABLE classify_scanned (a INTEGER);
 CREATE TABLE classify_kept (id INTEGER PRIMARY KEY);
 CREATE TABLE classify_keepers (kept INTEGER REFERENCES classify_kept (id) ON DELETE RESTRICT ON UPDATE RESTRICT);
 CREATE TABLE classify_plain (a INTEGER);
+CREATE TABLE classify_worded (a INTEGER);
+CREATE TRIGGER classify_word BEFORE INSERT ON classify_worded
+BEGIN SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed in the app'); END;
+CREATE TABLE classify_mimic (a INTEGER);
+CREATE TRIGGER classify_mime BEFORE INSERT ON classify_mimic
+BEGIN SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed'); END;
 INSERT INTO classify_parents VALUES (1);
 INSERT INTO classify_rows VALUES (1, 'taken', 1, 0);
 INSERT INTO classify_scanned VALUES (1), (2);
@@ -37,8 +43,9 @@ INSERT INTO classify_keepers VALUES (1);
 INSERT INTO classify_plain (rowid, a) VALUES (1, 1);
 `
 
-// classifyClasses lists every dbkit error class.
-var classifyClasses = []error{dbkit.ErrBusy, dbkit.ErrUnique, dbkit.ErrForeignKey, dbkit.ErrNotNull, dbkit.ErrCheck}
+// classifyClasses lists every dbkit error class and the restrict class of this package.
+var classifyClasses = []error{dbkit.ErrBusy, dbkit.ErrUnique, dbkit.ErrForeignKey, dbkit.ErrNotNull, dbkit.ErrCheck,
+	sqlite.ErrRestrict}
 
 // classifyOpen returns a handle on a fresh file holding classifySchema, with a short busy timeout.
 func classifyOpen(t *testing.T) *sql.DB {
@@ -127,14 +134,17 @@ func TestClassify(t *testing.T) {
 		{"unique", classifyExec("INSERT INTO classify_rows (id, code) VALUES (2, 'taken')"), 2067, dbkit.ErrUnique},
 		{"primary key", classifyExec("INSERT INTO classify_rows (id, code) VALUES (1, 'free')"), 1555, dbkit.ErrUnique},
 		{"a repeated rowid", classifyExec("INSERT INTO classify_plain (rowid, a) VALUES (1, 2)"), 2579, dbkit.ErrUnique},
-		{"a restricted delete", classifyExec("DELETE FROM classify_kept WHERE id = 1"), 1811, dbkit.ErrForeignKey},
+		{"a restricted delete", classifyExec("DELETE FROM classify_kept WHERE id = 1"), 1811, sqlite.ErrRestrict},
 		{"a restricted update", classifyExec("UPDATE classify_kept SET id = 2 WHERE id = 1"), 1811,
-			dbkit.ErrForeignKey},
+			sqlite.ErrRestrict},
 		{"foreign key", classifyExec("INSERT INTO classify_rows VALUES (3, 'orphan', 99, 0)"), 787,
 			dbkit.ErrForeignKey},
 		{"not null", classifyExec("INSERT INTO classify_rows (id, code) VALUES (4, NULL)"), 1299, dbkit.ErrNotNull},
 		{"check", classifyExec("INSERT INTO classify_rows VALUES (5, 'negative', 1, -1)"), 275, dbkit.ErrCheck},
 		{"a trigger abort", classifyExec("INSERT INTO classify_guarded VALUES (1)"), 1811, nil},
+		{"a trigger abort that names a foreign key", classifyExec("INSERT INTO classify_worded VALUES (1)"), 1811, nil},
+		{"a trigger abort in a restrict's own words", classifyExec("INSERT INTO classify_mimic VALUES (1)"), 1811,
+			sqlite.ErrRestrict},
 		{"a syntax error", classifyExec("SELEC 1"), 1, nil},
 	}
 	for _, c := range cases {
@@ -147,7 +157,7 @@ func TestClassify(t *testing.T) {
 
 			classifyMustCode(t, got, c.code)
 			for _, class := range classifyClasses {
-				if want := class == c.class; errors.Is(got, class) != want {
+				if want := errors.Is(c.class, class); errors.Is(got, class) != want {
 					t.Errorf("errors.Is(Classify(%v), %v) = %v, want %v", err, class, !want, want)
 				}
 			}

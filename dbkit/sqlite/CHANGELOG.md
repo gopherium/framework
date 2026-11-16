@@ -18,10 +18,13 @@ Releases of this module are tagged `dbkit/sqlite/vX.Y.Z`.
 - `ErrSnapshotExists`, which a snapshot error matches when a file already holds the target.
 - `ErrSnapshotUnsynced`, which a snapshot error matches when the copy is in place but its folder failed to sync.
 - `SnapshotOptions.Mode`, which narrows the permission bits of each copy below those of the live file and must keep the owner's read and write.
+- `ErrRestrict`, the class `Classify` gives a delete or update that a RESTRICT foreign key stops. It also matches `dbkit.ErrForeignKey`.
 
 ### Changed
 
 - **Breaking.** Requires `modernc.org/sqlite` v1.62.0 and `modernc.org/libc` v1.80.1, and `LibcVersion` is v1.80.1.
+- The error of a delete or update that a RESTRICT foreign key stops reads "dbkit: a foreign key constraint failed: another row still refers to the row: ", then the driver's message.
+- A trigger abort whose message holds more than "FOREIGN KEY constraint failed" no longer matches `dbkit.ErrForeignKey`.
 - **Breaking.** `NewSnapshotter` takes `SnapshotOptions`. Pass `sqlite.SnapshotOptions{}` for no margin and the live file's mode.
 - **Breaking.** A snapshot fails with `ErrNoSpace` before it writes the copy when the target folder has less free space than the used pages of the database plus `SnapshotOptions.Margin`.
 - **Breaking.** `Snapshot` refuses a target folder on a network file system, or on Linux a FUSE one, before it takes the lock, so a missing folder now fails at that read unless the snapshot runs as root.
