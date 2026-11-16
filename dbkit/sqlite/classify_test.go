@@ -37,8 +37,9 @@ INSERT INTO classify_keepers VALUES (1);
 INSERT INTO classify_plain (rowid, a) VALUES (1, 1);
 `
 
-// classifyClasses lists every dbkit error class.
-var classifyClasses = []error{dbkit.ErrBusy, dbkit.ErrUnique, dbkit.ErrForeignKey, dbkit.ErrNotNull, dbkit.ErrCheck}
+// classifyClasses lists every dbkit error class and the restrict class of this package.
+var classifyClasses = []error{dbkit.ErrBusy, dbkit.ErrUnique, dbkit.ErrForeignKey, dbkit.ErrNotNull, dbkit.ErrCheck,
+	sqlite.ErrRestrict}
 
 // classifyOpen returns a handle on a fresh file holding classifySchema, with a short busy timeout.
 func classifyOpen(t *testing.T) *sql.DB {
@@ -127,9 +128,9 @@ func TestClassify(t *testing.T) {
 		{"unique", classifyExec("INSERT INTO classify_rows (id, code) VALUES (2, 'taken')"), 2067, dbkit.ErrUnique},
 		{"primary key", classifyExec("INSERT INTO classify_rows (id, code) VALUES (1, 'free')"), 1555, dbkit.ErrUnique},
 		{"a repeated rowid", classifyExec("INSERT INTO classify_plain (rowid, a) VALUES (1, 2)"), 2579, dbkit.ErrUnique},
-		{"a restricted delete", classifyExec("DELETE FROM classify_kept WHERE id = 1"), 1811, dbkit.ErrForeignKey},
+		{"a restricted delete", classifyExec("DELETE FROM classify_kept WHERE id = 1"), 1811, sqlite.ErrRestrict},
 		{"a restricted update", classifyExec("UPDATE classify_kept SET id = 2 WHERE id = 1"), 1811,
-			dbkit.ErrForeignKey},
+			sqlite.ErrRestrict},
 		{"foreign key", classifyExec("INSERT INTO classify_rows VALUES (3, 'orphan', 99, 0)"), 787,
 			dbkit.ErrForeignKey},
 		{"not null", classifyExec("INSERT INTO classify_rows (id, code) VALUES (4, NULL)"), 1299, dbkit.ErrNotNull},
@@ -147,7 +148,7 @@ func TestClassify(t *testing.T) {
 
 			classifyMustCode(t, got, c.code)
 			for _, class := range classifyClasses {
-				if want := class == c.class; errors.Is(got, class) != want {
+				if want := errors.Is(c.class, class); errors.Is(got, class) != want {
 					t.Errorf("errors.Is(Classify(%v), %v) = %v, want %v", err, class, !want, want)
 				}
 			}

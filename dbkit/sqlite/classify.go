@@ -19,6 +19,9 @@ const LibcVersion = "v1.80.1"
 // restrictMessage is the text SQLite gives a foreign key a RESTRICT action stops.
 const restrictMessage = "FOREIGN KEY constraint failed"
 
+// ErrRestrict is the class of a delete or update a RESTRICT foreign key stops, and it matches dbkit.ErrForeignKey.
+var ErrRestrict = fmt.Errorf("%w: another row still refers to the row", dbkit.ErrForeignKey)
+
 // constraintClasses maps each extended constraint result code that has a class to that class.
 var constraintClasses = map[int]error{
 	sqlite3.SQLITE_CONSTRAINT_UNIQUE:     dbkit.ErrUnique,
@@ -49,7 +52,7 @@ func classOf(driverErr *modernc.Error) error {
 		return dbkit.ErrBusy
 	}
 	if code == sqlite3.SQLITE_CONSTRAINT_TRIGGER && strings.Contains(driverErr.Error(), restrictMessage) {
-		return dbkit.ErrForeignKey
+		return ErrRestrict
 	}
 	return constraintClasses[code]
 }
