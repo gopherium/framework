@@ -47,8 +47,9 @@ The build entry's `pot` also reads plugin manifests. Hand its
 `manifests` option the globs that name them, read from the root, such
 as `plugins/*/plugin.json`. Each manifest gives the template its
 `name` and `description`, and the `label` and `help` of each entry in
-its `settings`, with the manifest's path as the reference. It reads no
-other key, and it leaves out an empty or null value.
+its `settings`, each key in lower case as pluginkit requires, with the
+manifest's path as the reference. It reads no other key, and it leaves
+out an empty or null value.
 
 `pot` rejects a glob that matches no file, a path it cannot read as a
 file, a manifest that is not a JSON object, a `settings` that is not a
