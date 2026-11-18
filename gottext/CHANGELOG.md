@@ -5,6 +5,12 @@ versioning follows [Semantic Versioning](https://semver.org/). While at 0.x,
 minor releases may break. Releases are tagged `gottext/vX.Y.Z` and publish
 from CI.
 
+## [Unreleased]
+
+### Added
+
+- `pot` takes a `manifests` option, globs read from the root, and reads each plugin manifest's `name` and `description` and each setting's `label` and `help`, with the manifest's path as the reference. A glob that matches no file and a manifest it cannot read are rejected. Before Node 22.17 its glob prints Node's experimental warning.
+
 ## [0.8.1] - 2026-11-09
 
 ### Fixed
