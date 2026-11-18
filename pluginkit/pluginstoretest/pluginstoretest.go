@@ -32,24 +32,36 @@ func cases() map[string]func(t *testing.T, store pluginkit.PluginStore) {
 			act(t, store.Activate(t.Context(), "events"))
 			want(t, store, map[string]pluginkit.PluginRecord{"events": active("events")})
 		},
-		"pausing a plugin it never saw records it paused": func(t *testing.T, store pluginkit.PluginStore) {
-			act(t, store.Pause(t.Context(), "events", "a setting is missing"))
-			want(t, store, map[string]pluginkit.PluginRecord{"events": paused("events", "a setting is missing")})
+		"pausing a plugin it never saw records its step and its error": func(t *testing.T, store pluginkit.PluginStore) {
+			act(t, store.Pause(t.Context(), "events", pluginkit.StepRegister, "a setting is missing"))
+			want(t, store, map[string]pluginkit.PluginRecord{
+				"events": paused(pluginkit.Failure{ID: "events", Step: pluginkit.StepRegister, Reason: "a setting is missing"}),
+			})
 		},
 		"pausing an active plugin keeps its failure": func(t *testing.T, store pluginkit.PluginStore) {
 			act(t, store.Activate(t.Context(), "events"))
-			act(t, store.Pause(t.Context(), "events", "a setting is missing"))
-			want(t, store, map[string]pluginkit.PluginRecord{"events": paused("events", "a setting is missing")})
+			act(t, store.Pause(t.Context(), "events", pluginkit.StepRegister, "a setting is missing"))
+			want(t, store, map[string]pluginkit.PluginRecord{
+				"events": paused(pluginkit.Failure{ID: "events", Step: pluginkit.StepRegister, Reason: "a setting is missing"}),
+			})
 		},
-		"pausing a paused plugin keeps the newer failure": func(t *testing.T, store pluginkit.PluginStore) {
-			act(t, store.Pause(t.Context(), "events", "a setting is missing"))
-			act(t, store.Pause(t.Context(), "events", "no route table"))
-			want(t, store, map[string]pluginkit.PluginRecord{"events": paused("events", "no route table")})
+		"pausing a paused plugin keeps the newer step and the newer error": func(t *testing.T, store pluginkit.PluginStore) {
+			act(t, store.Pause(t.Context(), "events", pluginkit.StepRegister, "a setting is missing"))
+			act(t, store.Pause(t.Context(), "events", pluginkit.StepStart, "no route table"))
+			want(t, store, map[string]pluginkit.PluginRecord{
+				"events": paused(pluginkit.Failure{ID: "events", Step: pluginkit.StepStart, Reason: "no route table"}),
+			})
 		},
-		"activating a paused plugin clears its failure": func(t *testing.T, store pluginkit.PluginStore) {
-			act(t, store.Pause(t.Context(), "events", "a setting is missing"))
+		"activating a paused plugin clears its step and its error": func(t *testing.T, store pluginkit.PluginStore) {
+			act(t, store.Pause(t.Context(), "events", pluginkit.StepRegister, "a setting is missing"))
 			act(t, store.Activate(t.Context(), "events"))
 			want(t, store, map[string]pluginkit.PluginRecord{"events": active("events")})
+		},
+		"a step word the store never saw is kept as written": func(t *testing.T, store pluginkit.PluginStore) {
+			act(t, store.Pause(t.Context(), "events", pluginkit.Step("crash"), "the site stopped answering"))
+			want(t, store, map[string]pluginkit.PluginRecord{
+				"events": paused(pluginkit.Failure{ID: "events", Step: "crash", Reason: "the site stopped answering"}),
+			})
 		},
 		"activating an active plugin keeps it active": func(t *testing.T, store pluginkit.PluginStore) {
 			act(t, store.Activate(t.Context(), "events"))
@@ -57,17 +69,19 @@ func cases() map[string]func(t *testing.T, store pluginkit.PluginStore) {
 			want(t, store, map[string]pluginkit.PluginRecord{"events": active("events")})
 		},
 		"activating a plugin keeps every other record": func(t *testing.T, store pluginkit.PluginStore) {
-			act(t, store.Pause(t.Context(), "feed", "no route table"))
+			act(t, store.Pause(t.Context(), "feed", pluginkit.StepStart, "no route table"))
 			act(t, store.Activate(t.Context(), "events"))
 			want(t, store, map[string]pluginkit.PluginRecord{
-				"events": active("events"), "feed": paused("feed", "no route table"),
+				"events": active("events"),
+				"feed":   paused(pluginkit.Failure{ID: "feed", Step: pluginkit.StepStart, Reason: "no route table"}),
 			})
 		},
 		"one read answers every plugin by its id": func(t *testing.T, store pluginkit.PluginStore) {
 			act(t, store.Activate(t.Context(), "events"))
-			act(t, store.Pause(t.Context(), "feed", "no route table"))
+			act(t, store.Pause(t.Context(), "feed", pluginkit.StepStart, "no route table"))
 			want(t, store, map[string]pluginkit.PluginRecord{
-				"events": active("events"), "feed": paused("feed", "no route table"),
+				"events": active("events"),
+				"feed":   paused(pluginkit.Failure{ID: "feed", Step: pluginkit.StepStart, Reason: "no route table"}),
 			})
 		},
 	}
@@ -78,9 +92,11 @@ func active(id string) pluginkit.PluginRecord {
 	return pluginkit.PluginRecord{ID: id, State: pluginkit.PluginActive}
 }
 
-// paused returns the record of the plugin id paused for failure.
-func paused(id, failure string) pluginkit.PluginRecord {
-	return pluginkit.PluginRecord{ID: id, State: pluginkit.PluginPaused, LastError: failure}
+// paused returns the record of the plugin the failure names, paused at its step with its reason as the error.
+func paused(failure pluginkit.Failure) pluginkit.PluginRecord {
+	return pluginkit.PluginRecord{
+		ID: failure.ID, State: pluginkit.PluginPaused, Step: failure.Step, LastError: failure.Reason,
+	}
 }
 
 // act stops t when the store refused a write.
@@ -126,7 +142,7 @@ func (m *Memory) Records(context.Context) (map[string]pluginkit.PluginRecord, er
 	return maps.Clone(m.records), nil
 }
 
-// Activate marks the plugin id active and clears its error.
+// Activate marks the plugin id active and clears its step and its error.
 func (m *Memory) Activate(_ context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -134,10 +150,10 @@ func (m *Memory) Activate(_ context.Context, id string) error {
 	return nil
 }
 
-// Pause marks the plugin id paused with the text of its failure.
-func (m *Memory) Pause(_ context.Context, id, failure string) error {
+// Pause marks the plugin id paused at step with reason, keeping the step beside the error.
+func (m *Memory) Pause(_ context.Context, id string, step pluginkit.Step, reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.records[id] = paused(id, failure)
+	m.records[id] = paused(pluginkit.Failure{ID: id, Step: step, Reason: reason})
 	return nil
 }
