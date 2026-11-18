@@ -18,6 +18,7 @@ const fullManifest = `{
 	"name": "Events",
 	"backend": "example.com/myapp/plugins/events",
 	"frontend": "@myapp/plugin-events",
+	"description": "Sells seats for the events a site holds.",
 	"version": "2.0.0",
 	"license": "Apache-2.0",
 	"did": "did:plc:example",
@@ -58,18 +59,19 @@ func position(value int) *int {
 // fullManifestRead is what fullManifest reads as.
 func fullManifestRead() Manifest {
 	return Manifest{
-		ID:        "events",
-		Name:      "Events",
-		Backend:   "example.com/myapp/plugins/events",
-		Frontend:  "@myapp/plugin-events",
-		Version:   "2.0.0",
-		License:   "Apache-2.0",
-		DID:       "did:plc:example",
-		Requires:  map[string]string{"app": ">=0.31.0", "shop": "^2.1"},
-		Tested:    "0.32",
-		Engines:   []string{"postgres", "sqlite"},
-		Uninstall: true,
-		Hooks:     []string{"content.changed", "page.head"},
+		ID:          "events",
+		Name:        "Events",
+		Backend:     "example.com/myapp/plugins/events",
+		Frontend:    "@myapp/plugin-events",
+		Description: "Sells seats for the events a site holds.",
+		Version:     "2.0.0",
+		License:     "Apache-2.0",
+		DID:         "did:plc:example",
+		Requires:    map[string]string{"app": ">=0.31.0", "shop": "^2.1"},
+		Tested:      "0.32",
+		Engines:     []string{"postgres", "sqlite"},
+		Uninstall:   true,
+		Hooks:       []string{"content.changed", "page.head"},
 		Defines: []Define{
 			{Hook: "shop.order-placed"},
 			{Hook: "forum.post-check", Kind: "filter", Fires: "job"},
@@ -286,6 +288,29 @@ func TestLoadKeepsAZeroPositionApartFromAnAbsentOne(t *testing.T) {
 	})
 }
 
+func TestLoadReadsADescriptionIntoItsOwnFieldAndNotIntoExtra(t *testing.T) {
+	t.Parallel()
+
+	got := feedWith(t, `"description": "Serves the published posts as an RSS feed."`)
+
+	assertSame(t, got.Description, "Serves the published posts as an RSS feed.")
+	assertSame(t, got.Extra, map[string]json.RawMessage(nil))
+}
+
+func TestADescriptionReachesTheIndexAndReadsBack(t *testing.T) {
+	t.Parallel()
+
+	written := Manifest{ID: "feed", Name: "Feed", Description: "Serves the published posts as an RSS feed."}
+
+	data, err := json.Marshal(written)
+
+	assertErrorFree(t, err)
+	assertSame(t, string(data), `{"id":"feed","name":"Feed","description":"Serves the published posts as an RSS feed."}`)
+	var read Manifest
+	assertErrorFree(t, json.Unmarshal(data, &read))
+	assertSame(t, read, written)
+}
+
 func TestLoadKeepsAnUnknownKeyInExtra(t *testing.T) {
 	t.Parallel()
 
@@ -301,8 +326,9 @@ func TestLoadKeepsAnUnknownKeyInExtra(t *testing.T) {
 func TestLoadReadsANullAsAnAbsentKey(t *testing.T) {
 	t.Parallel()
 
-	got := feedWith(t, `"version": null, "requires": null, "engines": null, "uninstall": null, "hooks": null, `+
-		`"defines": null, "jobs": null, "settings": null, "menu": null, "screens": null, "screen_capabilities": null`)
+	got := feedWith(t, `"description": null, "version": null, "requires": null, "engines": null, "uninstall": null, `+
+		`"hooks": null, "defines": null, "jobs": null, "settings": null, "menu": null, "screens": null, `+
+		`"screen_capabilities": null`)
 
 	want, err := loadOne(t, "feed", feedManifest)
 	assertErrorFree(t, err)
@@ -373,8 +399,9 @@ func TestLoadReadsANewKeyInAnyCaseAsEncodingJSONDoes(t *testing.T) {
 	t.Parallel()
 
 	got := feedWith(t, `"Version": "2.0.0", "ENGINES": ["sqlite"], "job`+"ſ"+`": [{"NAME": "sweep", "Every": "1h"}], `+
-		`"defines": [{"HOOK": "a", "Kind": "b", "FIRES": "c"}], "ver-sion": "a", "ver_sion": "b"`)
+		`"defines": [{"HOOK": "a", "Kind": "b", "FIRES": "c"}], "ver-sion": "a", "ver_sion": "b", "DESCRIPTION": "d"`)
 
+	assertSame(t, got.Description, "d")
 	assertSame(t, got.Version, "2.0.0")
 	assertSame(t, got.Engines, []string{"sqlite"})
 	assertSame(t, got.Jobs, []Job{{Name: "sweep", Every: "1h"}})
@@ -406,6 +433,10 @@ type wrongShape struct{ keys, want string }
 // wrongTypes lists keys of the wrong JSON type, and what the decoder says of each.
 func wrongTypes() map[string]wrongShape {
 	return map[string]wrongShape{
+		"a number for description": {
+			`"description": 5`,
+			"json: cannot unmarshal number into Go struct field manifest.description of type string",
+		},
 		"a number for version": {
 			`"version": 5`, "json: cannot unmarshal number into Go struct field manifest.version of type string",
 		},

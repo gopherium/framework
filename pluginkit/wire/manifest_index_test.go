@@ -38,6 +38,7 @@ const fullIndex = `[
 		"name": "Events",
 		"backend": "example.com/myapp/plugins/events",
 		"frontend": "@myapp/plugin-events",
+		"description": "Sells seats for the events a site holds.",
 		"version": "2.0.0",
 		"license": "Apache-2.0",
 		"did": "did:plc:example",

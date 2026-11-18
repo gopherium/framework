@@ -21,18 +21,19 @@ type Manifest struct {
 	Backend  string `json:"backend,omitempty"`
 	Frontend string `json:"frontend,omitempty"`
 
-	Version   string            `json:"version,omitempty"`
-	License   string            `json:"license,omitempty"`
-	DID       string            `json:"did,omitempty"`
-	Requires  map[string]string `json:"requires,omitempty"`
-	Tested    string            `json:"tested,omitempty"`
-	Engines   []string          `json:"engines,omitempty"`
-	Uninstall bool              `json:"uninstall,omitempty"`
-	Hooks     []string          `json:"hooks,omitempty"`
-	Defines   []Define          `json:"defines,omitempty"`
-	Jobs      []Job             `json:"jobs,omitempty"`
-	Settings  []Setting         `json:"settings,omitempty"`
-	Menu      []MenuEntry       `json:"menu,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Version     string            `json:"version,omitempty"`
+	License     string            `json:"license,omitempty"`
+	DID         string            `json:"did,omitempty"`
+	Requires    map[string]string `json:"requires,omitempty"`
+	Tested      string            `json:"tested,omitempty"`
+	Engines     []string          `json:"engines,omitempty"`
+	Uninstall   bool              `json:"uninstall,omitempty"`
+	Hooks       []string          `json:"hooks,omitempty"`
+	Defines     []Define          `json:"defines,omitempty"`
+	Jobs        []Job             `json:"jobs,omitempty"`
+	Settings    []Setting         `json:"settings,omitempty"`
+	Menu        []MenuEntry       `json:"menu,omitempty"`
 	// Screens is the address of the module the admin imports only when one of the plugin's screens opens.
 	Screens string `json:"screens,omitempty"`
 	// ScreenCapabilities maps each screen no menu entry names to the capability it needs.
@@ -119,8 +120,8 @@ type manifest Manifest
 
 // typedKeys are the manifest keys Manifest has a field for.
 var typedKeys = []string{
-	"id", "name", "backend", "frontend", "version", "license", "did", "requires", "tested", "engines", "uninstall",
-	"hooks", "defines", "jobs", "settings", "menu", "screens", "screen_capabilities",
+	"id", "name", "backend", "frontend", "description", "version", "license", "did", "requires", "tested", "engines",
+	"uninstall", "hooks", "defines", "jobs", "settings", "menu", "screens", "screen_capabilities",
 }
 
 // isTypedKey reports whether encoding/json reads key into a field of Manifest.

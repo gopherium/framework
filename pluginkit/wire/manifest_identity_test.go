@@ -13,7 +13,8 @@ import (
 )
 
 // everyNewKey is every key a manifest may name beside the ones wire has always read.
-const everyNewKey = `"version": "2.0.0",
+const everyNewKey = `"description": "Sells seats for the events a site holds.",
+	"version": "2.0.0",
 	"license": "Apache-2.0",
 	"did": "did:plc:example",
 	"requires": {"app": ">=0.31.0"},
