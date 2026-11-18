@@ -4,9 +4,9 @@ Feature: Booting plugins and pausing the one that fails
   purpose. Paused means the boot stopped the plugin after it failed, as
   WordPress's recovery mode does. Each boot reads the records once,
   registers the active and paused plugins, lets the application run its
-  own steps, then starts them. A plugin that fails is paused with its
-  error, and the others still start. A paused plugin is tried again at
-  every boot.
+  own steps, then starts them. A plugin that fails is paused with the
+  step it failed at and its own error, kept apart, and the others still
+  start. A paused plugin is tried again at every boot.
 
   Scenario: The first boot records each compiled plugin as active
     Given the compiled plugins "events" and "feed"
@@ -28,21 +28,21 @@ Feature: Booting plugins and pausing the one that fails
     And the Register of "feed" fails with "the title is too long"
     When the application boots its plugins
     Then "events" and "gallery" started, in that order
-    And the store records "feed" as paused with "pluginkit: feed register: the title is too long"
+    And the store records "feed" as paused at "register" with "the title is too long"
 
   Scenario: A plugin whose Register panics is paused
     Given the compiled plugins "events" and "feed"
     And the Register of "feed" panics with "boom"
     When the application boots its plugins
     Then "events" started
-    And the store records "feed" as paused with "pluginkit: feed register panicked: boom"
+    And the store records "feed" as paused at "register" with "panicked: boom"
 
   Scenario: A plugin that calls itself by another id is paused under its entry's id
     Given the compiled plugins "events" and "feed"
     And the Register of "feed" answers a plugin that calls itself "news"
     When the application boots its plugins
     Then "events" started
-    And the store records "feed" as paused with "pluginkit: feed register: the plugin calls itself "news""
+    And the store records "feed" as paused at "register" with "the plugin calls itself "news""
     And the store holds no record of "news"
 
   Scenario: A plugin whose migration fails is paused and never starts
@@ -51,14 +51,14 @@ Feature: Booting plugins and pausing the one that fails
     When the application boots its plugins
     Then "events" started
     And "feed" never started
-    And the store records "feed" as paused with "pluginkit: feed migrate: schema exploded"
+    And the store records "feed" as paused at "migrate" with "schema exploded"
 
   Scenario: A plugin whose Start fails is paused
     Given the compiled plugins "events" and "feed"
     And the Start of "feed" fails with "no route table"
     When the application boots its plugins
     Then "events" started
-    And the store records "feed" as paused with "pluginkit: feed start: no route table"
+    And the store records "feed" as paused at "start" with "no route table"
 
   Scenario: A plugin whose migration record fails still starts and stays active
     Given the compiled plugins "events" and "feed"
@@ -83,31 +83,31 @@ Feature: Booting plugins and pausing the one that fails
       | inactive      |
       | not installed |
 
-  Scenario: A paused plugin that now starts is active again with no error
+  Scenario: A paused plugin that now starts is active again with no step and no error
     Given the compiled plugins "events" and "feed"
     And the store records "events" as active
-    And the store records "feed" as paused with "a setting is missing"
+    And the store records "feed" as paused at "register" with "a setting is missing"
     When the application boots its plugins
     Then "events" and "feed" started, in that order
-    And the store records "feed" as active with no error
+    And the store records "feed" as active with no step and no error
 
-  Scenario: A paused plugin that fails again stays paused with its new error
+  Scenario: A paused plugin that fails again stays paused at its new step with its new error
     Given the compiled plugins "events" and "feed"
     And the store records "events" as active
-    And the store records "feed" as paused with "a setting is missing"
+    And the store records "feed" as paused at "register" with "a setting is missing"
     And the Start of "feed" fails with "no route table"
     When the application boots its plugins
     Then "events" started
-    And the store records "feed" as paused with "pluginkit: feed start: no route table"
+    And the store records "feed" as paused at "start" with "no route table"
 
-  Scenario: The application pauses a plugin for a reason of its own
+  Scenario: The application pauses a plugin at the roles step for a reason of its own
     Given the compiled plugins "events" and "forum"
     And the store records "events" and "forum" as active
     And the application finds that "forum" declares a role it cannot accept
     When the application boots its plugins
     Then "events" started
     And "forum" never started
-    And the store records "forum" as paused with "forum declares a role it cannot accept"
+    And the store records "forum" as paused at "roles" with "it declares a role the application cannot accept"
 
   Scenario: A boot whose context ends pauses nothing
     Given the compiled plugins "events", "feed" and "gallery"
