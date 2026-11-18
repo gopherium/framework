@@ -4,7 +4,6 @@ package pluginkit
 
 import (
 	"context"
-	"errors"
 	"time"
 )
 
@@ -96,13 +95,14 @@ func (o *StartOutcome) startAfter(ctx context.Context, p Plugin, migration Failu
 	o.Started = append(o.Started, StartedPlugin{ID: p.ID(), Took: time.Since(began)})
 }
 
-// failureOf returns the failure of the plugin id at step, panicked only for its own panic, with no front on its reason.
+// failureOf returns the failure of the plugin id at step, its reason the text [guarded] read, calling no plugin code.
 func failureOf(id string, step Step, err error) Failure {
 	failure := Failure{ID: id, Step: step, Err: err}
-	if recovered, panicked := err.(guardedPanic); panicked {
-		failure.Panicked, failure.Reason = true, "panicked: "+recovered.value
-	} else if own := errors.Unwrap(err); own != nil {
-		failure.Reason = own.Error()
+	switch guardedErr := err.(type) {
+	case guardedPanic:
+		failure.Panicked, failure.Reason = true, "panicked: "+guardedErr.value
+	case *guardedError:
+		failure.Reason = guardedErr.text
 	}
 	return failure
 }

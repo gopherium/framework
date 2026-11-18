@@ -232,9 +232,26 @@ func guarded(ctx context.Context, name string, fn func(context.Context) error) (
 		}
 	}()
 	if err := fn(ctx); err != nil {
-		return fmt.Errorf("pluginkit: %s: %w", name, err)
+		return &guardedError{name: name, text: fmt.Sprint(err), err: err}
 	}
 	return nil
+}
+
+// guardedError is an error [guarded] wrapped, keeping its text, read once inside the recover, apart from the name.
+type guardedError struct {
+	name string
+	text string
+	err  error
+}
+
+// Error returns the text of the error with the name in front, as a log line prints it.
+func (e *guardedError) Error() string {
+	return "pluginkit: " + e.name + ": " + e.text
+}
+
+// Unwrap returns the error fn returned.
+func (e *guardedError) Unwrap() error {
+	return e.err
 }
 
 // guardedPanic is a panic [guarded] recovered, keeping the name it puts in front apart from the panic's value.
