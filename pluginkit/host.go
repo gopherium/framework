@@ -228,7 +228,7 @@ func safeCall(ctx context.Context, id, operation string, fn func(context.Context
 func guarded(ctx context.Context, name string, fn func(context.Context) error) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = panicError("pluginkit: " + name + " panicked: " + describe(recovered))
+			err = guardedPanic{name: name, value: describe(recovered)}
 		}
 	}()
 	if err := fn(ctx); err != nil {
@@ -237,7 +237,18 @@ func guarded(ctx context.Context, name string, fn func(context.Context) error) (
 	return nil
 }
 
-// panicError is a panic [guarded] recovered, holding the text that names where it came from.
+// guardedPanic is a panic [guarded] recovered, keeping the name it puts in front apart from the panic's value.
+type guardedPanic struct {
+	name  string
+	value string
+}
+
+// Error returns the text of the panic with the name in front, as a log line prints it.
+func (e guardedPanic) Error() string {
+	return "pluginkit: " + e.name + " panicked: " + e.value
+}
+
+// panicError is a panic a hook or a route recovered, holding the text that names where it came from.
 type panicError string
 
 // Error returns the text of the panic.

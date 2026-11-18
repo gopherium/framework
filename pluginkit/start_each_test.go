@@ -204,6 +204,73 @@ func TestStartEachKeepsEachCauseInItsFailure(t *testing.T) {
 	}
 }
 
+// reasons returns the id, the step and the reason of each failure, in order.
+func reasons(failures []pluginkit.Failure) []string {
+	got := make([]string, 0, len(failures))
+	for _, failure := range failures {
+		got = append(got, failure.ID+" "+string(failure.Step)+": "+failure.Reason)
+	}
+	return got
+}
+
+func TestStartEachKeepsEachPluginsOwnErrorAsItsReason(t *testing.T) {
+	t.Parallel()
+
+	var discarded []string
+	errNested := pluginkit.NewHost(&fakePlugin{id: "inner", startPanic: true, calls: &discarded}).
+		Start(t.Context(), stopGrace)
+	var calls []string
+	schema := migrating("alpha", &calls)
+	schema.migrateErr = errors.New("schema exploded")
+	panicking := migrating("beta", &calls)
+	panicking.migratePanic = true
+	host := pluginkit.NewHost(schema, panicking,
+		&fakePlugin{id: "gamma", startErr: errors.New("boot failed"), calls: &calls},
+		&fakePlugin{id: "delta", startPanic: true, calls: &calls},
+		&fakePlugin{id: "epsilon", startErr: errNested, calls: &calls},
+		&fakePlugin{id: "zeta", startErr: selfPanicking{}, calls: &calls},
+	)
+
+	outcome := startEach(t.Context(), t, host)
+
+	wantEqual(t, "reasons", reasons(outcome.Failed), []string{
+		"alpha migrate: schema exploded",
+		"beta migrate: panicked: boom",
+		"gamma start: boot failed",
+		"delta start: panicked: boom",
+		"epsilon start: pluginkit: inner start panicked: boom",
+		"zeta start: panicked: pluginkit_test.selfPanicking whose text panicked",
+	})
+}
+
+func TestStartEachKeepsTheReasonOfAStepAMigrationStoreRuns(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	store := &memoryStore{versions: map[string]string{}, recordErr: errStoreOffline, calls: &calls}
+	unversioned := versioned("beta", "", &calls)
+	host := storeHost(t, store, nil, versioned("alpha", "1", &calls), unversioned)
+
+	outcome := startEach(t.Context(), t, host)
+
+	wantEqual(t, "reasons", reasons(outcome.Failed), []string{
+		"alpha record: store offline",
+		"beta migrate: the version is empty",
+	})
+}
+
+func TestStartEachGivesTheEndedContextAsTheReason(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	outcome := startEach(ctx, t, pluginkit.NewHost(migrating("alpha", &calls)))
+
+	wantEqual(t, "reasons", reasons(outcome.Failed), []string{"alpha migrate: context canceled"})
+}
+
 func TestStartEachWithAMigrationStore(t *testing.T) {
 	t.Parallel()
 

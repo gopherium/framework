@@ -22,7 +22,9 @@ const (
 type PluginRecord struct {
 	ID    string
 	State PluginState
-	// LastError is the text of the failure that paused the plugin, and empty otherwise.
+	// Step is the step a paused plugin failed at, and empty otherwise.
+	Step Step
+	// LastError is the plugin's own error when paused, with no plugin id or step in front, and empty otherwise.
 	LastError string
 }
 
@@ -30,8 +32,8 @@ type PluginRecord struct {
 type PluginStore interface {
 	// Records returns every record, keyed by plugin id, in one read.
 	Records(ctx context.Context) (map[string]PluginRecord, error)
-	// Activate marks the plugin id active and clears its error, adding its record when it has none.
+	// Activate marks the plugin id active and clears its step and its error, adding its record when it has none.
 	Activate(ctx context.Context, id string) error
-	// Pause marks the plugin id paused with the text of its failure, adding its record when it has none.
-	Pause(ctx context.Context, id, failure string) error
+	// Pause marks the plugin id paused at step, kept as written, with reason, adding its record when it has none.
+	Pause(ctx context.Context, id string, step Step, reason string) error
 }

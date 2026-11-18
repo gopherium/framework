@@ -42,13 +42,13 @@ func (s *countingStore) Activate(ctx context.Context, id string) error {
 	return s.inner.Activate(ctx, id)
 }
 
-// Pause notes the write and pauses id, or answers the failure it was told.
-func (s *countingStore) Pause(ctx context.Context, id, failure string) error {
-	s.writes = append(s.writes, "pause "+id+": "+failure)
+// Pause notes the write and pauses id at step with reason, or answers the failure it was told.
+func (s *countingStore) Pause(ctx context.Context, id string, step pluginkit.Step, reason string) error {
+	s.writes = append(s.writes, "pause "+id+" at "+string(step)+": "+reason)
 	if s.writeErr != nil {
 		return s.writeErr
 	}
-	return s.inner.Pause(ctx, id, failure)
+	return s.inner.Pause(ctx, id, step, reason)
 }
 
 // assertErrorFree stops t when err is set.
@@ -182,8 +182,9 @@ func TestRegisterTriesAPausedPluginAgainWithoutWriting(t *testing.T) {
 	t.Parallel()
 
 	var calls []string
-	store := storeOf(record("events", pluginkit.PluginActive),
-		pluginkit.PluginRecord{ID: "feed", State: pluginkit.PluginPaused, LastError: "a setting is missing"})
+	store := storeOf(record("events", pluginkit.PluginActive), pluginkit.PluginRecord{
+		ID: "feed", State: pluginkit.PluginPaused, Step: pluginkit.StepRegister, LastError: "a setting is missing",
+	})
 
 	outcome := registerAll(t, newBoot(t, store), entry("events", &calls, succeeds), entry("feed", &calls, succeeds))
 
@@ -203,8 +204,8 @@ func TestRegisterPausesEachPluginThatFailsToRegister(t *testing.T) {
 
 	wantEqual(t, "registered", registeredIDs(outcome), []string{"events"})
 	wantEqual(t, "writes", store.writes, []string{
-		"pause feed: pluginkit: feed register: the title is too long",
-		"pause gallery: pluginkit: gallery register panicked: boom",
+		"pause feed at register: the title is too long",
+		"pause gallery at register: panicked: boom",
 	})
 }
 
@@ -260,17 +261,26 @@ func TestRegisterPausesNothingWhenTheContextEnded(t *testing.T) {
 	wantEqual(t, "writes", store.writes, []string(nil))
 }
 
-func TestBootPausePausesAPluginForTheApplicationsReason(t *testing.T) {
+func TestBootPausePausesAPluginAtTheApplicationsOwnStep(t *testing.T) {
 	t.Parallel()
 
 	store := storeOf(record("forum", pluginkit.PluginActive))
 
-	err := newBoot(t, store).Pause(t.Context(), "forum", errors.New("forum declares a role it cannot accept"))
+	err := newBoot(t, store).Pause(t.Context(), pluginkit.Failure{
+		ID: "forum", Step: pluginkit.StepRoles, Err: errors.New("forum roles: the role \"editor\" is taken"),
+		Reason: "the role \"editor\" is taken",
+	})
 
 	assertErrorFree(t, err)
 	wantEqual(t, "records", held(t, store), map[string]pluginkit.PluginRecord{"forum": {
-		ID: "forum", State: pluginkit.PluginPaused, LastError: "forum declares a role it cannot accept",
+		ID: "forum", State: pluginkit.PluginPaused, Step: pluginkit.StepRoles, LastError: "the role \"editor\" is taken",
 	}})
+}
+
+func TestStepRolesIsTheWordEveryApplicationPausesRolesAt(t *testing.T) {
+	t.Parallel()
+
+	wantEqual(t, "StepRoles", pluginkit.StepRoles, pluginkit.Step("roles"))
 }
 
 func TestStartedPausesEachPluginThatFailedToMigrateOrStart(t *testing.T) {
@@ -279,14 +289,20 @@ func TestStartedPausesEachPluginThatFailedToMigrateOrStart(t *testing.T) {
 	store := storeOf(record("feed", pluginkit.PluginActive), record("gallery", pluginkit.PluginActive))
 
 	err := newBoot(t, store).Started(t.Context(), pluginkit.StartOutcome{Failed: []pluginkit.Failure{
-		{ID: "feed", Step: pluginkit.StepMigrate, Err: errors.New("pluginkit: feed migrate: schema exploded")},
-		{ID: "gallery", Step: pluginkit.StepStart, Err: errors.New("pluginkit: gallery start: no route table")},
+		{
+			ID: "feed", Step: pluginkit.StepMigrate, Err: errors.New("pluginkit: feed migrate: schema exploded"),
+			Reason: "schema exploded",
+		},
+		{
+			ID: "gallery", Step: pluginkit.StepStart, Err: errors.New("pluginkit: gallery start: no route table"),
+			Reason: "no route table",
+		},
 	}})
 
 	assertErrorFree(t, err)
 	wantEqual(t, "writes", store.writes, []string{
-		"pause feed: pluginkit: feed migrate: schema exploded",
-		"pause gallery: pluginkit: gallery start: no route table",
+		"pause feed at migrate: schema exploded",
+		"pause gallery at start: no route table",
 	})
 }
 
@@ -298,20 +314,27 @@ func TestStartedLeavesAFailedMigrationRecordAlone(t *testing.T) {
 	err := newBoot(t, store).Started(t.Context(), pluginkit.StartOutcome{
 		Started: []pluginkit.StartedPlugin{{ID: "feed"}},
 		Failed: []pluginkit.Failure{
-			{ID: "feed", Step: pluginkit.StepRecord, Err: errors.New("pluginkit: feed record: ledger locked")},
-			{ID: "gallery", Step: pluginkit.StepStart, Err: errors.New("pluginkit: gallery start: no route table")},
+			{
+				ID: "feed", Step: pluginkit.StepRecord, Err: errors.New("pluginkit: feed record: ledger locked"),
+				Reason: "ledger locked",
+			},
+			{
+				ID: "gallery", Step: pluginkit.StepStart, Err: errors.New("pluginkit: gallery start: no route table"),
+				Reason: "no route table",
+			},
 		},
 	})
 
 	assertErrorFree(t, err)
-	wantEqual(t, "writes", store.writes, []string{"pause gallery: pluginkit: gallery start: no route table"})
+	wantEqual(t, "writes", store.writes, []string{"pause gallery at start: no route table"})
 }
 
 func TestStartedActivatesAPausedPluginThatStarted(t *testing.T) {
 	t.Parallel()
 
-	store := storeOf(record("events", pluginkit.PluginActive),
-		pluginkit.PluginRecord{ID: "feed", State: pluginkit.PluginPaused, LastError: "a setting is missing"})
+	store := storeOf(record("events", pluginkit.PluginActive), pluginkit.PluginRecord{
+		ID: "feed", State: pluginkit.PluginPaused, Step: pluginkit.StepStart, LastError: "a setting is missing",
+	})
 
 	err := newBoot(t, store).Started(t.Context(), pluginkit.StartOutcome{
 		Started: []pluginkit.StartedPlugin{{ID: "events"}, {ID: "feed"}},
