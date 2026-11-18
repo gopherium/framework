@@ -2,8 +2,8 @@
 
 import { GettextExtractor, JsExtractors } from 'gettext-extractor'
 import { po, type GetTextTranslation } from 'gettext-parser'
-import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { globSync, readFileSync, readdirSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 /** IGNORED is the set of paths that can never name a source, whatever a consumer ships. */
 const IGNORED = ['**/node_modules/**', '**/*.d.ts', '**/*.test.ts', '**/*.test.tsx']
@@ -22,6 +22,26 @@ const MARKER_CALL = /\bMsgid\("((?:[^"\\]|\\.)*)"\)/g
 
 /** DEFAULT_DOMAIN is the text domain a call naming none belongs to. */
 const DEFAULT_DOMAIN = 'default'
+
+/** MANIFEST_TEXTS is the keys of a plugin manifest whose text the template carries. */
+const MANIFEST_TEXTS = ['name', 'description']
+
+/** SETTING_TEXTS is the keys of each setting a plugin manifest declares whose text the template carries. */
+const SETTING_TEXTS = ['label', 'help']
+
+/** Entry is one JSON object a plugin manifest holds, read key by key. */
+type Entry = Record<string, unknown>
+
+/** Manifest is one plugin manifest read whole. */
+interface Manifest {
+	/** path is where the manifest sits, as its glob names it, and the reference its texts carry. */
+	path: string
+	/** entry is the top object the manifest holds. */
+	entry: Entry
+}
+
+/** Translations is every entry of a template, by context then message. */
+type Translations = Record<string, Record<string, GetTextTranslation>>
 
 /** Extractor is what the parser runs over every piece of a source. */
 type Extractor = ReturnType<typeof JsExtractors.callExpression>
@@ -78,6 +98,8 @@ export interface PotOptions {
 	ignored?: string[]
 	/** goRoots are the directories a Go walk reads, none by default. */
 	goRoots?: string[]
+	/** manifests are the globs naming the plugin manifests to read, from the root, none by default. */
+	manifests?: string[]
 }
 
 /**
@@ -147,6 +169,123 @@ export function goMessages(root: string, dirs: string[]): string[] {
 		}
 	}
 	return [...held]
+}
+
+/**
+ * Returns whether a JSON value is an object, rather than a list, a text, a number or null.
+ * @param value - The value to check.
+ * @returns True when the value is an object.
+ */
+function isEntry(value: unknown): value is Entry {
+	return value instanceof Object && !Array.isArray(value)
+}
+
+/**
+ * Returns the text one key of a manifest object holds, none when the key is absent, null or empty.
+ * @param manifest - The manifest the object sits in, named in an error.
+ * @param entry - The object to read.
+ * @param key - The key to read.
+ * @returns The text, or nothing.
+ */
+function textOf(manifest: Manifest, entry: Entry, key: string): string[] {
+	const text = entry[key] ?? ''
+	if (typeof text !== 'string') {
+		throw new Error(`the manifest ${manifest.path} holds a ${key} that is not text`)
+	}
+	return text === '' ? [] : [text]
+}
+
+/**
+ * Returns the settings a manifest declares, none when it names none.
+ * @param manifest - The manifest to read.
+ * @returns The declared settings.
+ */
+function settingsOf(manifest: Manifest): Entry[] {
+	const settings = manifest.entry.settings ?? []
+	if (!Array.isArray(settings) || !settings.every(isEntry)) {
+		throw new Error(`the manifest ${manifest.path} holds settings that are not a list of objects`)
+	}
+	return settings
+}
+
+/**
+ * Returns the plugin manifest at one path, read whole.
+ * @param options - The root the path resolves against.
+ * @param path - The manifest's path, as its glob names it.
+ * @returns The manifest with its top object.
+ */
+function manifestAt(options: PotOptions, path: string): Manifest {
+	let body: string
+	try {
+		body = readFileSync(resolve(options.root, path), 'utf8')
+	} catch (cause) {
+		throw new Error(`the manifest ${path} cannot be read`, { cause })
+	}
+	let entry: unknown
+	try {
+		entry = JSON.parse(body)
+	} catch {
+		throw new Error(`the manifest ${path} holds JSON this extractor cannot read`)
+	}
+	if (!isEntry(entry)) {
+		throw new Error(`the manifest ${path} holds no JSON object`)
+	}
+	return { path, entry }
+}
+
+/**
+ * Returns the texts one plugin manifest hands the template.
+ * @param manifest - The manifest to read.
+ * @returns The plugin's name and description, then each setting's label and help.
+ */
+function manifestTexts(manifest: Manifest): string[] {
+	return [
+		...MANIFEST_TEXTS.flatMap((key) => textOf(manifest, manifest.entry, key)),
+		...settingsOf(manifest).flatMap((setting) => SETTING_TEXTS.flatMap((key) => textOf(manifest, setting, key))),
+	]
+}
+
+/**
+ * Returns the paths the manifest globs match, rejecting a glob that matches none.
+ * @param options - The root and the manifest globs to read.
+ * @returns The paths found, as the globs name them, in a settled order.
+ */
+function manifestPaths(options: PotOptions): string[] {
+	return (options.manifests ?? []).flatMap((pattern) => {
+		const found = globSync(pattern, { cwd: options.root })
+		if (found.length === 0) {
+			throw new Error(`no manifest matches ${pattern}`)
+		}
+		return found
+	}).sort()
+}
+
+/**
+ * Returns each text the plugin manifests hand the template, with the manifests holding it.
+ * @param options - The root and the manifest globs to read.
+ * @returns The texts found, each with the paths of its manifests in a settled order.
+ */
+function manifestMessages(options: PotOptions): Map<string, Set<string>> {
+	const held = new Map<string, Set<string>>()
+	for (const path of manifestPaths(options)) {
+		for (const text of manifestTexts(manifestAt(options, path))) {
+			held.set(text, (held.get(text) ?? new Set<string>()).add(path))
+		}
+	}
+	return held
+}
+
+/**
+ * Adds each text the plugin manifests hold to the template, naming its manifests as its reference.
+ * @param translations - The template entries, by context then message.
+ * @param options - The root and the manifest globs to read.
+ */
+function addManifests(translations: Translations, options: PotOptions): void {
+	for (const [text, paths] of manifestMessages(options)) {
+		translations[''] ??= {}
+		translations[''][text] ??= { msgid: text, msgstr: [''] }
+		translations[''][text].comments = { reference: [...paths].join('\n') }
+	}
 }
 
 /**
@@ -248,7 +387,7 @@ function entryOf(message: Found): GetTextTranslation {
  * @returns The template as UTF-8 bytes.
  */
 export function pot(options: PotOptions): Buffer {
-	const translations: Record<string, Record<string, GetTextTranslation>> = {}
+	const translations: Translations = {}
 	for (const text of goMessages(options.root, options.goRoots ?? [])) {
 		translations[''] ??= {}
 		translations[''][text] = { msgid: text, msgstr: [''] }
@@ -258,6 +397,7 @@ export function pot(options: PotOptions): Buffer {
 		translations[context] ??= {}
 		translations[context][message.text] = entryOf(message)
 	}
+	addManifests(translations, options)
 	return po.compile(
 		{
 			charset: 'UTF-8',
