@@ -23,11 +23,14 @@ const MARKER_CALL = /\bMsgid\("((?:[^"\\]|\\.)*)"\)/g
 /** DEFAULT_DOMAIN is the text domain a call naming none belongs to. */
 const DEFAULT_DOMAIN = 'default'
 
+/** ManifestKey is a key of a plugin manifest whose text the template carries, in lower case. */
+type ManifestKey = 'name' | 'description' | 'label' | 'help'
+
 /** MANIFEST_TEXTS is the keys of a plugin manifest whose text the template carries. */
-const MANIFEST_TEXTS = ['name', 'description']
+const MANIFEST_TEXTS: ManifestKey[] = ['name', 'description']
 
 /** SETTING_TEXTS is the keys of each setting a plugin manifest declares whose text the template carries. */
-const SETTING_TEXTS = ['label', 'help']
+const SETTING_TEXTS: ManifestKey[] = ['label', 'help']
 
 /** Entry is one JSON object a plugin manifest holds, read key by key. */
 type Entry = Record<string, unknown>
@@ -181,14 +184,24 @@ function isEntry(value: unknown): value is Entry {
 }
 
 /**
+ * Returns the value a manifest object holds under a key as its own, none when it only inherits one.
+ * @param entry - The object to read.
+ * @param key - The key to read.
+ * @returns The value, or nothing.
+ */
+function ownValue<K extends string>(entry: Partial<Record<K, unknown>>, key: K): unknown {
+	return Object.hasOwn(entry, key) ? entry[key] : undefined
+}
+
+/**
  * Returns the text one key of a manifest object holds, none when the key is absent, null or empty.
  * @param manifest - The manifest the object sits in, named in an error.
  * @param entry - The object to read.
  * @param key - The key to read.
  * @returns The text, or nothing.
  */
-function textOf(manifest: Manifest, entry: Entry, key: string): string[] {
-	const text = entry[key] ?? ''
+function textOf(manifest: Manifest, entry: Entry, key: ManifestKey): string[] {
+	const text = ownValue(entry, key) ?? ''
 	if (typeof text !== 'string') {
 		throw new Error(`the manifest ${manifest.path} holds a ${key} that is not text`)
 	}
@@ -201,7 +214,7 @@ function textOf(manifest: Manifest, entry: Entry, key: string): string[] {
  * @returns The declared settings.
  */
 function settingsOf(manifest: Manifest): Entry[] {
-	const settings = manifest.entry.settings ?? []
+	const settings = ownValue(manifest.entry, 'settings') ?? []
 	if (!Array.isArray(settings) || !settings.every(isEntry)) {
 		throw new Error(`the manifest ${manifest.path} holds settings that are not a list of objects`)
 	}
@@ -276,15 +289,38 @@ function manifestMessages(options: PotOptions): Map<string, Set<string>> {
 }
 
 /**
+ * Returns the value a table owns under a key, first defining a made one as its own when it owns none.
+ * @param table - The table to read.
+ * @param key - The key to read, which may name an Object member such as __proto__ that every table inherits.
+ * @param made - Returns the value to define when the table owns none.
+ * @returns The value the table owns under the key.
+ */
+function owned<K extends string, T>(table: Record<K, T>, key: K, made: () => NoInfer<T>): T {
+	if (!Object.hasOwn(table, key)) {
+		Object.defineProperty(table, key, { value: made(), enumerable: true, writable: true, configurable: true })
+	}
+	return table[key]
+}
+
+/**
+ * Returns the entries a template holds under one context, starting them when it holds none.
+ * @param translations - The template entries, by context then message.
+ * @param context - The context, which may name an Object member.
+ * @returns The entries under the context, by message.
+ */
+function contextOf(translations: Translations, context: string): Record<string, GetTextTranslation> {
+	return owned(translations, context, () => ({}))
+}
+
+/**
  * Adds each text the plugin manifests hold to the template, naming its manifests as its reference.
  * @param translations - The template entries, by context then message.
  * @param options - The root and the manifest globs to read.
  */
 function addManifests(translations: Translations, options: PotOptions): void {
 	for (const [text, paths] of manifestMessages(options)) {
-		translations[''] ??= {}
-		translations[''][text] ??= { msgid: text, msgstr: [''] }
-		translations[''][text].comments = { reference: [...paths].join('\n') }
+		const entry = owned(contextOf(translations, ''), text, () => ({ msgid: text, msgstr: [''] }))
+		entry.comments = { reference: [...paths].join('\n') }
 	}
 }
 
@@ -388,14 +424,11 @@ function entryOf(message: Found): GetTextTranslation {
  */
 export function pot(options: PotOptions): Buffer {
 	const translations: Translations = {}
-	for (const text of goMessages(options.root, options.goRoots ?? [])) {
-		translations[''] ??= {}
-		translations[''][text] = { msgid: text, msgstr: [''] }
-	}
 	for (const message of messages(options)) {
-		const context = message.context ?? ''
-		translations[context] ??= {}
-		translations[context][message.text] = entryOf(message)
+		owned(contextOf(translations, message.context ?? ''), message.text, () => entryOf(message))
+	}
+	for (const text of goMessages(options.root, options.goRoots ?? [])) {
+		owned(contextOf(translations, ''), text, () => ({ msgid: text, msgstr: [''] }))
 	}
 	addManifests(translations, options)
 	return po.compile(

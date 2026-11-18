@@ -215,6 +215,18 @@ test('names the messages a Go marker declares', () => {
 	expect(held).toContain('msgid "Saved"')
 })
 
+test('keeps the plural form the sources give a message a Go marker declares too', () => {
+	const root = rootWith({
+		'src/a.ts': "_n('Saved', 'Saved items', 2, 'probe')\n",
+		'internal/thing.go': 'package thing\n\nvar held = Msgid("Saved")\n',
+	})
+
+	const held = pot({ domain: 'probe', root, sources: SOURCES, goRoots: ['internal'] }).toString()
+
+	expect(held).toContain('\n\nmsgid "Saved"\nmsgid_plural "Saved items"\nmsgstr[0] ""\nmsgstr[1] ""\n')
+	expect(held).not.toContain('\n\nmsgid "Saved"\nmsgstr ""\n')
+})
+
 test('names the messages a Go template asks for', () => {
 	const root = rootWith({
 		'src/a.ts': "__('Older posts', 'probe')\n",
@@ -335,6 +347,32 @@ test('leaves out every other key a plugin manifest holds', () => {
 	expect(held.match(MESSAGE_LINE)).toEqual(['msgid ""', 'msgid "Notes"', 'msgid "Tone"'])
 })
 
+test('leaves out a manifest key spelled in another case', () => {
+	const held = potOfManifests({ [NOTES]: JSON.stringify({ Name: 'Notes' }) })
+
+	expect(held.match(MESSAGE_LINE)).toEqual(['msgid ""'])
+})
+
+test.each([
+	{ key: 'description', manifest: { name: 'Notes' } },
+	{ key: 'settings', manifest: { name: 'Notes' } },
+	{ key: 'label', manifest: { name: 'Notes', settings: [{ key: 'title', type: 'text' }] } },
+	{ key: 'help', manifest: { name: 'Notes', settings: [{ key: 'title', type: 'text' }] } },
+])('reads only the $key a manifest holds itself, when a source context gives every object one', ({ key, manifest }) => {
+	const root = rootWith({
+		'src/a.ts': `_x('${key}', '__proto__', 'probe')\n`,
+		[NOTES]: JSON.stringify(manifest),
+	})
+
+	try {
+		const held = pot({ domain: 'probe', root, sources: SOURCES, manifests: MANIFESTS }).toString()
+
+		expect(held.match(MESSAGE_LINE)).toEqual(['msgid ""', 'msgid "Notes"'])
+	} finally {
+		Reflect.deleteProperty(Object.prototype, key)
+	}
+})
+
 test.each([
 	{ name: 'Notes', description: '' },
 	{ name: 'Notes', description: null },
@@ -421,6 +459,31 @@ test.each([
 ])('rejects a manifest whose $key holds something other than text', ({ key, manifest }) => {
 	expect(() => potOfManifests({ [NOTES]: JSON.stringify(manifest) }))
 		.toThrow(`the manifest plugins/notes/plugin.json holds a ${key} that is not text`)
+})
+
+test('names the messages a manifest declares under the names of Object members', () => {
+	const held = potOfManifests({
+		[NOTES]: JSON.stringify({ name: 'constructor', settings: [{ key: 'title', label: '__proto__' }] }),
+	})
+
+	expect(held).toContain('\n\n#: plugins/notes/plugin.json\nmsgid "__proto__"\n')
+	expect(held).toContain('\n\n#: plugins/notes/plugin.json\nmsgid "constructor"\n')
+	expect(Object.hasOwn(Object.prototype, 'comments')).toBe(false)
+	expect(Object.hasOwn(Object, 'comments')).toBe(false)
+	expect(({} as { comments?: unknown }).comments).toBeUndefined()
+})
+
+test('keeps the entry a Go marker gives a message named like an Object member that a manifest declares too', () => {
+	const root = rootWith({
+		'internal/thing.go': 'package thing\n\nvar held = []string{Msgid("constructor"), Msgid("__proto__")}\n',
+		[NOTES]: JSON.stringify({ name: 'constructor', description: '__proto__' }),
+	})
+
+	const held = pot({ domain: 'probe', root, sources: SOURCES, goRoots: ['internal'], manifests: MANIFESTS }).toString()
+
+	expect(held.match(MESSAGE_LINE)).toEqual(['msgid ""', 'msgid "__proto__"', 'msgid "constructor"'])
+	expect(held).toContain('\n\n#: plugins/notes/plugin.json\nmsgid "__proto__"\n')
+	expect(held).toContain('\n\n#: plugins/notes/plugin.json\nmsgid "constructor"\n')
 })
 
 test.each([
