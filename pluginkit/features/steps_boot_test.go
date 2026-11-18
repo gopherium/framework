@@ -106,6 +106,7 @@ type bootWorld struct {
 	seeds        map[string]pluginkit.PluginRecord
 	registerFail map[string]string
 	registerBoom map[string]string
+	textBoom     map[string]string
 	calledAs     map[string]string
 	migrateFails map[string]string
 	startFails   map[string]string
@@ -123,12 +124,28 @@ type bootWorld struct {
 	err          error
 }
 
+// panickingText is an error whose text panics with its own value, a panic fmt catches while it prints the error.
+type panickingText string
+
+// Error panics with the error's value.
+func (e panickingText) Error() string {
+	panic(string(e))
+}
+
 // failure returns the error a scenario set for id in failures, or nil.
 func (w *bootWorld) failure(failures map[string]string, id string) error {
 	if text, ok := failures[id]; ok {
 		return errors.New(text)
 	}
 	return nil
+}
+
+// registerError returns the error a scenario set for the Register of id, or nil.
+func (w *bootWorld) registerError(id string) error {
+	if text, ok := w.textBoom[id]; ok {
+		return panickingText(text)
+	}
+	return w.failure(w.registerFail, id)
 }
 
 // compile lists the plugins of list as compiled.
@@ -195,7 +212,7 @@ func (w *bootWorld) registerOf(id string) func(string) (*bootPlugin, error) {
 		if value, ok := w.registerBoom[id]; ok {
 			panic(value)
 		}
-		if err := w.failure(w.registerFail, id); err != nil {
+		if err := w.registerError(id); err != nil {
 			return nil, err
 		}
 		if name, ok := w.calledAs[id]; ok {
@@ -367,6 +384,8 @@ func givenBoot(sc *godog.ScenarioContext, w *bootWorld) {
 	sc.Step(`^the store records "([^"]*)" as paused at "([^"]*)" with "(.*)"$`, w.pausedAt)
 	sc.Step(`^the Register of "([^"]*)" fails with "([^"]*)"$`, func(id, text string) { set(w.registerFail, id, text) })
 	sc.Step(`^the Register of "([^"]*)" panics with "([^"]*)"$`, func(id, text string) { set(w.registerBoom, id, text) })
+	sc.Step(`^the Register of "([^"]*)" fails with an error whose text panics with "([^"]*)"$`,
+		func(id, text string) { set(w.textBoom, id, text) })
 	sc.Step(`^the Register of "([^"]*)" answers a plugin that calls itself "([^"]*)"$`,
 		func(id, name string) { set(w.calledAs, id, name) })
 	sc.Step(`^the migration of "([^"]*)" fails with "([^"]*)"$`, func(id, text string) { set(w.migrateFails, id, text) })
@@ -398,9 +417,9 @@ func thenBoot(sc *godog.ScenarioContext, w *bootWorld) {
 func newBootWorld(t *testing.T) *bootWorld {
 	return &bootWorld{
 		t: t, seeds: map[string]pluginkit.PluginRecord{}, registerFail: map[string]string{},
-		registerBoom: map[string]string{}, migrateFails: map[string]string{}, startFails: map[string]string{},
-		recordFails: map[string]string{}, rejected: map[string]bool{}, endsOn: map[string]string{},
-		calledAs: map[string]string{},
+		registerBoom: map[string]string{}, textBoom: map[string]string{}, migrateFails: map[string]string{},
+		startFails: map[string]string{}, recordFails: map[string]string{}, rejected: map[string]bool{},
+		endsOn: map[string]string{}, calledAs: map[string]string{},
 	}
 }
 

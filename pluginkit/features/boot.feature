@@ -37,6 +37,13 @@ Feature: Booting plugins and pausing the one that fails
     Then "events" started
     And the store records "feed" as paused at "register" with "panicked: boom"
 
+  Scenario: A plugin whose Register error panics when read is paused and the others start
+    Given the compiled plugins "events", "feed" and "gallery"
+    And the Register of "feed" fails with an error whose text panics with "text exploded"
+    When the application boots its plugins
+    Then "events" and "gallery" started, in that order
+    And the store records "feed" as paused at "register" with "%!v(PANIC=Error method: text exploded)"
+
   Scenario: A plugin that calls itself by another id is paused under its entry's id
     Given the compiled plugins "events" and "feed"
     And the Register of "feed" answers a plugin that calls itself "news"
