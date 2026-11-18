@@ -50,6 +50,10 @@ func TestBoot(t *testing.T) {
 	runFeature(t, "boot.feature", initializeBoot(t))
 }
 
+func TestInstalled(t *testing.T) {
+	runFeature(t, "installed.feature", initializeInstalled(t))
+}
+
 func TestRoutes(t *testing.T) {
 	runFeature(t, "routes.feature", initializeRoutes())
 }

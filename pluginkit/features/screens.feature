@@ -112,6 +112,19 @@ Feature: Admin menus and lazy screens from the manifest
       | {"label": "Reservations", "screen": "list/all", "capability": "events.manage"}                          | menu[0]: the screen "list/all" must be one path segment                                 |
       | {"label": "Reservations", "screen": "reservations", "capability": "events.manage", "position": "first"} | json: cannot unmarshal string into Go struct field manifest.menu.0.position of type int |
 
+  Scenario Outline: A menu entry key spelled in another case or named twice is rejected
+    Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
+    And "events" has the menu entry <entry>
+    When the plugins are wired
+    Then the wiring is rejected with: pluginwire: plugins/events/plugin.json: <error>
+    And the files of the earlier wiring are left as they were
+
+    Examples:
+      | entry                                                                                                  | error                                                      |
+      | {"Label": "Reservations", "screen": "reservations", "capability": "events.manage"}                     | menu[0]: the key "Label" must be spelled "label"           |
+      | {"label": "Reservations", "screen": "reservations", "CAPABILITY": "events.manage"}                     | menu[0]: the key "CAPABILITY" must be spelled "capability" |
+      | {"label": "Reservations", "label": "Bookings", "screen": "reservations", "capability": "events.manage"} | menu[0]: the key "label" appears twice                     |
+
   Scenario Outline: A screen capability with a wrong shape is refused
     Given the plugin "events" has a backend and the screens module "@example/plugin-events/screens"
     And "events" has the screen capabilities <capabilities>

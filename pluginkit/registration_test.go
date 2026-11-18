@@ -146,6 +146,26 @@ func TestRegisterEachGoesOnPastAFailingRegisterAndNamesIt(t *testing.T) {
 	}
 }
 
+func TestRegisterEachGoesOnPastAnErrorWhoseTextPanics(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	entries := []pluginkit.Registration[listedDeps, *listedPlugin]{
+		entry("events", &calls, succeeds), entry("feed", &calls, answers(panickingText("title text exploded"))),
+		entry("gallery", &calls, succeeds),
+	}
+
+	outcome := pluginkit.RegisterEach(entries, depsOf(&calls))
+
+	wantEqual(t, "registered", registeredIDs(outcome), []string{"events", "gallery"})
+	wantEqual(t, "failed", failures(outcome), []failureWant{
+		{"feed", pluginkit.StepRegister, false, "pluginkit: feed register: %!v(PANIC=Error method: title text exploded)"},
+	})
+	wantEqual(t, "reasons", reasons(outcome.Failed), []string{
+		"feed register: %!v(PANIC=Error method: title text exploded)",
+	})
+}
+
 func TestRegisterEachFailsAPluginWhoseIDIsNotItsEntrys(t *testing.T) {
 	t.Parallel()
 

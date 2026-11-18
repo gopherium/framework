@@ -5,6 +5,16 @@ versioning follows [Semantic Versioning](https://semver.org/). While at 0.x,
 minor releases may break. Releases are tagged `gottext/vX.Y.Z` and publish
 from CI.
 
+## [Unreleased]
+
+### Added
+
+- `pot` takes a `manifests` option, globs read from the root, and reads each plugin manifest's `name` and `description` and each setting's `label` and `help`, each key in lower case as pluginkit requires, with the manifest's path as the reference. A glob that matches no file and a manifest it cannot read are rejected. Before Node 22.17 its glob prints Node's experimental warning.
+
+### Fixed
+
+- `pot` keeps a message a Go marker or template names `__proto__`, which it used to leave out.
+
 ## [0.8.1] - 2026-11-09
 
 ### Fixed

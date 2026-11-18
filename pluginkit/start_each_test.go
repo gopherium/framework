@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -202,6 +203,131 @@ func TestStartEachKeepsEachCauseInItsFailure(t *testing.T) {
 			t.Errorf("failure %d error = %v, want %v in its chain", i, outcome.Failed[i].Err, cause)
 		}
 	}
+}
+
+// reasons returns the id, the step and the reason of each failure, in order.
+func reasons(failures []pluginkit.Failure) []string {
+	got := make([]string, 0, len(failures))
+	for _, failure := range failures {
+		got = append(got, failure.ID+" "+string(failure.Step)+": "+failure.Reason)
+	}
+	return got
+}
+
+func TestStartEachKeepsEachPluginsOwnErrorAsItsReason(t *testing.T) {
+	t.Parallel()
+
+	var discarded []string
+	errNested := pluginkit.NewHost(&fakePlugin{id: "inner", startPanic: true, calls: &discarded}).
+		Start(t.Context(), stopGrace)
+	var calls []string
+	schema := migrating("alpha", &calls)
+	schema.migrateErr = errors.New("schema exploded")
+	panicking := migrating("beta", &calls)
+	panicking.migratePanic = true
+	host := pluginkit.NewHost(schema, panicking,
+		&fakePlugin{id: "gamma", startErr: errors.New("boot failed"), calls: &calls},
+		&fakePlugin{id: "delta", startPanic: true, calls: &calls},
+		&fakePlugin{id: "epsilon", startErr: errNested, calls: &calls},
+		&fakePlugin{id: "zeta", startErr: selfPanicking{}, calls: &calls},
+	)
+
+	outcome := startEach(t.Context(), t, host)
+
+	wantEqual(t, "reasons", reasons(outcome.Failed), []string{
+		"alpha migrate: schema exploded",
+		"beta migrate: panicked: boom",
+		"gamma start: boot failed",
+		"delta start: panicked: boom",
+		"epsilon start: pluginkit: inner start panicked: boom",
+		"zeta start: panicked: pluginkit_test.selfPanicking whose text panicked",
+	})
+}
+
+func TestStartEachKeepsTheReasonOfAStepAMigrationStoreRuns(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	store := &memoryStore{versions: map[string]string{}, recordErr: errStoreOffline, calls: &calls}
+	unversioned := versioned("beta", "", &calls)
+	host := storeHost(t, store, nil, versioned("alpha", "1", &calls), unversioned)
+
+	outcome := startEach(t.Context(), t, host)
+
+	wantEqual(t, "reasons", reasons(outcome.Failed), []string{
+		"alpha record: store offline",
+		"beta migrate: the version is empty",
+	})
+}
+
+func TestStartEachGivesTheEndedContextAsTheReason(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	outcome := startEach(ctx, t, pluginkit.NewHost(migrating("alpha", &calls)))
+
+	wantEqual(t, "reasons", reasons(outcome.Failed), []string{"alpha migrate: context canceled"})
+}
+
+// panickingText is an error whose text panics with its own value, a panic fmt catches while it prints the error.
+type panickingText string
+
+// Error panics with the error's value.
+func (e panickingText) Error() string {
+	panic(string(e))
+}
+
+func TestStartEachGoesOnPastAnErrorWhoseTextPanics(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	schema := migrating("alpha", &calls)
+	schema.migrateErr = panickingText("schema text exploded")
+	host := pluginkit.NewHost(schema, migrating("beta", &calls),
+		&fakePlugin{id: "gamma", startErr: panickingText("boot text exploded"), calls: &calls}, plain("delta", &calls))
+
+	outcome := startEach(t.Context(), t, host)
+
+	wantOutcome(t, outcome, []string{"beta", "delta"}, []failureWant{
+		{"alpha", pluginkit.StepMigrate, false, "pluginkit: alpha migrate: %!v(PANIC=Error method: schema text exploded)"},
+		{"gamma", pluginkit.StepStart, false, "pluginkit: gamma start: %!v(PANIC=Error method: boot text exploded)"},
+	})
+	wantCalls(t, calls, []string{"alpha migrate", "beta migrate", "beta start", "gamma start", "delta start"})
+	wantEqual(t, "reasons", reasons(outcome.Failed), []string{
+		"alpha migrate: %!v(PANIC=Error method: schema text exploded)",
+		"gamma start: %!v(PANIC=Error method: boot text exploded)",
+	})
+	var cause panickingText
+	if !errors.As(outcome.Failed[1].Err, &cause) || cause != "boot text exploded" {
+		t.Errorf("gamma's error = %#v, want the error its Start answered in its chain", outcome.Failed[1].Err)
+	}
+}
+
+// changingText is an error whose text counts the times it was read.
+type changingText struct {
+	reads int
+}
+
+// Error returns the text of this read.
+func (e *changingText) Error() string {
+	e.reads++
+	return "read " + strconv.Itoa(e.reads)
+}
+
+func TestStartEachReadsTheTextOfAPluginsErrorOnce(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	text := &changingText{}
+
+	outcome := startEach(t.Context(), t, pluginkit.NewHost(&fakePlugin{id: "alpha", startErr: text, calls: &calls}))
+
+	wantOutcome(t, outcome, nil, []failureWant{{"alpha", pluginkit.StepStart, false, "pluginkit: alpha start: read 1"}})
+	wantEqual(t, "reasons", reasons(outcome.Failed), []string{"alpha start: read 1"})
+	wantEqual(t, "reads", text.reads, 1)
 }
 
 func TestStartEachWithAMigrationStore(t *testing.T) {

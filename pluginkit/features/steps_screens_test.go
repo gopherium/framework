@@ -360,8 +360,13 @@ func (w *screensWorld) writesOnlyWiring() error {
 
 // refusedWith checks that the run failed with the text, the scenario's root left out of its paths.
 func (w *screensWorld) refusedWith(text string) error {
+	return w.rejectedWith(text)
+}
+
+// rejectedWith checks that the run failed with the text, the scenario's root left out of its paths.
+func (w *screensWorld) rejectedWith(text string) error {
 	if w.err == nil {
-		return errors.New("the run succeeded, want it refused")
+		return errors.New("the run succeeded, want it rejected")
 	}
 	if got := strings.ReplaceAll(w.err.Error(), w.root+string(filepath.Separator), ""); got != text {
 		return fmt.Errorf("the run failed with %q, want %q", got, text)
@@ -453,6 +458,7 @@ func thenScreens(sc *godog.ScenarioContext, w *screensWorld) {
 	sc.Step(`^the frontend wiring imports "([^"]*)" and "([^"]*)"$`, w.importsFrontends)
 	sc.Step(`^the generator writes only the Go and the TypeScript wiring$`, w.writesOnlyWiring)
 	sc.Step(`^the wiring is refused with: (.+)$`, w.refusedWith)
+	sc.Step(`^the wiring is rejected with: (.+)$`, w.rejectedWith)
 	sc.Step(`^the files of the earlier wiring are left as they were$`, w.earlierWiringKept)
 	sc.Step(`^the package\.json depends only on "([^"]*)" as a workspace package$`, w.dependsOnlyOn)
 	sc.Step(`^the manifest index holds this entry for "([^"]*)":$`, w.indexHolds)

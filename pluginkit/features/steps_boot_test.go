@@ -75,13 +75,13 @@ func (s *bootStore) Activate(ctx context.Context, id string) error {
 	return s.inner.Activate(ctx, id)
 }
 
-// Pause notes the write and pauses id, or answers the failure the scenario set.
-func (s *bootStore) Pause(ctx context.Context, id, failure string) error {
+// Pause notes the write and pauses id at step with reason, or answers the failure the scenario set.
+func (s *bootStore) Pause(ctx context.Context, id string, step pluginkit.Step, reason string) error {
 	s.writes++
 	if s.writeErr != nil {
 		return s.writeErr
 	}
-	return s.inner.Pause(ctx, id, failure)
+	return s.inner.Pause(ctx, id, step, reason)
 }
 
 // bootMigrations is the scenario's migration store, failing the record of the plugins the scenario names.
@@ -106,6 +106,7 @@ type bootWorld struct {
 	seeds        map[string]pluginkit.PluginRecord
 	registerFail map[string]string
 	registerBoom map[string]string
+	textBoom     map[string]string
 	calledAs     map[string]string
 	migrateFails map[string]string
 	startFails   map[string]string
@@ -123,12 +124,28 @@ type bootWorld struct {
 	err          error
 }
 
+// panickingText is an error whose text panics with its own value, a panic fmt catches while it prints the error.
+type panickingText string
+
+// Error panics with the error's value.
+func (e panickingText) Error() string {
+	panic(string(e))
+}
+
 // failure returns the error a scenario set for id in failures, or nil.
 func (w *bootWorld) failure(failures map[string]string, id string) error {
 	if text, ok := failures[id]; ok {
 		return errors.New(text)
 	}
 	return nil
+}
+
+// registerError returns the error a scenario set for the Register of id, or nil.
+func (w *bootWorld) registerError(id string) error {
+	if text, ok := w.textBoom[id]; ok {
+		return panickingText(text)
+	}
+	return w.failure(w.registerFail, id)
 }
 
 // compile lists the plugins of list as compiled.
@@ -146,9 +163,9 @@ func (w *bootWorld) seed(list, state string) {
 	}
 }
 
-// pausedWith seeds the plugin id as paused with text before the boot, and checks that record after it.
-func (w *bootWorld) pausedWith(id, text string) error {
-	want := pluginkit.PluginRecord{ID: id, State: pluginkit.PluginPaused, LastError: text}
+// pausedAt seeds the plugin id as paused at step with its error text before the boot, and checks that record after.
+func (w *bootWorld) pausedAt(id, step, text string) error {
+	want := pluginkit.PluginRecord{ID: id, State: pluginkit.PluginPaused, Step: pluginkit.Step(step), LastError: text}
 	if !w.booted {
 		w.seeds[id] = want
 		return nil
@@ -195,7 +212,7 @@ func (w *bootWorld) registerOf(id string) func(string) (*bootPlugin, error) {
 		if value, ok := w.registerBoom[id]; ok {
 			panic(value)
 		}
-		if err := w.failure(w.registerFail, id); err != nil {
+		if err := w.registerError(id); err != nil {
 			return nil, err
 		}
 		if name, ok := w.calledAs[id]; ok {
@@ -205,7 +222,10 @@ func (w *bootWorld) registerOf(id string) func(string) (*bootPlugin, error) {
 	}
 }
 
-// accept pauses each registered plugin the application rejects, and answers the ones it keeps.
+// rejectedRole is the application's own reason for pausing a plugin whose roles it rejects.
+const rejectedRole = "it declares a role the application cannot accept"
+
+// accept pauses each registered plugin the application rejects at the roles step, and answers the ones it keeps.
 func (w *bootWorld) accept(ctx context.Context, boot *pluginkit.Boot,
 	registered []*bootPlugin) ([]pluginkit.Plugin, error) {
 	var kept []pluginkit.Plugin
@@ -214,7 +234,11 @@ func (w *bootWorld) accept(ctx context.Context, boot *pluginkit.Boot,
 			kept = append(kept, plugin)
 			continue
 		}
-		if err := boot.Pause(ctx, plugin.id, fmt.Errorf("%s declares a role it cannot accept", plugin.id)); err != nil {
+		failure := pluginkit.Failure{
+			ID: plugin.id, Step: pluginkit.StepRoles, Err: fmt.Errorf("%s roles: %s", plugin.id, rejectedRole),
+			Reason: rejectedRole,
+		}
+		if err := boot.Pause(ctx, failure); err != nil {
 			return nil, err
 		}
 	}
@@ -315,7 +339,7 @@ func (w *bootWorld) holds(want pluginkit.PluginRecord) error {
 	return nil
 }
 
-// recordsClean checks that the store holds the plugin id in state with no error.
+// recordsClean checks that the store holds the plugin id in state with no step and no error.
 func (w *bootWorld) recordsClean(id, state string) error {
 	return w.holds(pluginkit.PluginRecord{ID: id, State: pluginkit.PluginState(state)})
 }
@@ -357,9 +381,11 @@ func givenBoot(sc *godog.ScenarioContext, w *bootWorld) {
 	sc.Step(`^the compiled plugins (.+)$`, w.compile)
 	sc.Step(`^the store holds no record$`, w.noRecord)
 	sc.Step(`^the store records (.+) as (active|inactive|not installed)$`, w.seed)
-	sc.Step(`^the store records "([^"]*)" as paused with "(.*)"$`, w.pausedWith)
+	sc.Step(`^the store records "([^"]*)" as paused at "([^"]*)" with "(.*)"$`, w.pausedAt)
 	sc.Step(`^the Register of "([^"]*)" fails with "([^"]*)"$`, func(id, text string) { set(w.registerFail, id, text) })
 	sc.Step(`^the Register of "([^"]*)" panics with "([^"]*)"$`, func(id, text string) { set(w.registerBoom, id, text) })
+	sc.Step(`^the Register of "([^"]*)" fails with an error whose text panics with "([^"]*)"$`,
+		func(id, text string) { set(w.textBoom, id, text) })
 	sc.Step(`^the Register of "([^"]*)" answers a plugin that calls itself "([^"]*)"$`,
 		func(id, name string) { set(w.calledAs, id, name) })
 	sc.Step(`^the migration of "([^"]*)" fails with "([^"]*)"$`, func(id, text string) { set(w.migrateFails, id, text) })
@@ -379,6 +405,7 @@ func thenBoot(sc *godog.ScenarioContext, w *bootWorld) {
 	sc.Step(`^((?:"[^"]*"(?:, | and )?)+) started(?:, in that order)?$`, w.startedInOrder)
 	sc.Step(`^"([^"]*)" never started$`, w.neverStarted)
 	sc.Step(`^the store records "([^"]*)" as (active|inactive|not installed) with no error$`, w.recordsClean)
+	sc.Step(`^the store records "([^"]*)" as (active|inactive|not installed) with no step and no error$`, w.recordsClean)
 	sc.Step(`^the store was not written$`, w.notWritten)
 	sc.Step(`^the store holds no record of "([^"]*)"$`, w.noRecordOf)
 	sc.Step(`^the Register of "([^"]*)" never ran$`, w.neverRegistered)
@@ -386,15 +413,20 @@ func thenBoot(sc *godog.ScenarioContext, w *bootWorld) {
 	sc.Step(`^the boot fails with: (.+)$`, w.failedWith)
 }
 
+// newBootWorld returns the empty world of one scenario that seeds a store or boots plugins.
+func newBootWorld(t *testing.T) *bootWorld {
+	return &bootWorld{
+		t: t, seeds: map[string]pluginkit.PluginRecord{}, registerFail: map[string]string{},
+		registerBoom: map[string]string{}, textBoom: map[string]string{}, migrateFails: map[string]string{},
+		startFails: map[string]string{}, recordFails: map[string]string{}, rejected: map[string]bool{},
+		endsOn: map[string]string{}, calledAs: map[string]string{},
+	}
+}
+
 // initializeBoot gives each boot scenario a world of its own and its steps.
 func initializeBoot(t *testing.T) func(*godog.ScenarioContext) {
 	return func(sc *godog.ScenarioContext) {
-		w := &bootWorld{
-			t: t, seeds: map[string]pluginkit.PluginRecord{}, registerFail: map[string]string{},
-			registerBoom: map[string]string{}, migrateFails: map[string]string{}, startFails: map[string]string{},
-			recordFails: map[string]string{}, rejected: map[string]bool{}, endsOn: map[string]string{},
-			calledAs: map[string]string{},
-		}
+		w := newBootWorld(t)
 		givenBoot(sc, w)
 		thenBoot(sc, w)
 	}

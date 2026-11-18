@@ -13,7 +13,8 @@ import (
 )
 
 // everyNewKey is every key a manifest may name beside the ones wire has always read.
-const everyNewKey = `"version": "2.0.0",
+const everyNewKey = `"description": "Sells seats for the events a site holds.",
+	"version": "2.0.0",
 	"license": "Apache-2.0",
 	"did": "did:plc:example",
 	"requires": {"app": ">=0.31.0"},
@@ -195,6 +196,10 @@ func todaysErrors() map[string]todaysErrorCase {
 		},
 		"a list at the top level": {
 			dir: "listed", manifest: `[]`,
+			want: "json: cannot unmarshal array into Go value of type wire.manifest",
+		},
+		"a list at the top level holding a key in another case": {
+			dir: "listed", manifest: `[{"id": "listed", "Name": "Listed"}]`,
 			want: "json: cannot unmarshal array into Go value of type wire.manifest",
 		},
 		"a missing id": {

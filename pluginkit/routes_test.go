@@ -69,21 +69,28 @@ func TestRoutesEachFailsAPluginWhoseRoutesFailToLoad(t *testing.T) {
 
 	const panicked = "pluginkit: feed routes panicked: boom"
 	const noHandler = "pluginkit: feed routes: Routes answered no handler"
+	const noHandlerReason = "Routes answered no handler"
 	mux := http.NewServeMux()
 	tests := map[string]struct {
 		plugin   pluginkit.Plugin
 		want     string
 		panicked bool
+		reason   string
 	}{
-		"Routes panics": {plugin: &panickyRoutesPlugin{fakePlugin{id: "feed"}}, want: panicked, panicked: true},
+		"Routes panics": {
+			plugin: &panickyRoutesPlugin{fakePlugin{id: "feed"}}, want: panicked, panicked: true, reason: "panicked: boom",
+		},
 		"PublicPaths panics": {
 			plugin:   &servingPlugin{routedPlugin: *routed("feed", mux), paths: func() []string { panic("boom") }},
 			want:     panicked,
 			panicked: true,
+			reason:   "panicked: boom",
 		},
-		"Routes answers nil":           {plugin: routed("feed", nil), want: noHandler},
-		"Routes answers a nil mux":     {plugin: routed("feed", (*http.ServeMux)(nil)), want: noHandler},
-		"Routes answers a nil handler": {plugin: routed("feed", http.HandlerFunc(nil)), want: noHandler},
+		"Routes answers nil":       {plugin: routed("feed", nil), want: noHandler, reason: noHandlerReason},
+		"Routes answers a nil mux": {plugin: routed("feed", (*http.ServeMux)(nil)), want: noHandler, reason: noHandlerReason},
+		"Routes answers a nil handler": {
+			plugin: routed("feed", http.HandlerFunc(nil)), want: noHandler, reason: noHandlerReason,
+		},
 	}
 
 	for name, test := range tests {
@@ -99,7 +106,9 @@ func TestRoutesEachFailsAPluginWhoseRoutesFailToLoad(t *testing.T) {
 				t.Errorf("PublicPaths = %v, want none", outcome.PublicPaths)
 			}
 			shapes, texts := splitFailures(outcome.Failed)
-			want := []pluginkit.Failure{{ID: "feed", Step: pluginkit.StepRoutes, Panicked: test.panicked}}
+			want := []pluginkit.Failure{
+				{ID: "feed", Step: pluginkit.StepRoutes, Panicked: test.panicked, Reason: test.reason},
+			}
 			if !slices.Equal(shapes, want) {
 				t.Errorf("Failed = %+v, want %+v", outcome.Failed, want)
 			}

@@ -510,6 +510,20 @@ func TestHostRecoversStartPanic(t *testing.T) {
 	}
 }
 
+func TestHostKeepsTheTextOfEachPanicItRecovers(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	host := pluginkit.NewHost(
+		&fakePlugin{id: "alpha", stopPanic: true, calls: &calls},
+		&fakePlugin{id: "beta", startPanic: true, calls: &calls},
+	)
+
+	err := host.Start(t.Context(), stopGrace)
+
+	assertErrorText(t, err, "pluginkit: beta start panicked: boom\npluginkit: alpha stop panicked: boom")
+}
+
 func TestHostStopCollectsAllFailures(t *testing.T) {
 	t.Parallel()
 

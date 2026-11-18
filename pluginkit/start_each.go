@@ -21,6 +21,8 @@ const (
 	StepRegister Step = "register"
 	// StepRoutes is a plugin's Routes and PublicPaths, read by [RoutesEach].
 	StepRoutes Step = "routes"
+	// StepRoles is the application's declaration of a plugin's roles, named here so every application uses one word.
+	StepRoles Step = "roles"
 )
 
 // Failure is one step one plugin failed, or was still waiting for when the context ended.
@@ -29,7 +31,10 @@ type Failure struct {
 	Step Step
 	// Panicked is true only for a panic this step recovered, never for an error that merely holds one.
 	Panicked bool
-	Err      error
+	// Err is the whole error, the plugin id and the step in front, as a log line prints it.
+	Err error
+	// Reason is the plugin's own error with nothing in front, which a pause records beside the step.
+	Reason string
 }
 
 // StartedPlugin is one plugin whose Start returned nil, and how long that Start took.
@@ -90,8 +95,14 @@ func (o *StartOutcome) startAfter(ctx context.Context, p Plugin, migration Failu
 	o.Started = append(o.Started, StartedPlugin{ID: p.ID(), Took: time.Since(began)})
 }
 
-// failureOf returns the failure of the plugin id at step, marked as panicked only when err is that step's own panic.
+// failureOf returns the failure of the plugin id at step, its reason the text [guarded] read, calling no plugin code.
 func failureOf(id string, step Step, err error) Failure {
-	_, panicked := err.(panicError)
-	return Failure{ID: id, Step: step, Panicked: panicked, Err: err}
+	failure := Failure{ID: id, Step: step, Err: err}
+	switch guardedErr := err.(type) {
+	case guardedPanic:
+		failure.Panicked, failure.Reason = true, "panicked: "+guardedErr.value
+	case *guardedError:
+		failure.Reason = guardedErr.text
+	}
+	return failure
 }

@@ -62,7 +62,7 @@ func (b *Boot) pauseEach(ctx context.Context, failures []Failure) error {
 		if failure.Step == StepRecord {
 			continue
 		}
-		if err := b.Pause(ctx, failure.ID, failure.Err); err != nil {
+		if err := b.Pause(ctx, failure); err != nil {
 			return err
 		}
 	}
@@ -77,14 +77,14 @@ func (b *Boot) admit(ctx context.Context, id string) (bool, error) {
 	return true, b.activate(ctx, id)
 }
 
-// Pause pauses the plugin id for failure, a step that failed or a reason of the application's own.
-func (b *Boot) Pause(ctx context.Context, id string, failure error) error {
-	return guarded(ctx, "pause "+id, func(ctx context.Context) error {
-		return b.store.Pause(ctx, id, failure.Error())
+// Pause pauses the plugin the failure names, recording its step and its reason apart.
+func (b *Boot) Pause(ctx context.Context, failure Failure) error {
+	return guarded(ctx, "pause "+failure.ID, func(ctx context.Context) error {
+		return b.store.Pause(ctx, failure.ID, failure.Step, failure.Reason)
 	})
 }
 
-// activate marks the plugin id active and clears its error.
+// activate marks the plugin id active and clears its step and its error.
 func (b *Boot) activate(ctx context.Context, id string) error {
 	return guarded(ctx, "activate "+id, func(ctx context.Context) error { return b.store.Activate(ctx, id) })
 }

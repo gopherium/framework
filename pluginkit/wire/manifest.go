@@ -21,18 +21,19 @@ type Manifest struct {
 	Backend  string `json:"backend,omitempty"`
 	Frontend string `json:"frontend,omitempty"`
 
-	Version   string            `json:"version,omitempty"`
-	License   string            `json:"license,omitempty"`
-	DID       string            `json:"did,omitempty"`
-	Requires  map[string]string `json:"requires,omitempty"`
-	Tested    string            `json:"tested,omitempty"`
-	Engines   []string          `json:"engines,omitempty"`
-	Uninstall bool              `json:"uninstall,omitempty"`
-	Hooks     []string          `json:"hooks,omitempty"`
-	Defines   []Define          `json:"defines,omitempty"`
-	Jobs      []Job             `json:"jobs,omitempty"`
-	Settings  []Setting         `json:"settings,omitempty"`
-	Menu      []MenuEntry       `json:"menu,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Version     string            `json:"version,omitempty"`
+	License     string            `json:"license,omitempty"`
+	DID         string            `json:"did,omitempty"`
+	Requires    map[string]string `json:"requires,omitempty"`
+	Tested      string            `json:"tested,omitempty"`
+	Engines     []string          `json:"engines,omitempty"`
+	Uninstall   bool              `json:"uninstall,omitempty"`
+	Hooks       []string          `json:"hooks,omitempty"`
+	Defines     []Define          `json:"defines,omitempty"`
+	Jobs        []Job             `json:"jobs,omitempty"`
+	Settings    []Setting         `json:"settings,omitempty"`
+	Menu        []MenuEntry       `json:"menu,omitempty"`
 	// Screens is the address of the module the admin imports only when one of the plugin's screens opens.
 	Screens string `json:"screens,omitempty"`
 	// ScreenCapabilities maps each screen no menu entry names to the capability it needs.
@@ -55,7 +56,7 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	return slices.Concat(typed[:len(typed)-len("}\n")], []byte(","), extra[1:]), nil
 }
 
-// UnmarshalJSON reads m from a plugin.json or an entry of the manifest index, checking only the JSON types.
+// UnmarshalJSON reads m from a plugin.json or an entry of the manifest index, checking only keys, text and JSON types.
 func (m *Manifest) UnmarshalJSON(data []byte) error {
 	parsed, err := parseManifest(data)
 	*m = Manifest(parsed)
@@ -119,17 +120,20 @@ type manifest Manifest
 
 // typedKeys are the manifest keys Manifest has a field for.
 var typedKeys = []string{
-	"id", "name", "backend", "frontend", "version", "license", "did", "requires", "tested", "engines", "uninstall",
-	"hooks", "defines", "jobs", "settings", "menu", "screens", "screen_capabilities",
+	"id", "name", "backend", "frontend", "description", "version", "license", "did", "requires", "tested", "engines",
+	"uninstall", "hooks", "defines", "jobs", "settings", "menu", "screens", "screen_capabilities",
 }
 
-// isTypedKey reports whether encoding/json reads key into a field of Manifest.
+// isTypedKey reports whether key is the json name of a field of Manifest.
 func isTypedKey(key string, _ json.RawMessage) bool {
-	return slices.ContainsFunc(typedKeys, func(typed string) bool { return strings.EqualFold(key, typed) })
+	return slices.Contains(typedKeys, key)
 }
 
 // parseManifest decodes one plugin.json, keeping the keys Manifest has no field for in Extra.
 func parseManifest(data []byte) (manifest, error) {
+	if err := checkStrict(data); err != nil {
+		return manifest{}, err
+	}
 	var m manifest
 	var raw map[string]json.RawMessage
 	err := json.Unmarshal(data, &m)

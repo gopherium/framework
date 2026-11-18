@@ -5,10 +5,15 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 
 ## Unreleased
 
-- `PluginStore`, with `Records`, `Activate` and `Pause`, is an application's record of each plugin's state: not installed, inactive, active or paused, with the text of the failure that paused it.
-- `NewBoot`, `Register`, `Boot.Pause` and `Boot.Started` carry one boot from the records to the start: a plugin seen for the first time is recorded active, inactive and not installed plugins are never registered, a plugin that fails to register, migrate or start is paused, and a paused plugin that starts again is active with no error.
+- `PluginStore`, with `Records`, `Activate` and `Pause`, is an application's record of each plugin's state: not installed, inactive, active or paused, with the step a paused plugin failed at and its own error kept apart. A store keeps any step word as written.
+- `NewBoot`, `Register`, `Boot.Pause` and `Boot.Started` carry one boot from the records to the start: a plugin seen for the first time is recorded active, inactive and not installed plugins are never registered, a plugin that fails to register, migrate or start is paused at that step with its own error, and a paused plugin that starts again is active with no step and no error. `Boot.Pause` takes a `Failure`, so an application pauses a plugin at a step of its own.
+- `StepRoles` names the step where an application declares a plugin's roles, so every application pauses a plugin's roles at one word.
+- `Failure.Reason` is the plugin's own error with nothing in front, and a recovered panic reads `panicked: <value>`. `Failure.Err` keeps the whole text, so log lines read as before.
 - A boot whose context ends pauses nothing, and a store read or write that fails is returned to the application.
 - `pluginstoretest.Run` checks any `PluginStore` against the contract, and `pluginstoretest.NewMemory` is a store in memory that keeps it.
+- `Installed` lists one `InstalledPlugin` per installed plugin, with the JSON names `id`, `name`, `description`, `version`, `status`, `paused_step` and `paused_reason`, sorted by name without regard to case, then by id. It leaves out a plugin the records hold as not installed and a record with no manifest, and lists a manifest with no record as active. The step and the reason are empty unless the plugin is paused.
+- `wire.Manifest` reads `description`, which no longer sits in `Extra`, a breaking change.
+- `wire` rejects a manifest that spells a key it reads in another case, such as `Name`, repeats a name in one object, or holds text that is not valid UTF-8, as bytes or as an escaped surrogate with no pair, a breaking change.
 - `RegisterEach` and `Register` take only plugins with an `ID() string` method, and fail at `StepRegister` a plugin whose `ID` is not its entry's id, or a `Register` that answers no plugin, a breaking change.
 - `Protect` takes the plugin's id and a `RouteSettings`, which holds the middleware as `Wrap`, a breaking change.
 - `Protect` recovers each panic of a plugin's handler, on its public paths too. While nothing went out, `RouteSettings.Answer` answers it, else the connection is cut, and `RouteSettings.Report` receives a `RouteFailure` with the stack.
