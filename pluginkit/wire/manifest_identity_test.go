@@ -198,6 +198,10 @@ func todaysErrors() map[string]todaysErrorCase {
 			dir: "listed", manifest: `[]`,
 			want: "json: cannot unmarshal array into Go value of type wire.manifest",
 		},
+		"a list at the top level holding a key in another case": {
+			dir: "listed", manifest: `[{"id": "listed", "Name": "Listed"}]`,
+			want: "json: cannot unmarshal array into Go value of type wire.manifest",
+		},
 		"a missing id": {
 			dir: "anon", manifest: `{"name": "Anon", "backend": "example.com/anon"}`,
 			want: `id "" must match ^[a-z][a-z0-9-]*$`,

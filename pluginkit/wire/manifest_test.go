@@ -225,20 +225,6 @@ func TestDefineKeepsTheEntryItFailsToRead(t *testing.T) {
 	assertSame(t, got, Define{Hook: "old", Kind: "filter", Fires: "job"})
 }
 
-func TestLoadReadsARepeatedDefinesAsTheLastOne(t *testing.T) {
-	t.Parallel()
-
-	for name, last := range map[string]string{"a plain string": `"b"`, "an object": `{"hook": "b"}`} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := feedWith(t, `"defines": [{"hook": "a", "kind": "filter", "fires": "job"}], "defines": [`+last+`]`)
-
-			assertSame(t, got.Defines, []Define{{Hook: "b"}})
-		})
-	}
-}
-
 func TestLoadLeavesAnAbsentFiresEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -395,36 +381,40 @@ func TestReadLeavesTheIDsTheGeneratedWiringOwnsToLoad(t *testing.T) {
 	}
 }
 
-func TestLoadReadsANewKeyInAnyCaseAsEncodingJSONDoes(t *testing.T) {
-	t.Parallel()
-
-	got := feedWith(t, `"Version": "2.0.0", "ENGINES": ["sqlite"], "job`+"ſ"+`": [{"NAME": "sweep", "Every": "1h"}], `+
-		`"defines": [{"HOOK": "a", "Kind": "b", "FIRES": "c"}], "ver-sion": "a", "ver_sion": "b", "DESCRIPTION": "d"`)
-
-	assertSame(t, got.Description, "d")
-	assertSame(t, got.Version, "2.0.0")
-	assertSame(t, got.Engines, []string{"sqlite"})
-	assertSame(t, got.Jobs, []Job{{Name: "sweep", Every: "1h"}})
-	assertSame(t, got.Defines, []Define{{Hook: "a", Kind: "b", Fires: "c"}})
-	assertSame(t, got.Extra, map[string]json.RawMessage{
-		"ver-sion": json.RawMessage(`"a"`),
-		"ver_sion": json.RawMessage(`"b"`),
-	})
+// shapeOf returns the names encoding/json reads the struct type typ by, from its json tags, and its list entry structs.
+func shapeOf(t *testing.T, typ reflect.Type) keyShape {
+	t.Helper()
+	var shape keyShape
+	for i := range typ.NumField() {
+		field := typ.Field(i)
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if name == "-" {
+			continue
+		}
+		shape.names = append(shape.names, name)
+		inner := field.Type
+		for inner.Kind() == reflect.Pointer || inner.Kind() == reflect.Slice {
+			inner = inner.Elem()
+		}
+		if inner.Kind() != reflect.Struct {
+			continue
+		}
+		if field.Type.Kind() != reflect.Slice {
+			t.Errorf("%s.%s reads a struct outside a list, which checkStrict does not read", typ.Name(), field.Name)
+		}
+		if shape.entries == nil {
+			shape.entries = map[string]keyShape{}
+		}
+		shape.entries[name] = shapeOf(t, inner)
+	}
+	return shape
 }
 
-func TestTypedKeysNameEveryManifestField(t *testing.T) {
+func TestManifestShapeNamesEveryJSONFieldOfEachStruct(t *testing.T) {
 	t.Parallel()
 
-	var fromTags []string
-	fields := reflect.TypeFor[Manifest]()
-	for i := range fields.NumField() {
-		name, _, _ := strings.Cut(fields.Field(i).Tag.Get("json"), ",")
-		if name != "-" {
-			fromTags = append(fromTags, name)
-		}
-	}
-
-	assertSame(t, typedKeys, fromTags)
+	assertSame(t, manifestShape, shapeOf(t, reflect.TypeFor[Manifest]()))
+	assertSame(t, manifestShape.names, typedKeys)
 }
 
 // wrongShape is one set of keys a manifest may not hold, and the text refusing them.
@@ -516,6 +506,10 @@ func wrongEntryTypes() map[string]wrongShape {
 			`"settings": [{"key": "a", "type": "b", "max": "1"}]`,
 			"json: cannot unmarshal string into Go struct field manifest.settings.0.max of type float64",
 		},
+		"a list in settings holding a key in another case": {
+			`"settings": [[{"KEY": "a"}]]`,
+			"json: cannot unmarshal array into manifest.settings.0 of type wire.Setting",
+		},
 	}
 }
 
@@ -531,6 +525,10 @@ func wrongDefines() map[string]wrongShape {
 		},
 		"a list in defines": {
 			`"defines": [["a"]]`, "defines[0]: json: cannot unmarshal array into Go value of type wire.define",
+		},
+		"a list in defines holding a key in another case": {
+			`"defines": [[{"Hook": "a"}]]`,
+			"defines[0]: json: cannot unmarshal array into Go value of type wire.define",
 		},
 		"true in defines": {
 			`"defines": [true]`, "defines[0]: json: cannot unmarshal bool into Go value of type wire.define",
@@ -563,11 +561,7 @@ func emptyValues() map[string]wrongShape {
 		"an empty string in defines":   {`"defines": [""]`, "defines[0]: hook is required"},
 		"a defines entry with no hook": {`"defines": ["a", {"kind": "filter"}]`, "defines[1]: hook is required"},
 		"a null in defines":            {`"defines": [null]`, "defines[0]: hook is required"},
-		"a repeated defines with no hook": {
-			`"defines": [{"hook": "a"}], "defines": [{"kind": "filter"}]`, "defines[0]: hook is required",
-		},
-		"a repeated defines with a null": {`"defines": [{"hook": "a"}], "defines": [null]`, "defines[0]: hook is required"},
-		"a job with no name":             {`"jobs": [{"every": "24h"}]`, "jobs[0]: name is required"},
+		"a job with no name":           {`"jobs": [{"every": "24h"}]`, "jobs[0]: name is required"},
 		"a job with no interval": {
 			`"jobs": [{"name": "a", "every": "1h"}, {"name": "b"}]`, "jobs[1]: every is required",
 		},
@@ -595,6 +589,10 @@ func wrongScreenTypes() map[string]wrongShape {
 	return map[string]wrongShape{
 		"an object for menu": {
 			`"menu": {"label": "a"}`,
+			"json: cannot unmarshal object into Go struct field manifest.menu of type []wire.MenuEntry",
+		},
+		"an object for menu holding a key in another case": {
+			`"menu": {"Label": "a"}`,
 			"json: cannot unmarshal object into Go struct field manifest.menu of type []wire.MenuEntry",
 		},
 		"a number for a menu label": {
@@ -709,6 +707,7 @@ func eachWrongShape(t *testing.T, check func(t *testing.T, tc wrongShape)) {
 	t.Helper()
 	for _, shapes := range []map[string]wrongShape{
 		wrongTypes(), wrongEntryTypes(), wrongDefines(), emptyValues(), wrongScreenTypes(), emptyScreenValues(),
+		wrongCaseKeys(), repeatedKeys(), invalidText(),
 	} {
 		for name, tc := range shapes {
 			t.Run(name, func(t *testing.T) {

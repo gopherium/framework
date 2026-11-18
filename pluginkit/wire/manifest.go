@@ -56,7 +56,7 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	return slices.Concat(typed[:len(typed)-len("}\n")], []byte(","), extra[1:]), nil
 }
 
-// UnmarshalJSON reads m from a plugin.json or an entry of the manifest index, checking only the JSON types.
+// UnmarshalJSON reads m from a plugin.json or an entry of the manifest index, checking only keys, text and JSON types.
 func (m *Manifest) UnmarshalJSON(data []byte) error {
 	parsed, err := parseManifest(data)
 	*m = Manifest(parsed)
@@ -124,13 +124,16 @@ var typedKeys = []string{
 	"uninstall", "hooks", "defines", "jobs", "settings", "menu", "screens", "screen_capabilities",
 }
 
-// isTypedKey reports whether encoding/json reads key into a field of Manifest.
+// isTypedKey reports whether key is the json name of a field of Manifest.
 func isTypedKey(key string, _ json.RawMessage) bool {
-	return slices.ContainsFunc(typedKeys, func(typed string) bool { return strings.EqualFold(key, typed) })
+	return slices.Contains(typedKeys, key)
 }
 
 // parseManifest decodes one plugin.json, keeping the keys Manifest has no field for in Extra.
 func parseManifest(data []byte) (manifest, error) {
+	if err := checkStrict(data); err != nil {
+		return manifest{}, err
+	}
 	var m manifest
 	var raw map[string]json.RawMessage
 	err := json.Unmarshal(data, &m)
