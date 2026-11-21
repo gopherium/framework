@@ -38,6 +38,7 @@ const fullIndex = `[
 		"name": "Events",
 		"backend": "example.com/myapp/plugins/events",
 		"frontend": "@myapp/plugin-events",
+		"graphql": true,
 		"description": "Sells seats for the events a site holds.",
 		"version": "2.0.0",
 		"license": "Apache-2.0",
@@ -115,7 +116,7 @@ const fullIndex = `[
 		"screen_capabilities": {
 			"seats": "events.manage"
 		},
-		"graphql": true
+		"myapp_featured": true
 	},
 	{
 		"id": "feed",
@@ -169,8 +170,8 @@ func TestManifestIndexLeavesOutAnAbsentOrEmptyOptionalKey(t *testing.T) {
 	t.Parallel()
 
 	got := runForIndex(t, map[string]string{
-		"feed": withKeys(feedManifest,
-			`"uninstall": false, "engines": [], "requires": {}, "settings": [{"key": "seats", "type": "count"}]`),
+		"feed": withKeys(feedManifest, `"graphql": false, "uninstall": false, "engines": [], "requires": {}, `+
+			`"settings": [{"key": "seats", "type": "count"}]`),
 	})
 
 	want := `[

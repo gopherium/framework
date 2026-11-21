@@ -18,6 +18,7 @@ const fullManifest = `{
 	"name": "Events",
 	"backend": "example.com/myapp/plugins/events",
 	"frontend": "@myapp/plugin-events",
+	"graphql": true,
 	"description": "Sells seats for the events a site holds.",
 	"version": "2.0.0",
 	"license": "Apache-2.0",
@@ -43,7 +44,7 @@ const fullManifest = `{
 	],
 	"screens": "@myapp/plugin-events/screens",
 	"screen_capabilities": {"seats": "events.manage"},
-	"graphql": true
+	"myapp_featured": true
 }`
 
 // number returns a pointer to value, as a setting's limits hold it.
@@ -63,6 +64,7 @@ func fullManifestRead() Manifest {
 		Name:        "Events",
 		Backend:     "example.com/myapp/plugins/events",
 		Frontend:    "@myapp/plugin-events",
+		GraphQL:     true,
 		Description: "Sells seats for the events a site holds.",
 		Version:     "2.0.0",
 		License:     "Apache-2.0",
@@ -94,7 +96,7 @@ func fullManifestRead() Manifest {
 		},
 		Screens:            "@myapp/plugin-events/screens",
 		ScreenCapabilities: map[string]string{"seats": "events.manage"},
-		Extra:              map[string]json.RawMessage{"graphql": json.RawMessage(`true`)},
+		Extra:              map[string]json.RawMessage{"myapp_featured": json.RawMessage(`true`)},
 	}
 }
 
@@ -297,24 +299,48 @@ func TestADescriptionReachesTheIndexAndReadsBack(t *testing.T) {
 	assertSame(t, read, written)
 }
 
+func TestLoadReadsTheGraphqlKeyIntoItsOwnFieldAndNotIntoExtra(t *testing.T) {
+	t.Parallel()
+
+	got := feedWith(t, `"graphql": true`)
+
+	assertSame(t, got.GraphQL, true)
+	assertSame(t, got.Extra, map[string]json.RawMessage(nil))
+}
+
+func TestTheGraphqlKeyReachesTheIndexBesideTheFrontendAndReadsBack(t *testing.T) {
+	t.Parallel()
+
+	written := Manifest{ID: "feed", Name: "Feed", Frontend: "@myapp/plugin-feed", GraphQL: true, Version: "1.0.0"}
+
+	data, err := json.Marshal(written)
+
+	assertErrorFree(t, err)
+	assertSame(t, string(data),
+		`{"id":"feed","name":"Feed","frontend":"@myapp/plugin-feed","graphql":true,"version":"1.0.0"}`)
+	var read Manifest
+	assertErrorFree(t, json.Unmarshal(data, &read))
+	assertSame(t, read, written)
+}
+
 func TestLoadKeepsAnUnknownKeyInExtra(t *testing.T) {
 	t.Parallel()
 
-	got := feedWith(t, `"graphql": true, "pages": [{"word": "forums"}], "note": null`)
+	got := feedWith(t, `"myapp_featured": true, "pages": [{"word": "forums"}], "note": null`)
 
 	assertSame(t, got.Extra, map[string]json.RawMessage{
-		"graphql": json.RawMessage(`true`),
-		"pages":   json.RawMessage(`[{"word": "forums"}]`),
-		"note":    json.RawMessage(`null`),
+		"myapp_featured": json.RawMessage(`true`),
+		"pages":          json.RawMessage(`[{"word": "forums"}]`),
+		"note":           json.RawMessage(`null`),
 	})
 }
 
 func TestLoadReadsANullAsAnAbsentKey(t *testing.T) {
 	t.Parallel()
 
-	got := feedWith(t, `"description": null, "version": null, "requires": null, "engines": null, "uninstall": null, `+
-		`"hooks": null, "defines": null, "jobs": null, "settings": null, "menu": null, "screens": null, `+
-		`"screen_capabilities": null`)
+	got := feedWith(t, `"graphql": null, "description": null, "version": null, "requires": null, "engines": null, `+
+		`"uninstall": null, "hooks": null, "defines": null, "jobs": null, "settings": null, "menu": null, `+
+		`"screens": null, "screen_capabilities": null`)
 
 	want, err := loadOne(t, "feed", feedManifest)
 	assertErrorFree(t, err)
@@ -423,6 +449,9 @@ type wrongShape struct{ keys, want string }
 // wrongTypes lists keys of the wrong JSON type, and what the decoder says of each.
 func wrongTypes() map[string]wrongShape {
 	return map[string]wrongShape{
+		"a string for graphql": {
+			`"graphql": "yes"`, "json: cannot unmarshal string into Go struct field manifest.graphql of type bool",
+		},
 		"a number for description": {
 			`"description": 5`,
 			"json: cannot unmarshal number into Go struct field manifest.description of type string",
