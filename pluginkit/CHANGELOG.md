@@ -13,6 +13,7 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 - `pluginstoretest.Run` checks any `PluginStore` against the contract, and `pluginstoretest.NewMemory` is a store in memory that keeps it.
 - `Installed` lists one `InstalledPlugin` per installed plugin, with the JSON names `id`, `name`, `description`, `version`, `status`, `paused_step` and `paused_reason`, sorted by name without regard to case, then by id. It leaves out a plugin the records hold as not installed and a record with no manifest, and lists a manifest with no record as active. The step and the reason are empty unless the plugin is paused.
 - `wire.Manifest` reads `description`, which no longer sits in `Extra`, a breaking change.
+- `wire.Manifest` reads `graphql` as `GraphQL`, which no longer sits in `Extra`, a breaking change.
 - `wire` rejects a manifest that spells a key it reads in another case, such as `Name`, repeats a name in one object, or holds text that is not valid UTF-8, as bytes or as an escaped surrogate with no pair, a breaking change.
 - `RegisterEach` and `Register` take only plugins with an `ID() string` method, and fail at `StepRegister` a plugin whose `ID` is not its entry's id, or a `Register` that answers no plugin, a breaking change.
 - `Protect` takes the plugin's id and a `RouteSettings`, which holds the middleware as `Wrap`, a breaking change.

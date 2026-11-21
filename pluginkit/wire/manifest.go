@@ -20,6 +20,8 @@ type Manifest struct {
 	Name     string `json:"name"`
 	Backend  string `json:"backend,omitempty"`
 	Frontend string `json:"frontend,omitempty"`
+	// GraphQL marks a plugin whose backend extends the application's GraphQL API.
+	GraphQL bool `json:"graphql,omitempty"`
 
 	Description string            `json:"description,omitempty"`
 	Version     string            `json:"version,omitempty"`
@@ -120,8 +122,8 @@ type manifest Manifest
 
 // typedKeys are the manifest keys Manifest has a field for.
 var typedKeys = []string{
-	"id", "name", "backend", "frontend", "description", "version", "license", "did", "requires", "tested", "engines",
-	"uninstall", "hooks", "defines", "jobs", "settings", "menu", "screens", "screen_capabilities",
+	"id", "name", "backend", "frontend", "graphql", "description", "version", "license", "did", "requires", "tested",
+	"engines", "uninstall", "hooks", "defines", "jobs", "settings", "menu", "screens", "screen_capabilities",
 }
 
 // isTypedKey reports whether key is the json name of a field of Manifest.

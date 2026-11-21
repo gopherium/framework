@@ -14,6 +14,7 @@ func wrongCaseKeys() map[string]wrongShape {
 			`"DESCRIPTION": "Sells seats"`, `the key "DESCRIPTION" must be spelled "description"`,
 		},
 		"a top level key in mixed case":           {`"Version": "2.0.0"`, `the key "Version" must be spelled "version"`},
+		"graphql spelled as its Go field":         {`"GraphQL": true`, `the key "GraphQL" must be spelled "graphql"`},
 		"a top level key beside its own spelling": {`"Name": "Other"`, `the key "Name" must be spelled "name"`},
 		"a top level key with an underscore": {
 			`"Screen_Capabilities": {"seats": "a"}`, `the key "Screen_Capabilities" must be spelled "screen_capabilities"`,
@@ -84,7 +85,7 @@ func repeatedKeys() map[string]wrongShape {
 func TestLoadReadsAKeyOfDataAsWritten(t *testing.T) {
 	t.Parallel()
 
-	got := feedWith(t, `"GraphQL": true, "note": 1, "Note": 2, "ver-sion": "a", "ver_sion": "b", `+
+	got := feedWith(t, `"Featured": true, "note": 1, "Note": 2, "ver-sion": "a", "ver_sion": "b", `+
 		`"pages": [{"Word": "forums", "word": "topics"}], "requires": {"App": ">=1", "app": ">=2"}, `+
 		`"screen_capabilities": {"Seats": "events.manage"}, "settings": [{"key": "a", "type": "b", "Note": 1}]`)
 
@@ -92,7 +93,7 @@ func TestLoadReadsAKeyOfDataAsWritten(t *testing.T) {
 	assertSame(t, got.ScreenCapabilities, map[string]string{"Seats": "events.manage"})
 	assertSame(t, got.Settings, []Setting{{Key: "a", Type: "b"}})
 	assertSame(t, got.Extra, map[string]json.RawMessage{
-		"GraphQL":  json.RawMessage(`true`),
+		"Featured": json.RawMessage(`true`),
 		"note":     json.RawMessage(`1`),
 		"Note":     json.RawMessage(`2`),
 		"ver-sion": json.RawMessage(`"a"`),
