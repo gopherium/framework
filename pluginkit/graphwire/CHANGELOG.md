@@ -17,6 +17,8 @@ stdlib-only `pluginkit` module so its gqlparser dependency never enters
 ### Changed
 
 - The module needs Go 1.27.4.
+- `Run` reads each plugin.json with `wire.Read` and rejects every manifest `wire.Read` rejects, with its error, a breaking change.
+- The module requires `github.com/gopherium/framework/pluginkit` for that reader, so an application on this version takes that pluginkit too.
 
 ## [0.4.0] - 2026-09-26
 

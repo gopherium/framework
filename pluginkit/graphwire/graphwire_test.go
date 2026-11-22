@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/gopherium/framework/pluginkit/wire"
 )
 
 var testConfig = Config{
@@ -692,5 +694,77 @@ func TestGraphQLPluginsRequireABackend(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "backend") {
 		t.Errorf("Run() error = %v, want the missing backend reported", err)
+	}
+}
+
+func TestRunRejectsEveryManifestWireRejects(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		dir      string
+		manifest string
+		want     string
+	}{
+		"graphql spelled in another case": {"alpha",
+			`{"id": "alpha", "name": "Alpha", "backend": "example.com/myapp/plugins/alpha", "GraphQL": true}`,
+			`the key "GraphQL" must be spelled "graphql"`},
+		"graphql repeated": {"alpha",
+			`{"id": "alpha", "name": "Alpha", "backend": "example.com/alpha", "graphql": false, "graphql": true}`,
+			`the key "graphql" appears twice`},
+		"backend repeated": {"alpha",
+			`{"id": "alpha", "name": "Alpha", "backend": "example.com/one", "backend": "example.com/two", "graphql": true}`,
+			`the key "backend" appears twice`},
+		"text that is not UTF-8": {"alpha",
+			`{"id": "alpha", "name": "Alph` + "\xff" + `", "backend": "example.com/alpha", "graphql": true}`,
+			"the manifest holds text that is not valid UTF-8"},
+		"an id out of the id pattern": {"Alpha",
+			`{"id": "Alpha", "name": "Alpha", "backend": "example.com/myapp/plugins/alpha", "graphql": true}`,
+			`id "Alpha" must match ^[a-z][a-z0-9-]*$`},
+		"an id naming another directory": {"alpha",
+			`{"id": "beta", "name": "Beta", "backend": "example.com/myapp/plugins/beta", "graphql": true}`,
+			`id "beta" does not match directory "alpha"`},
+		"no name": {"alpha",
+			`{"id": "alpha", "backend": "example.com/myapp/plugins/alpha", "graphql": true}`,
+			"name is required"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			writeCore(t, root)
+			writePlugin(t, root, tc.dir, tc.manifest, alphaSchema)
+			if err := os.MkdirAll(filepath.Join(root, "cmd", "myapp"), 0o755); err != nil {
+				t.Fatalf("creating the output directory: %v", err)
+			}
+			path := filepath.Join(root, "plugins", tc.dir, "plugin.json")
+
+			err := Run(root, testConfig)
+
+			if want := "graphwire: " + path + ": " + tc.want; err == nil || err.Error() != want {
+				t.Errorf("Run() error = %v, want %q", err, want)
+			}
+			_, wireErr := wire.Load(root, []string{"plugins"}, nil)
+			if want := "pluginwire: " + path + ": " + tc.want; wireErr == nil || wireErr.Error() != want {
+				t.Errorf("wire.Load() error = %v, want %q", wireErr, want)
+			}
+		})
+	}
+}
+
+func TestRunChecksTheManifestBeforeItsDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeCore(t, root)
+	writePlugin(t, root, "alpha",
+		`{"id": "beta", "backend": "example.com/myapp/plugins/beta", "graphql": true}`,
+		alphaSchema)
+
+	err := Run(root, testConfig)
+
+	want := "graphwire: " + filepath.Join(root, "plugins", "alpha", "plugin.json") + ": name is required"
+	if err == nil || err.Error() != want {
+		t.Errorf("Run() error = %v, want %q", err, want)
 	}
 }

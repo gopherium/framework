@@ -5,7 +5,6 @@
 package graphwire
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"go/format"
@@ -13,12 +12,13 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
+
+	"github.com/gopherium/framework/pluginkit/wire"
 )
 
 // Config parameterizes the resolver root generation for the consuming application.
@@ -66,12 +66,10 @@ func validateConfig(cfg Config) error {
 	return nil
 }
 
-// manifest is the subset of plugin.json the graph wiring reads.
+// manifest is one plugin.json as wire reads it, with the plugin root it came from.
 type manifest struct {
-	ID      string `json:"id"`
-	Backend string `json:"backend"`
-	GraphQL bool   `json:"graphql"`
-	root    string
+	wire.Manifest
+	root string
 }
 
 // roots returns the plugin root directories scanned in order, defaulting to plugins.
@@ -103,8 +101,6 @@ func loadRoots(dir string, roots []string) ([]manifest, error) {
 	return manifests, nil
 }
 
-var idPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-
 // loadManifests loads the plugin manifest in each subdirectory of dir.
 func loadManifests(dir string) ([]manifest, error) {
 	entries, err := os.ReadDir(dir)
@@ -116,8 +112,7 @@ func loadManifests(dir string) ([]manifest, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		path := filepath.Join(dir, entry.Name(), "plugin.json")
-		m, err := loadManifest(path, entry.Name())
+		m, err := loadManifest(dir, entry.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -126,29 +121,25 @@ func loadManifests(dir string) ([]manifest, error) {
 	return manifests, nil
 }
 
-// loadManifest reads and validates one plugin manifest.
-func loadManifest(path, dir string) (manifest, error) {
-	data, err := os.ReadFile(path)
+// loadManifest reads and checks the plugin.json in directory name under dir through wire, its path before any error.
+func loadManifest(dir, name string) (manifest, error) {
+	read, err := wire.Read(os.DirFS(filepath.Join(dir, name)))
+	if err == nil {
+		err = validateManifest(read, name)
+	}
 	if err != nil {
-		return manifest{}, fmt.Errorf("graphwire: %s: %w", path, err)
+		return manifest{}, fmt.Errorf("graphwire: %s: %w", filepath.Join(dir, name, "plugin.json"), err)
 	}
-	var m manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return manifest{}, fmt.Errorf("graphwire: %s: %w", path, err)
-	}
-	if err := validateManifest(m, path, dir); err != nil {
-		return manifest{}, err
-	}
-	return m, nil
+	return manifest{Manifest: read}, nil
 }
 
-// validateManifest checks the manifest fields the graph wiring relies on.
-func validateManifest(m manifest, path, dir string) error {
-	if !idPattern.MatchString(m.ID) || m.ID != dir {
-		return fmt.Errorf("graphwire: %s: id %q does not match directory %q", path, m.ID, dir)
+// validateManifest checks that m names its directory dir and that a graphql plugin has a backend.
+func validateManifest(m wire.Manifest, dir string) error {
+	if m.ID != dir {
+		return fmt.Errorf("id %q does not match directory %q", m.ID, dir)
 	}
 	if m.GraphQL && m.Backend == "" {
-		return fmt.Errorf("graphwire: %s: graphql plugins require a backend", path)
+		return errors.New("graphql plugins require a backend")
 	}
 	return nil
 }

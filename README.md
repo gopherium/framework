@@ -49,8 +49,9 @@ One repository, one self-contained brick per directory. A Go brick
 carries its own go.mod and a TypeScript brick its own package.json,
 each with its own CHANGELOG and lint configuration, released
 independently under a path-prefixed tag such as `mailkit/v0.1.0` or
-`gottext/v0.4.0`. Bricks share code only through those published tags,
-never through sibling source, so what you pin is what you get.
+`gottext/v0.4.0`. Bricks share code only through those published tags
+or the Go pseudo-version of a commit on main, never through sibling
+source, so what you pin is what you get.
 
 ## Reporting security issues
 
