@@ -23,6 +23,7 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 - `settings.Name` names the variable of each setting from the application's prefix, the plugin's id and the key.
 - `Schema.Resolve` works out each value from the environment values the application found, then from the default. An empty value counts as unset, and a value its type rejects is named by its variable.
 - A secret's value is a `settings.Hidden`, which prints, logs and encodes as `set` or `not set`.
+- `ScreenGate` is an optional interface whose `ShowsScreens` tells an application whether a plugin's admin menu entries and screens show for the caller in the context.
 - The module needs Go 1.27.4.
 
 ## 0.12.0 - 2026-11-07
