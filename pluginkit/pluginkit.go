@@ -63,3 +63,9 @@ type PublicPathProvider interface {
 	// PublicPaths returns those paths, whether or not Start ran or worked.
 	PublicPaths() []string
 }
+
+// ScreenGate is implemented by plugins whose admin menu entries and screens show only for some callers.
+type ScreenGate interface {
+	// ShowsScreens reports whether they show for the caller ctx carries, returning by the time ctx ends.
+	ShowsScreens(ctx context.Context) (bool, error)
+}
