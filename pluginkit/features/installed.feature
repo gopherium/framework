@@ -3,11 +3,11 @@ Feature: Listing the installed plugins
   WordPress lists its installed plugins. The list joins the manifest of
   each compiled plugin with the record the store keeps of it. Each row
   holds the plugin's id, the name, description and version its manifest
-  gives, and the state its record holds. A paused row also holds the step
-  the plugin failed at and its own error, kept apart, so a screen can
-  build its sentence for the step from a translated template. A plugin
-  the application has not installed and a record whose plugin is no
-  longer compiled are left out.
+  gives, whether it declares any settings, and the state its record
+  holds. A paused row also holds the step the plugin failed at and its
+  own error, kept apart, so a screen can build its sentence for the step
+  from a translated template. A plugin the application has not installed
+  and a record whose plugin is no longer compiled are left out.
 
   Scenario: An active plugin is listed with the name, description and version of its manifest
     Given the compiled plugins "feed"
@@ -63,6 +63,16 @@ Feature: Listing the installed plugins
     And the store records "feed" as active
     When the application lists the installed plugins
     Then the list holds "feed" as "active" with no description and no version
+
+  Scenario: A plugin whose manifest declares a setting is listed with settings
+    Given the compiled plugins "events" and "feed"
+    And the manifest of "events" names it "Events"
+    And the manifest of "feed" names it "Feed"
+    And the manifest of "feed" declares the setting "title"
+    And the store holds no record
+    When the application lists the installed plugins
+    Then the list holds "feed" with settings
+    And the list holds "events" without settings
 
   Scenario: The plugins are listed by name, then by id
     Given the compiled plugins "events", "feed" and "gallery"

@@ -10,7 +10,7 @@ import (
 	"github.com/gopherium/framework/pluginkit/wire"
 )
 
-// InstalledPlugin is one compiled plugin a Plugins screen lists, with its state and why it paused.
+// InstalledPlugin is one compiled plugin a Plugins screen lists: its state, why it paused and whether it has settings.
 type InstalledPlugin struct {
 	ID           string      `json:"id"`
 	Name         string      `json:"name"`
@@ -19,6 +19,7 @@ type InstalledPlugin struct {
 	State        PluginState `json:"status"`
 	PausedStep   Step        `json:"paused_step"`
 	PausedReason string      `json:"paused_reason"`
+	HasSettings  bool        `json:"has_settings"`
 }
 
 // Installed lists each manifest the records hold as installed, by name then id, one with no record as active.
@@ -46,7 +47,7 @@ func byName(a, b InstalledPlugin) int {
 func installedFrom(manifest wire.Manifest, record PluginRecord) InstalledPlugin {
 	plugin := InstalledPlugin{
 		ID: manifest.ID, Name: manifest.Name, Description: manifest.Description, Version: manifest.Version,
-		State: record.State,
+		State: record.State, HasSettings: len(manifest.Settings) > 0,
 	}
 	if record.State == PluginPaused {
 		plugin.PausedStep, plugin.PausedReason = record.Step, record.LastError
