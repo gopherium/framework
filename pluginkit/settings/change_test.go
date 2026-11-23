@@ -323,14 +323,19 @@ func TestCheckChangeNeverShowsTheValueOfASecret(t *testing.T) {
 		{change: map[string]string{"api_key": knownSecret, "colour": "green"}},
 	}
 	for _, c := range cases {
-		err := schema.CheckChange(c.change, c.env)
-		if err == nil {
-			t.Fatalf("CheckChange(%v) = nil, want a rejection", c.change)
-		}
-		for _, out := range renderings(err) {
-			if strings.Contains(out, knownSecret) || strings.Contains(out, anotherSecret) {
-				t.Errorf("a rendering of the rejection of %v shows a secret: %q", c.change, out)
-			}
+		rejectsShowingNoSecret(t, c.change, schema.CheckChange(c.change, c.env))
+	}
+}
+
+// rejectsShowingNoSecret fails t unless err rejects change and no rendering of it shows a test secret.
+func rejectsShowingNoSecret(t *testing.T, change map[string]string, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("CheckChange(%v) = nil, want a rejection", change)
+	}
+	for _, out := range renderings(err) {
+		if strings.Contains(out, knownSecret) || strings.Contains(out, anotherSecret) {
+			t.Errorf("a rendering of the rejection of %v shows a secret: %q", change, out)
 		}
 	}
 }
