@@ -78,14 +78,19 @@ func (w *installedWorld) holdsPaused(id, step, reason string) error {
 
 // holdsSettings checks that the row of the plugin id says it declares settings when with reads with, none otherwise.
 func (w *installedWorld) holdsSettings(id, with string) error {
-	at := slices.IndexFunc(w.listed, func(plugin pluginkit.InstalledPlugin) bool { return plugin.ID == id })
-	if at < 0 {
-		return fmt.Errorf("the list holds %+v, want a row of %s", w.listed, id)
+	want := w.listedRow(id)
+	want.HasSettings = with == "with"
+	return w.holds(want)
+}
+
+// listedRow returns the listed row of the plugin id, a row with only the id when the list holds none.
+func (w *installedWorld) listedRow(id string) pluginkit.InstalledPlugin {
+	for _, plugin := range w.listed {
+		if plugin.ID == id {
+			return plugin
+		}
 	}
-	if got, want := w.listed[at].HasSettings, with == "with"; got != want {
-		return fmt.Errorf("the row of %s says it has settings %t, want %t", id, got, want)
-	}
-	return nil
+	return pluginkit.InstalledPlugin{ID: id}
 }
 
 // namesInOrder checks that the list holds exactly the plugins of list, in order.
