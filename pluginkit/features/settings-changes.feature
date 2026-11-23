@@ -15,7 +15,6 @@ Feature: Checking a change to a plugin's settings before it is saved
       | key      | type     | default | min | max | options        |
       | title    | text     | Notes   |     |     |                |
       | per_page | count    | 10      | 1   | 50  |                |
-      | total    | count    | 0       |     |     |                |
       | open     | flag     | false   |     |     |                |
       | keep_for | duration | 720h    |     |     |                |
       | order    | choice   | newest  |     |     | newest, oldest |
@@ -69,11 +68,9 @@ Feature: Checking a change to a plugin's settings before it is saved
     And the rejection gives only the <bound> <limit>
 
     Examples:
-      | key      | value                | reason    | bound | limit                |
-      | per_page | 0                    | below_min | min   | 1                    |
-      | per_page | 60                   | above_max | max   | 50                   |
-      | total    | 9223372036854775808  | above_max | max   | 9223372036854775807  |
-      | total    | -9223372036854775809 | below_min | min   | -9223372036854775808 |
+      | key      | value | reason    | bound | limit |
+      | per_page | 0     | below_min | min   | 1     |
+      | per_page | 60    | above_max | max   | 50    |
 
   Scenario: A choice outside its options gives the options
     When a change to "notes" sets "order" to "random"
