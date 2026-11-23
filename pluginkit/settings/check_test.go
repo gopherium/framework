@@ -144,7 +144,8 @@ func TestCheckAnswersEachSettingReadyToResolve(t *testing.T) {
 	}
 	one, fifty := 1, 50
 	want := Schema{ID: "notes", Fields: []Field{
-		{Key: "title", Type: TypeText, Env: "APP_PLUGIN_NOTES__TITLE", Default: "Notes"},
+		{Key: "title", Type: TypeText, Label: "Title", Help: "The title readers see", Env: "APP_PLUGIN_NOTES__TITLE",
+			Default: "Notes"},
 		{Key: "per_page", Type: TypeCount, Env: "APP_PLUGIN_NOTES__PER_PAGE", Default: "10", Min: &one, Max: &fifty},
 		{Key: "open", Type: TypeFlag, Env: "APP_PLUGIN_NOTES__OPEN"},
 		{Key: "keep_for", Type: TypeDuration, Env: "APP_PLUGIN_NOTES__KEEP_FOR", Default: "720h"},
@@ -155,6 +156,38 @@ func TestCheckAnswersEachSettingReadyToResolve(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(schema, want) {
 		t.Errorf("Check = %+v, want %+v", schema, want)
+	}
+}
+
+func TestCheckKeepsTheLabelAndHelpOfEachSetting(t *testing.T) {
+	declared := everyType()
+	for i := range declared {
+		declared[i].Label, declared[i].Help = "Label of "+declared[i].Key, "Help for "+declared[i].Key
+	}
+	schema, err := Check("notes", declared, appRules)
+	if err != nil {
+		t.Fatalf("Check = %v, want nil", err)
+	}
+	if len(schema.Fields) != len(declared) {
+		t.Fatalf("Check answered %d fields, want %d", len(schema.Fields), len(declared))
+	}
+	for i, field := range schema.Fields {
+		if field.Label != declared[i].Label {
+			t.Errorf("%s: label %q, want %q", field.Key, field.Label, declared[i].Label)
+		}
+		if field.Help != declared[i].Help {
+			t.Errorf("%s: help %q, want %q", field.Key, field.Help, declared[i].Help)
+		}
+	}
+}
+
+func TestCheckLeavesTheLabelAndHelpEmptyWhenTheManifestGivesNone(t *testing.T) {
+	schema, err := Check("notes", []wire.Setting{{Key: "title", Type: TypeText}}, appRules)
+	if err != nil {
+		t.Fatalf("Check = %v, want nil", err)
+	}
+	if field := schema.Fields[0]; field.Label != "" || field.Help != "" {
+		t.Errorf("a setting with no label or help answered %q and %q", field.Label, field.Help)
 	}
 }
 

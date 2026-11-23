@@ -7,38 +7,76 @@ import (
 	"strings"
 )
 
-// Resolve works out each field's value from found, the environment values by variable name, then from its default.
-func (s Schema) Resolve(found map[string]string) (Values, error) {
+// Sources holds what an application found for a schema: environment values by variable name and saved values by key.
+type Sources struct {
+	Env   map[string]string
+	Saved map[string]string
+}
+
+// RejectedSavedValue is a saved value its field no longer takes, so the default applies.
+type RejectedSavedValue struct {
+	Key string
+	Err error
+}
+
+// Resolve works out each field from the environment, then the saved value, then the default.
+func (s Schema) Resolve(found Sources) (Values, []RejectedSavedValue, error) {
 	values := make(Values, len(s.Fields))
+	var rejected []RejectedSavedValue
 	for _, field := range s.Fields {
-		value, err := field.read(field.pick(found[field.Env]))
+		value, report, err := field.resolve(found)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", field.Env, err)
+			return nil, nil, fmt.Errorf("%s: %w", field.Env, err)
+		}
+		if report != nil {
+			rejected = append(rejected, *report)
 		}
 		values[field.Key] = value
 	}
-	return values, nil
+	return values, rejected, nil
 }
 
-// pick returns the environment's value of the field, its default when the value is blank, a secret taking no default.
-func (f Field) pick(found string) string {
-	if f.Type == TypeSecret {
-		return found
-	}
-	if value := strings.TrimSpace(found); value != "" {
-		return value
-	}
-	return strings.TrimSpace(f.Default)
-}
-
-// read returns value read by the field's type, the zero value of the type when value is empty.
-func (f Field) read(value string) (Value, error) {
+// resolve returns the field's value from found, with the report of a saved value it passed over for the default.
+func (f Field) resolve(found Sources) (Value, *RejectedSavedValue, error) {
 	parse, err := parserOf(f.Type)
 	if err != nil {
-		return Value{}, err
+		return Value{}, nil, err
 	}
-	if value == "" {
-		return Value{Type: f.Type}, nil
+	if env := found.Env[f.Env]; strings.TrimSpace(env) != "" {
+		value, err := parse(f, env)
+		value.Source = SourceEnvironment
+		return value, nil, err
 	}
-	return parse(f, value)
+	saved, isSaved := found.Saved[f.Key]
+	if !isSaved {
+		value, err := f.byDefault(parse)
+		return value, nil, err
+	}
+	value, rejection := f.fromSaved(parse, saved)
+	if rejection == nil {
+		return value, nil, nil
+	}
+	value, err = f.byDefault(parse)
+	return value, &RejectedSavedValue{Key: f.Key, Err: rejection}, err
+}
+
+// fromSaved returns the saved value read by parse, or why the field rejects it, a secret rejecting any saved value.
+func (f Field) fromSaved(parse parser, saved string) (Value, error) {
+	if f.Type == TypeSecret {
+		return Value{}, &ValueError{Reason: ReasonEnvironmentOnly, text: "a secret comes from the environment only"}
+	}
+	value, err := parse(f, saved)
+	value.Source = SourceSaved
+	return value, err
+}
+
+// byDefault returns the field's default read by parse, the zero value of its type when it has none or is a secret.
+func (f Field) byDefault(parse parser) (Value, error) {
+	text := strings.TrimSpace(f.Default)
+	if text == "" || f.Type == TypeSecret {
+		return Value{Type: f.Type, Source: SourceDefault}, nil
+	}
+	value, err := parse(f, text)
+	value.Source = SourceDefault
+	return value, err
 }

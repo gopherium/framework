@@ -85,7 +85,7 @@ func checkShape(setting wire.Setting) error {
 	return nil
 }
 
-// fieldOf returns the field of setting, its bounds read as whole numbers with min not above max.
+// fieldOf returns the field of setting with its label and help, its bounds whole numbers with min not above max.
 func fieldOf(setting wire.Setting) (Field, error) {
 	low, err := wholeBound("min", setting.Min)
 	if err != nil {
@@ -101,6 +101,8 @@ func fieldOf(setting wire.Setting) (Field, error) {
 	return Field{
 		Key:     setting.Key,
 		Type:    setting.Type,
+		Label:   setting.Label,
+		Help:    setting.Help,
 		Default: setting.Default,
 		Min:     low,
 		Max:     high,

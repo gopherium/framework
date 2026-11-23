@@ -53,6 +53,28 @@ func renderings(value any) []string {
 	return append(append(prints(value), logged(value)...), encoded(value))
 }
 
+func TestSourcesReadAsTheNamesAnApplicationSends(t *testing.T) {
+	cases := []struct {
+		got, want string
+	}{
+		{SourceEnvironment, "environment"},
+		{SourceSaved, "saved"},
+		{SourceDefault, "default"},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("source %q, want %q", c.got, c.want)
+		}
+	}
+}
+
+func TestValueKeepsWhereItCameFrom(t *testing.T) {
+	value := Value{Type: TypeText, Source: SourceSaved, Text: "Field Notes"}
+	if got := encoded(value); !strings.Contains(got, `"Source":"saved"`) {
+		t.Errorf("the JSON of a saved value %s does not say it was saved", got)
+	}
+}
+
 func TestHiddenRevealsItsText(t *testing.T) {
 	if got := hide(knownSecret).Reveal(); got != knownSecret {
 		t.Errorf("Reveal() = %q, want %q", got, knownSecret)
@@ -138,8 +160,8 @@ func TestHiddenNeverShowsItsTextWhereverItSits(t *testing.T) {
 		"slice":              []Hidden{h},
 		"unexported field":   holder{secret: h},
 		"unexported pointer": &holder{secret: h},
-		"value":              Value{Type: TypeSecret, Secret: h},
-		"values":             Values{"api_key": {Type: TypeSecret, Secret: h}},
+		"value":              Value{Type: TypeSecret, Source: SourceEnvironment, Secret: h},
+		"values":             Values{"api_key": {Type: TypeSecret, Source: SourceEnvironment, Secret: h}},
 		"any map":            map[string]any{"api_key": h},
 	}
 	for place, value := range places {

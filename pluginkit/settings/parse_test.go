@@ -3,6 +3,7 @@
 package settings
 
 import (
+	"errors"
 	"math"
 	"reflect"
 	"strconv"
@@ -18,12 +19,13 @@ func bound(n int) *int {
 	return &n
 }
 
-// parseCase is one value a parser reads and the reading or the error it answers.
+// parseCase is one value a parser reads and the reading, or the error text and reason, it answers.
 type parseCase struct {
-	field Field
-	value string
-	want  Value
-	err   string
+	field  Field
+	value  string
+	want   Value
+	err    string
+	reason string
 }
 
 // runParse reads each case's value with the parser of its field's type and compares what it answers.
@@ -52,11 +54,19 @@ func checkParse(t *testing.T, c parseCase) {
 	}
 }
 
-// wantError reports err when it is not the error the case expects.
+// wantError reports err when it is not the value error the case expects, by its text and its reason.
 func wantError(t *testing.T, c parseCase, err error) {
 	t.Helper()
 	if err == nil || err.Error() != c.err {
 		t.Errorf("%s %q: error %v, want %q", c.field.Type, c.value, err, c.err)
+	}
+	var valueErr *ValueError
+	if !errors.As(err, &valueErr) {
+		t.Errorf("%s %q: error %v is no value error", c.field.Type, c.value, err)
+		return
+	}
+	if valueErr.Reason != c.reason {
+		t.Errorf("%s %q: reason %q, want %q", c.field.Type, c.value, valueErr.Reason, c.reason)
 	}
 }
 
@@ -94,11 +104,11 @@ func TestParseCountReadsAWholeNumber(t *testing.T) {
 func TestParseCountRejectsAnythingButAWholeNumber(t *testing.T) {
 	open := Field{Type: TypeCount}
 	runParse(t, []parseCase{
-		{field: open, value: "banana", err: `must be a whole number, got "banana"`},
-		{field: open, value: "2.5", err: `must be a whole number, got "2.5"`},
-		{field: open, value: "1e3", err: `must be a whole number, got "1e3"`},
-		{field: open, value: "", err: `must be a whole number, got ""`},
-		{field: open, value: " 2 5 ", err: `must be a whole number, got "2 5"`},
+		{field: open, value: "banana", err: `must be a whole number, got "banana"`, reason: ReasonNotWhole},
+		{field: open, value: "2.5", err: `must be a whole number, got "2.5"`, reason: ReasonNotWhole},
+		{field: open, value: "1e3", err: `must be a whole number, got "1e3"`, reason: ReasonNotWhole},
+		{field: open, value: "", err: `must be a whole number, got ""`, reason: ReasonNotWhole},
+		{field: open, value: " 2 5 ", err: `must be a whole number, got "2 5"`, reason: ReasonNotWhole},
 	})
 }
 
@@ -107,9 +117,10 @@ func TestParseCountKeepsWithinItsBounds(t *testing.T) {
 	runParse(t, []parseCase{
 		{field: seats, value: "1", want: Value{Type: TypeCount, Count: 1}},
 		{field: seats, value: "50", want: Value{Type: TypeCount, Count: 50}},
-		{field: seats, value: "60", err: `must stand at or below 50, got "60"`},
-		{field: seats, value: "0", err: `must stand at or above 1, got "0"`},
-		{field: seats, value: "-4", err: `must stand at or above 1, got "-4"`},
+		{field: seats, value: "51", err: `must stand at or below 50, got "51"`, reason: ReasonAboveMax},
+		{field: seats, value: "60", err: `must stand at or below 50, got "60"`, reason: ReasonAboveMax},
+		{field: seats, value: "0", err: `must stand at or above 1, got "0"`, reason: ReasonBelowMin},
+		{field: seats, value: "-4", err: `must stand at or above 1, got "-4"`, reason: ReasonBelowMin},
 	})
 }
 
@@ -117,13 +128,30 @@ func TestParseCountRejectsANumberPastTheInt(t *testing.T) {
 	top, bottom := strconv.Itoa(math.MaxInt), strconv.Itoa(math.MinInt)
 	runParse(t, []parseCase{
 		{field: Field{Type: TypeCount}, value: beyondEveryInt,
-			err: "must stand at or below " + top + `, got "` + beyondEveryInt + `"`},
+			err: "must stand at or below " + top + `, got "` + beyondEveryInt + `"`, reason: ReasonAboveMax},
 		{field: Field{Type: TypeCount}, value: "-" + beyondEveryInt,
-			err: "must stand at or above " + bottom + `, got "-` + beyondEveryInt + `"`},
+			err: "must stand at or above " + bottom + `, got "-` + beyondEveryInt + `"`, reason: ReasonBelowMin},
 		{field: Field{Type: TypeCount, Max: bound(50)}, value: beyondEveryInt,
-			err: `must stand at or below 50, got "` + beyondEveryInt + `"`},
+			err: `must stand at or below 50, got "` + beyondEveryInt + `"`, reason: ReasonAboveMax},
 		{field: Field{Type: TypeCount, Min: bound(1)}, value: "-" + beyondEveryInt,
-			err: `must stand at or above 1, got "-` + beyondEveryInt + `"`},
+			err: `must stand at or above 1, got "-` + beyondEveryInt + `"`, reason: ReasonBelowMin},
+		{field: Field{Type: TypeCount, Min: bound(1)}, value: beyondEveryInt,
+			err: "must stand at or below " + top + `, got "` + beyondEveryInt + `"`, reason: ReasonAboveMax},
+		{field: Field{Type: TypeCount, Max: bound(50)}, value: "-" + beyondEveryInt,
+			err: "must stand at or above " + bottom + `, got "-` + beyondEveryInt + `"`, reason: ReasonBelowMin},
+	})
+}
+
+func TestParseCountWithNoBoundsRejectsTheFirstNumberPastEachIntLimit(t *testing.T) {
+	open := Field{Type: TypeCount}
+	top, bottom := strconv.Itoa(math.MaxInt), strconv.Itoa(math.MinInt)
+	above := strconv.FormatUint(uint64(math.MaxInt)+1, 10)
+	below := "-" + strconv.FormatUint(uint64(math.MaxInt)+2, 10)
+	runParse(t, []parseCase{
+		{field: open, value: above, err: "must stand at or below " + top + `, got "` + above + `"`,
+			reason: ReasonAboveMax},
+		{field: open, value: below, err: "must stand at or above " + bottom + `, got "` + below + `"`,
+			reason: ReasonBelowMin},
 	})
 }
 
@@ -142,22 +170,35 @@ func TestParseFlagReadsEveryWordParseBoolTakes(t *testing.T) {
 func TestParseFlagRejectsAnotherWord(t *testing.T) {
 	flag := Field{Type: TypeFlag}
 	runParse(t, []parseCase{
-		{field: flag, value: "maybe", err: `must be true or false, got "maybe"`},
-		{field: flag, value: "yes", err: `must be true or false, got "yes"`},
+		{field: flag, value: "maybe", err: `must be true or false, got "maybe"`, reason: ReasonNotFlag},
+		{field: flag, value: "yes", err: `must be true or false, got "yes"`, reason: ReasonNotFlag},
+		{field: flag, value: "", err: `must be true or false, got ""`, reason: ReasonNotFlag},
 	})
 }
 
 func TestParseDurationReadsADurationAboveZero(t *testing.T) {
 	keep := Field{Type: TypeDuration}
 	runParse(t, []parseCase{
-		{field: keep, value: "30s", want: Value{Type: TypeDuration, Duration: 30 * time.Second}},
-		{field: keep, value: " 720h ", want: Value{Type: TypeDuration, Duration: 720 * time.Hour}},
-		{field: keep, value: "1h30m", want: Value{Type: TypeDuration, Duration: 90 * time.Minute}},
-		{field: keep, value: "soon", err: `must be a duration like 30s, got "soon"`},
-		{field: keep, value: "30", err: `must be a duration like 30s, got "30"`},
-		{field: keep, value: "-1h", err: `must stand above zero, got "-1h"`},
-		{field: keep, value: "0s", err: `must stand above zero, got "0s"`},
-		{field: keep, value: "9999999999h", err: `must be a duration like 30s, got "9999999999h"`},
+		{field: keep, value: "30s", want: Value{Type: TypeDuration, Text: "30s", Duration: 30 * time.Second}},
+		{field: keep, value: " 720h ", want: Value{Type: TypeDuration, Text: "720h", Duration: 720 * time.Hour}},
+		{field: keep, value: "1h30m", want: Value{Type: TypeDuration, Text: "1h30m", Duration: 90 * time.Minute}},
+		{field: keep, value: "1ns", want: Value{Type: TypeDuration, Text: "1ns", Duration: time.Nanosecond}},
+		{field: keep, value: "soon", err: `must be a duration like 30s, got "soon"`, reason: ReasonNotDuration},
+		{field: keep, value: "30", err: `must be a duration like 30s, got "30"`, reason: ReasonNotDuration},
+		{field: keep, value: "", err: `must be a duration like 30s, got ""`, reason: ReasonNotDuration},
+		{field: keep, value: "-1h", err: `must stand above zero, got "-1h"`, reason: ReasonNotPositive},
+		{field: keep, value: "0s", err: `must stand above zero, got "0s"`, reason: ReasonNotPositive},
+		{field: keep, value: "9999999999h", err: `must be a duration like 30s, got "9999999999h"`,
+			reason: ReasonNotDuration},
+	})
+}
+
+func TestParseDurationKeepsTheTextItReadTrimmed(t *testing.T) {
+	keep := Field{Type: TypeDuration}
+	runParse(t, []parseCase{
+		{field: keep, value: "2h", want: Value{Type: TypeDuration, Text: "2h", Duration: 2 * time.Hour}},
+		{field: keep, value: " 90m\t", want: Value{Type: TypeDuration, Text: "90m", Duration: 90 * time.Minute}},
+		{field: keep, value: "1h0m0s", want: Value{Type: TypeDuration, Text: "1h0m0s", Duration: time.Hour}},
 	})
 }
 
@@ -166,8 +207,9 @@ func TestParseChoiceReadsOneOfItsOptions(t *testing.T) {
 	runParse(t, []parseCase{
 		{field: order, value: "oldest", want: Value{Type: TypeChoice, Text: "oldest"}},
 		{field: order, value: " newest ", want: Value{Type: TypeChoice, Text: "newest"}},
-		{field: order, value: "random", err: `must be one of newest, oldest, got "random"`},
-		{field: order, value: "Newest", err: `must be one of newest, oldest, got "Newest"`},
+		{field: order, value: "random", err: `must be one of newest, oldest, got "random"`, reason: ReasonNotOption},
+		{field: order, value: "Newest", err: `must be one of newest, oldest, got "Newest"`, reason: ReasonNotOption},
+		{field: order, value: "", err: `must be one of newest, oldest, got ""`, reason: ReasonNotOption},
 	})
 }
 
@@ -197,6 +239,37 @@ func TestParseSecretFillsOnlyTheSecret(t *testing.T) {
 	got, _ := parse(Field{Type: TypeSecret}, knownSecret)
 	if got.Text != "" || got.Lines != nil {
 		t.Errorf("a secret filled %+v beside its Secret", got)
+	}
+}
+
+func TestReasonsReadAsTheNamesAnApplicationSends(t *testing.T) {
+	cases := []struct {
+		got, want string
+	}{
+		{ReasonNotWhole, "not_whole"},
+		{ReasonBelowMin, "below_min"},
+		{ReasonAboveMax, "above_max"},
+		{ReasonNotFlag, "not_flag"},
+		{ReasonNotDuration, "not_duration"},
+		{ReasonNotPositive, "not_positive"},
+		{ReasonNotOption, "not_option"},
+		{ReasonEnvironmentOnly, "environment_only"},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("reason %q, want %q", c.got, c.want)
+		}
+	}
+}
+
+func TestAnOptionThatStartsWithASpaceIsNoValueRejection(t *testing.T) {
+	err := trimmedOptions([]string{" newest"})
+	if want := `an option must not start or end with a space, got " newest"`; err == nil || err.Error() != want {
+		t.Fatalf("trimmedOptions = %v, want %q", err, want)
+	}
+	var valueErr *ValueError
+	if errors.As(err, &valueErr) {
+		t.Errorf("the option error %v names the reason %q, want no value error", err, valueErr.Reason)
 	}
 }
 

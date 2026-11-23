@@ -26,16 +26,27 @@ const (
 	TypeLines = "lines"
 )
 
+const (
+	// SourceEnvironment says a value came from the environment.
+	SourceEnvironment = "environment"
+	// SourceSaved says a value came from the values an administrator saved.
+	SourceSaved = "saved"
+	// SourceDefault says a value came from the setting's default.
+	SourceDefault = "default"
+)
+
 // Rules is what one application sets for every plugin: the start of each variable name and the key starts it reserves.
 type Rules struct {
 	Prefix   string
 	Reserved []string
 }
 
-// Field is one checked setting: its key, its type, the variable that sets it and the rules its value follows.
+// Field is one checked setting: its key, type, label and help, the variable that sets it and the rules of its value.
 type Field struct {
 	Key     string
 	Type    string
+	Label   string
+	Help    string
 	Env     string
 	Default string
 	Min     *int
@@ -49,9 +60,10 @@ type Schema struct {
 	Fields []Field
 }
 
-// Value is one resolved setting, with the reading of its type filled in.
+// Value is one resolved setting, with where it came from and the reading of its type filled in.
 type Value struct {
 	Type     string
+	Source   string
 	Text     string
 	Count    int
 	Flag     bool

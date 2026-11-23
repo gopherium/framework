@@ -19,7 +19,13 @@ type installedWorld struct {
 	named     map[string]string
 	described map[string]string
 	versions  map[string]string
+	settings  map[string][]wire.Setting
 	listed    []pluginkit.InstalledPlugin
+}
+
+// declaresSetting has the manifest of the plugin id declare a text setting under key.
+func (w *installedWorld) declaresSetting(id, key string) {
+	w.settings[id] = append(w.settings[id], wire.Setting{Key: key, Type: "text"})
 }
 
 // list joins the manifest of each compiled plugin with the store's records, as an application lists its plugins.
@@ -27,16 +33,17 @@ func (w *installedWorld) list() {
 	manifests := make([]wire.Manifest, 0, len(w.boot.compiled))
 	for _, id := range w.boot.compiled {
 		manifests = append(manifests, wire.Manifest{
-			ID: id, Name: w.named[id], Description: w.described[id], Version: w.versions[id],
+			ID: id, Name: w.named[id], Description: w.described[id], Version: w.versions[id], Settings: w.settings[id],
 		})
 	}
 	w.listed = pluginkit.Installed(manifests, w.boot.seeds)
 }
 
-// row returns the row the plugin id should have in state, with the name, description and version its manifest gives.
+// row returns the row the plugin id should have in state, with the words and the settings its manifest gives.
 func (w *installedWorld) row(id string, state pluginkit.PluginState) pluginkit.InstalledPlugin {
 	return pluginkit.InstalledPlugin{
 		ID: id, Name: w.named[id], Description: w.described[id], Version: w.versions[id], State: state,
+		HasSettings: len(w.settings[id]) > 0,
 	}
 }
 
@@ -69,6 +76,23 @@ func (w *installedWorld) holdsPaused(id, step, reason string) error {
 	return w.holds(want)
 }
 
+// holdsSettings checks that the row of the plugin id says it declares settings when with reads with, none otherwise.
+func (w *installedWorld) holdsSettings(id, with string) error {
+	want := w.listedRow(id)
+	want.HasSettings = with == "with"
+	return w.holds(want)
+}
+
+// listedRow returns the listed row of the plugin id, a row with only the id when the list holds none.
+func (w *installedWorld) listedRow(id string) pluginkit.InstalledPlugin {
+	for _, plugin := range w.listed {
+		if plugin.ID == id {
+			return plugin
+		}
+	}
+	return pluginkit.InstalledPlugin{ID: id}
+}
+
 // namesInOrder checks that the list holds exactly the plugins of list, in order.
 func (w *installedWorld) namesInOrder(list string) error {
 	ids := make([]string, 0, len(w.listed))
@@ -94,10 +118,11 @@ func initializeInstalled(t *testing.T) func(*godog.ScenarioContext) {
 	return func(sc *godog.ScenarioContext) {
 		w := &installedWorld{
 			boot: newBootWorld(t), named: map[string]string{}, described: map[string]string{},
-			versions: map[string]string{},
+			versions: map[string]string{}, settings: map[string][]wire.Setting{},
 		}
 		givenBoot(sc, w.boot)
 		sc.Step(`^the manifest of "([^"]*)" names it "([^"]*)"$`, func(id, name string) { set(w.named, id, name) })
+		sc.Step(`^the manifest of "([^"]*)" declares the setting "([^"]*)"$`, w.declaresSetting)
 		sc.Step(`^the manifest of "([^"]*)" describes it as "([^"]*)"$`,
 			func(id, text string) { set(w.described, id, text) })
 		sc.Step(`^the manifest of "([^"]*)" gives the version "([^"]*)"$`,
@@ -106,6 +131,7 @@ func initializeInstalled(t *testing.T) func(*godog.ScenarioContext) {
 		sc.Step(`^the list holds "([^"]*)" as "(active|inactive)"$`, w.holdsAs)
 		sc.Step(`^the list holds "([^"]*)" as "(active|inactive)" with no description and no version$`, w.holdsBare)
 		sc.Step(`^the list holds "([^"]*)" as paused at "([^"]*)", its reason reading "(.*)"$`, w.holdsPaused)
+		sc.Step(`^the list holds "([^"]*)" (with|without) settings$`, w.holdsSettings)
 		sc.Step(`^the list names ((?:"[^"]*"(?:, | and )?)+), in that order$`, w.namesInOrder)
 		sc.Step(`^the list leaves out "([^"]*)"$`, w.leavesOut)
 	}

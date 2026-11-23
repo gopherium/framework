@@ -66,6 +66,14 @@ func TestSettingsDeclarations(t *testing.T) {
 	runFeature(t, "settings-declarations.feature", initializeSettings())
 }
 
+func TestSettingsSaved(t *testing.T) {
+	runFeature(t, "settings-saved.feature", initializeSettings())
+}
+
+func TestSettingsChanges(t *testing.T) {
+	runFeature(t, "settings-changes.feature", initializeSettings())
+}
+
 func TestScreenGate(t *testing.T) {
 	runFeature(t, "screen-gate.feature", initializeScreenGate(t))
 }

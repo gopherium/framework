@@ -160,6 +160,22 @@ func TestInstalledComparesNamesWithoutRegardToCase(t *testing.T) {
 	wantEqual(t, "ids", idsOf(got), []string{"lower", "upper", "bold", "zines"})
 }
 
+func TestInstalledSaysWhetherAPluginDeclaresSettings(t *testing.T) {
+	t.Parallel()
+
+	feed := feedManifest()
+	feed.Settings = []wire.Setting{{Key: "title", Type: "text"}}
+	manifests := []wire.Manifest{manifestOf("events", "Events"), feed}
+
+	got := pluginkit.Installed(manifests, nil)
+
+	withSettings := feedRow(pluginkit.PluginActive)
+	withSettings.HasSettings = true
+	wantEqual(t, "listed", got, []pluginkit.InstalledPlugin{
+		{ID: "events", Name: "Events", State: pluginkit.PluginActive}, withSettings,
+	})
+}
+
 func TestInstalledAnswersAnEmptyListThatEncodesAsOne(t *testing.T) {
 	t.Parallel()
 
@@ -175,11 +191,12 @@ func TestInstalledPluginEncodesUnderTheNamesAScreenReads(t *testing.T) {
 	t.Parallel()
 
 	row := feedRow(pluginkit.PluginPaused)
-	row.PausedStep, row.PausedReason = pluginkit.StepStart, "no route table"
+	row.PausedStep, row.PausedReason, row.HasSettings = pluginkit.StepStart, "no route table", true
 
 	data, err := json.Marshal(row)
 
 	assertErrorFree(t, err)
 	wantEqual(t, "JSON", string(data), `{"id":"feed","name":"Feed","description":"`+feedDescription+
-		`","version":"0.0.1","status":"paused","paused_step":"start","paused_reason":"no route table"}`)
+		`","version":"0.0.1","status":"paused","paused_step":"start","paused_reason":"no route table",`+
+		`"has_settings":true}`)
 }
