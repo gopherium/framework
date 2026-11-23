@@ -11,7 +11,7 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 - `Failure.Reason` is the plugin's own error with nothing in front, and a recovered panic reads `panicked: <value>`. `Failure.Err` keeps the whole text, so log lines read as before.
 - A boot whose context ends pauses nothing, and a store read or write that fails is returned to the application.
 - `pluginstoretest.Run` checks any `PluginStore` against the contract, and `pluginstoretest.NewMemory` is a store in memory that keeps it.
-- `Installed` lists one `InstalledPlugin` per installed plugin, with the JSON names `id`, `name`, `description`, `version`, `status`, `paused_step` and `paused_reason`, sorted by name without regard to case, then by id. It leaves out a plugin the records hold as not installed and a record with no manifest, and lists a manifest with no record as active. The step and the reason are empty unless the plugin is paused.
+- `Installed` lists one `InstalledPlugin` per installed plugin, with the JSON names `id`, `name`, `description`, `version`, `status`, `paused_step`, `paused_reason` and `has_settings`, sorted by name without regard to case, then by id. It leaves out a plugin the records hold as not installed and a record with no manifest, and lists a manifest with no record as active. The step and the reason are empty unless the plugin is paused, and `has_settings` is true when the manifest declares a setting.
 - `wire.Manifest` reads `description`, which no longer sits in `Extra`, a breaking change.
 - `wire.Manifest` reads `graphql` as `GraphQL`, which no longer sits in `Extra`, a breaking change.
 - `wire` rejects a manifest that spells a key it reads in another case, such as `Name`, repeats a name in one object, or holds text that is not valid UTF-8, as bytes or as an escaped surrogate with no pair, a breaking change.
@@ -21,8 +21,13 @@ Releases of this module are tagged `pluginkit/vX.Y.Z`. Releases up to
 - `RoutesEach` reads each plugin's routes and public paths inside a recover, and fails at the new `StepRoutes` a plugin whose `Routes` or `PublicPaths` panics, or whose `Routes` answers no handler.
 - `settings.Check` checks the settings a plugin declares: seven types (`text`, `count`, `flag`, `duration`, `choice`, `secret`, `lines`), each key lowercase words joined by one underscore and outside the starts the application reserves, whole-number bounds on a count only, the options of a choice, a default for a count, a duration and a choice that its type accepts, a flag default of true or false, no default for a secret, and no `of`. A plugin with settings may not hold two hyphens in a row in its id or end it with one.
 - `settings.Name` names the variable of each setting from the application's prefix, the plugin's id and the key.
-- `Schema.Resolve` works out each value from the environment values the application found, then from the default. An empty value counts as unset, and a value its type rejects is named by its variable.
+- `Schema.Resolve` takes `Sources`, the environment values by variable name and the saved values by key, and works out each value from the environment, then the saved value, then the default, setting its `Source`. A blank environment value counts as unset, for a secret too, and one its type rejects is named by its variable. A saved value its type no longer takes is reported as a `RejectedSavedValue` so the default applies, and a saved secret is never taken.
 - A secret's value is a `settings.Hidden`, which prints, logs and encodes as `set` or `not set`.
+- `settings.Field` keeps the `label` and `help` a manifest declares as `Label` and `Help`.
+- `Schema.CheckChange` checks a change against the schema and the environment before it is saved, and answers its first problem as a `ChangeError` of the kind `unknown`, `locked` or `invalid`.
+- A value its type rejects is a `settings.ValueError`, whose `Reason` is `not_whole`, `below_min`, `above_max`, `not_flag`, `not_duration`, `not_positive` or `not_option`, and whose text reads as before. A saved secret is reported with the reason `environment_only`.
+- `Schema.FormFields` describes each field for a settings form as a `FormField`, in manifest order, and a secret only as set or not set.
+- A duration `Value` keeps the text it was read from in `Text`, so `2h` stays `2h`.
 - `ScreenGate` is an optional interface whose `ShowsScreens` tells an application whether a plugin's admin menu entries and screens show for the caller in the context.
 - The module needs Go 1.27.4.
 
