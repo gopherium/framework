@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,12 +21,15 @@ import (
 	"github.com/gopherium/framework/pluginkit/wire"
 )
 
-// settingsWorld is what one scenario of the settings features declares, finds and works out.
+// settingsWorld is what one scenario of the settings features declares, finds, saves and works out.
 type settingsWorld struct {
 	rules    settings.Rules
 	declared map[string][]wire.Setting
 	found    map[string]string
+	saved    map[string]string
+	schema   settings.Schema
 	values   settings.Values
+	rejected []settings.RejectedSavedValue
 	err      error
 }
 
@@ -137,16 +142,26 @@ func columnsOf(table *godog.Table) map[string]int {
 	return columns
 }
 
-// settingOf reads the cells of one row of a settings table under columns.
+// settingOf reads the cells of one row of a settings table under columns, the label and help only under their headings.
 func settingOf(cells []string, columns map[string]int) (wire.Setting, error) {
 	cell := func(name string) string { return cells[columns[name]] }
 	low, lowErr := boundOf(cell("min"))
 	high, highErr := boundOf(cell("max"))
 	setting := wire.Setting{
 		Key: cell("key"), Type: cell("type"), Default: cell("default"),
+		Label: optionalCell(cells, columns, "label"), Help: optionalCell(cells, columns, "help"),
 		Min: low, Max: high, Options: optionsOf(cell("options")),
 	}
 	return setting, errors.Join(lowErr, highErr)
+}
+
+// optionalCell returns the cell under the heading name, empty when the table has no such heading.
+func optionalCell(cells []string, columns map[string]int, name string) string {
+	i, ok := columns[name]
+	if !ok {
+		return ""
+	}
+	return cells[i]
 }
 
 // namesUnder sets the prefix of every variable.
@@ -200,6 +215,11 @@ func (w *settingsWorld) holds(value, variable string) {
 	w.found[variable] = value
 }
 
+// savedAs puts value among the values an administrator saved, under key.
+func (w *settingsWorld) savedAs(key, value string) {
+	w.saved[key] = value
+}
+
 // declaredBy returns the settings plugin id declared, an error when the scenario declared none for it.
 func (w *settingsWorld) declaredBy(id string) ([]wire.Setting, error) {
 	declared, ok := w.declared[id]
@@ -232,14 +252,39 @@ func (w *settingsWorld) checked(id string) error {
 	return nil
 }
 
-// workedOut checks the settings of plugin id, then works them out from the environment and keeps what it answers.
+// workedOut checks the settings of plugin id, then works them out from the environment and the saved values.
 func (w *settingsWorld) workedOut(id string) error {
 	schema, err := w.schemaOf(id)
 	if err != nil {
 		return err
 	}
-	w.values, w.err = schema.Resolve(w.found)
+	w.schema = schema
+	w.values, w.rejected, w.err = schema.Resolve(settings.Sources{Env: w.found, Saved: w.saved})
 	return nil
+}
+
+// changed checks change against the settings of plugin id and the environment, and keeps its rejection.
+func (w *settingsWorld) changed(id string, change map[string]string) error {
+	schema, err := w.schemaOf(id)
+	if err != nil {
+		return err
+	}
+	w.err = schema.CheckChange(change, w.found)
+	return nil
+}
+
+// changes checks a change to plugin id that sets key to value.
+func (w *settingsWorld) changes(id, key, value string) error {
+	return w.changed(id, map[string]string{key: value})
+}
+
+// changesTable checks a change to plugin id that sets each key of table to the value beside it.
+func (w *settingsWorld) changesTable(id string, table *godog.Table) error {
+	change := make(map[string]string, len(table.Rows)-1)
+	for _, row := range table.Rows[1:] {
+		change[row.Cells[0].Value] = row.Cells[1].Value
+	}
+	return w.changed(id, change)
 }
 
 // variableOf returns the variable that sets key of plugin id.
@@ -306,19 +351,100 @@ func written(kind, text string) string {
 	return text
 }
 
-// reads fails unless the worked out key reads want.
-func (w *settingsWorld) reads(key, want string) error {
+// resolved fails when working out the settings was rejected.
+func (w *settingsWorld) resolved() error {
 	if w.err != nil {
 		return fmt.Errorf("the settings were rejected: %w", w.err)
 	}
+	return nil
+}
+
+// valueOf returns the worked out value of key, an error when the settings were rejected or hold no key.
+func (w *settingsWorld) valueOf(key string) (settings.Value, error) {
+	if err := w.resolved(); err != nil {
+		return settings.Value{}, err
+	}
 	value, ok := w.values[key]
 	if !ok {
-		return fmt.Errorf("no setting %q was worked out", key)
+		return settings.Value{}, fmt.Errorf("no setting %q was worked out", key)
+	}
+	return value, nil
+}
+
+// reads fails unless the worked out key reads want.
+func (w *settingsWorld) reads(key, want string) error {
+	value, err := w.valueOf(key)
+	if err != nil {
+		return err
 	}
 	if got := reading(value); got != written(value.Type, want) {
 		return fmt.Errorf("%s reads %q, want %q", key, got, want)
 	}
 	return nil
+}
+
+// sourceIs fails unless the worked out key came from source.
+func (w *settingsWorld) sourceIs(key, source string) error {
+	value, err := w.valueOf(key)
+	if err != nil {
+		return err
+	}
+	if value.Source != source {
+		return fmt.Errorf("%s came from %q, want %q", key, value.Source, source)
+	}
+	return nil
+}
+
+// notWorkedOut fails unless the settings were worked out with no setting under key.
+func (w *settingsWorld) notWorkedOut(key string) error {
+	if err := w.resolved(); err != nil {
+		return err
+	}
+	if _, ok := w.values[key]; ok {
+		return fmt.Errorf("a setting %q was worked out", key)
+	}
+	return nil
+}
+
+// noneRejected fails unless the settings were worked out with no saved value reported as rejected.
+func (w *settingsWorld) noneRejected() error {
+	if err := w.resolved(); err != nil {
+		return err
+	}
+	if len(w.rejected) != 0 {
+		return fmt.Errorf("%d saved values were reported as rejected, the first %q", len(w.rejected), w.rejected[0].Key)
+	}
+	return nil
+}
+
+// onlyRejected fails unless key is the one saved value reported as rejected, with a value error of reason.
+func (w *settingsWorld) onlyRejected(key, reason string) error {
+	if err := w.resolved(); err != nil {
+		return err
+	}
+	if len(w.rejected) != 1 {
+		return fmt.Errorf("%d saved values were reported as rejected, want 1", len(w.rejected))
+	}
+	report := w.rejected[0]
+	var rejection *settings.ValueError
+	if !errors.As(report.Err, &rejection) {
+		return fmt.Errorf("the saved value %q was reported with %v, want a value error", report.Key, report.Err)
+	}
+	if report.Key != key || rejection.Reason != reason {
+		return fmt.Errorf("the saved value %q was reported as rejected with %q, want %q with %q",
+			report.Key, rejection.Reason, key, reason)
+	}
+	return nil
+}
+
+// rejectedLacks fails when any print, log or encoding of a saved value reported as rejected or its error holds text.
+func (w *settingsWorld) rejectedLacks(text string) error {
+	for _, report := range w.rejected {
+		if err := nowhereIn("the error of "+report.Key, report.Err, text); err != nil {
+			return err
+		}
+	}
+	return nowhereIn("the saved values reported as rejected", w.rejected, text)
 }
 
 // readsTable fails unless the worked out settings are those of table, each reading the value beside it.
@@ -353,15 +479,12 @@ func (w *settingsWorld) passed() error {
 	return nil
 }
 
-// reasonLacks fails unless the last rejection is there and does not hold text.
+// reasonLacks fails unless the last rejection is there and no print, log or encoding of it holds text.
 func (w *settingsWorld) reasonLacks(text string) error {
 	if w.err == nil {
 		return errors.New("nothing was rejected")
 	}
-	if strings.Contains(w.err.Error(), text) {
-		return fmt.Errorf("the reason %q holds %q", w.err, text)
-	}
-	return nil
+	return nowhereIn("the reason", w.err, text)
 }
 
 // revealed fails unless the secret key reveals want.
@@ -428,16 +551,192 @@ func (w *settingsWorld) showsAs(want, key string) error {
 	return nil
 }
 
-// nowhere fails when any print, log or encoding of the worked out settings holds text.
-func (w *settingsWorld) nowhere(text string) error {
+// nowhereIn fails when any print, log or encoding of value, named what, holds text.
+func nowhereIn(what string, value any, text string) error {
 	all := map[string]func(any) string{"%#v": printer("%#v")}
 	for name, render := range renderers {
 		all[name] = render
 	}
 	for name, render := range all {
-		if out := render(w.values); strings.Contains(out, text) {
-			return fmt.Errorf("%s of the settings holds %q: %s", name, text, out)
+		if out := render(value); strings.Contains(out, text) {
+			return fmt.Errorf("%s of %s holds %q: %s", name, what, text, out)
 		}
+	}
+	return nil
+}
+
+// nowhere fails when any print, log or encoding of the worked out settings holds text.
+func (w *settingsWorld) nowhere(text string) error {
+	return nowhereIn("the settings", w.values, text)
+}
+
+// formFieldOf returns the form field of key, described from the worked out settings.
+func (w *settingsWorld) formFieldOf(key string) (settings.FormField, error) {
+	if err := w.resolved(); err != nil {
+		return settings.FormField{}, err
+	}
+	for _, field := range w.schema.FormFields(w.values) {
+		if field.Key == key {
+			return field, nil
+		}
+	}
+	return settings.FormField{}, fmt.Errorf("the form shows no field %q", key)
+}
+
+// formLocked fails unless the form shows key locked by variable.
+func (w *settingsWorld) formLocked(key, variable string) error {
+	field, err := w.formFieldOf(key)
+	if err != nil {
+		return err
+	}
+	if !field.Locked || field.Env != variable {
+		return fmt.Errorf("the form shows %s locked %t by %s, want locked by %s", key, field.Locked, field.Env, variable)
+	}
+	return nil
+}
+
+// formValue fails unless the form shows key with the value want.
+func (w *settingsWorld) formValue(key, want string) error {
+	field, err := w.formFieldOf(key)
+	if err != nil {
+		return err
+	}
+	if field.Value == nil {
+		return fmt.Errorf("the form shows %s with no value, want %q", key, want)
+	}
+	if *field.Value != want {
+		return fmt.Errorf("the form shows %s with the value %q, want %q", key, *field.Value, want)
+	}
+	return nil
+}
+
+// formNotSet fails unless the form shows the secret key as not set, with no value.
+func (w *settingsWorld) formNotSet(key string) error {
+	field, err := w.formFieldOf(key)
+	if err != nil {
+		return err
+	}
+	if field.Set == nil || *field.Set {
+		return fmt.Errorf("the form shows %s with set %s, want false", key, encoding(field.Set))
+	}
+	if field.Value != nil {
+		return fmt.Errorf("the form shows the secret %s with a value", key)
+	}
+	return nil
+}
+
+// formEncodes fails unless the form fields encode as the JSON of want, the order of keys aside.
+func (w *settingsWorld) formEncodes(want *godog.DocString) error {
+	if err := w.resolved(); err != nil {
+		return err
+	}
+	data, err := json.Marshal(w.schema.FormFields(w.values))
+	if err != nil {
+		return err
+	}
+	var got, wanted any
+	if err := errors.Join(json.Unmarshal(data, &got), json.Unmarshal([]byte(want.Content), &wanted)); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(got, wanted) {
+		return fmt.Errorf("the form fields encode as %s, want %s", data, want.Content)
+	}
+	return nil
+}
+
+// formLacks fails when any print, log or encoding of the form fields holds text.
+func (w *settingsWorld) formLacks(text string) error {
+	if err := w.resolved(); err != nil {
+		return err
+	}
+	return nowhereIn("the form fields", w.schema.FormFields(w.values), text)
+}
+
+// changeError returns the rejection of the last change as a change error, an error when it holds none.
+func (w *settingsWorld) changeError() (*settings.ChangeError, error) {
+	var problem *settings.ChangeError
+	if !errors.As(w.err, &problem) {
+		return nil, fmt.Errorf("the change was not rejected as a change error: %v", w.err)
+	}
+	return problem, nil
+}
+
+// changeAccepted fails unless the last change was accepted.
+func (w *settingsWorld) changeAccepted() error {
+	if w.err != nil {
+		return fmt.Errorf("the change was rejected: %w", w.err)
+	}
+	return nil
+}
+
+// rejectedAs returns the rejection of the last change, an error unless it is of kind for key.
+func (w *settingsWorld) rejectedAs(kind, key string) (*settings.ChangeError, error) {
+	problem, err := w.changeError()
+	if err != nil {
+		return nil, err
+	}
+	if problem.Kind != kind || problem.Key != key {
+		return nil, fmt.Errorf("the change was rejected as %q for %q, want %q for %q", problem.Kind, problem.Key, kind, key)
+	}
+	return problem, nil
+}
+
+// changeRejected fails unless the last change was rejected as kind for key.
+func (w *settingsWorld) changeRejected(kind, key string) error {
+	_, err := w.rejectedAs(kind, key)
+	return err
+}
+
+// changeRejectedWith fails unless the last change was rejected as kind for key with reason.
+func (w *settingsWorld) changeRejectedWith(kind, key, reason string) error {
+	problem, err := w.rejectedAs(kind, key)
+	if err != nil {
+		return err
+	}
+	if problem.Reason != reason {
+		return fmt.Errorf("the change to %s was rejected with the reason %q, want %q", key, problem.Reason, reason)
+	}
+	return nil
+}
+
+// namesVariable fails unless the rejection of the last change names variable.
+func (w *settingsWorld) namesVariable(variable string) error {
+	problem, err := w.changeError()
+	if err != nil {
+		return err
+	}
+	if problem.Env != variable {
+		return fmt.Errorf("the rejection names the variable %q, want %q", problem.Env, variable)
+	}
+	return nil
+}
+
+// givesOnly fails unless the rejection of the last change gives the bound which at limit, and no other bound or option.
+func (w *settingsWorld) givesOnly(which string, limit int) error {
+	problem, err := w.changeError()
+	if err != nil {
+		return err
+	}
+	want := settings.ChangeError{Max: &limit}
+	if which == "min" {
+		want = settings.ChangeError{Min: &limit}
+	}
+	got := settings.ChangeError{Min: problem.Min, Max: problem.Max, Options: problem.Options}
+	if !reflect.DeepEqual(got, want) {
+		return fmt.Errorf("the rejection gives the min %s, the max %s and the options %q, want only the %s %d",
+			encoding(problem.Min), encoding(problem.Max), problem.Options, which, limit)
+	}
+	return nil
+}
+
+// givesOptions fails unless the rejection of the last change gives the options of the comma list.
+func (w *settingsWorld) givesOptions(list string) error {
+	problem, err := w.changeError()
+	if err != nil {
+		return err
+	}
+	if want := optionsOf(list); !slices.Equal(problem.Options, want) {
+		return fmt.Errorf("the rejection gives the options %q, want %q", problem.Options, want)
 	}
 	return nil
 }
@@ -450,12 +749,15 @@ func givenSettings(sc *godog.ScenarioContext, w *settingsWorld) {
 	sc.Step(`^the plugin "([^"]*)" declares no settings$`, w.declaresNone)
 	sc.Step(`^the plugin "([^"]*)" declares (a .+|the text setting .+)$`, w.declares)
 	sc.Step(`^the environment holds "([^"]*)" in "([^"]*)"$`, w.holds)
+	sc.Step(`^"([^"]*)" is saved as "([^"]*)"$`, w.savedAs)
 }
 
-// whenSettings binds the steps that check and work out the settings.
+// whenSettings binds the steps that check and work out the settings and check a change to them.
 func whenSettings(sc *godog.ScenarioContext, w *settingsWorld) {
 	sc.Step(`^the settings of "([^"]*)" are checked$`, w.checked)
 	sc.Step(`^the settings of "([^"]*)" are worked out$`, w.workedOut)
+	sc.Step(`^a change to "([^"]*)" sets "([^"]*)" to "([^"]*)"$`, w.changes)
+	sc.Step(`^a change to "([^"]*)" sets these settings:$`, w.changesTable)
 }
 
 // thenSettings binds the steps that check what the settings read and why they were rejected.
@@ -473,12 +775,43 @@ func thenSettings(sc *godog.ScenarioContext, w *settingsWorld) {
 	sc.Step(`^no print, log or encoding of the settings holds "([^"]*)"$`, w.nowhere)
 }
 
+// thenSaved binds the steps that check where each value came from and which saved values were reported.
+func thenSaved(sc *godog.ScenarioContext, w *settingsWorld) {
+	sc.Step(`^the source of "([^"]*)" is "([^"]*)"$`, w.sourceIs)
+	sc.Step(`^no setting "([^"]*)" is worked out$`, w.notWorkedOut)
+	sc.Step(`^no saved value is reported as rejected$`, w.noneRejected)
+	sc.Step(`^the only saved value reported as rejected is "([^"]*)", with the reason "([^"]*)"$`, w.onlyRejected)
+	sc.Step(`^no saved value reported as rejected holds "([^"]*)"$`, w.rejectedLacks)
+}
+
+// thenForm binds the steps that check how each field is described for a settings form.
+func thenForm(sc *godog.ScenarioContext, w *settingsWorld) {
+	sc.Step(`^the form shows "([^"]*)" locked by "([^"]*)"$`, w.formLocked)
+	sc.Step(`^the form shows "([^"]*)" with the value "([^"]*)"$`, w.formValue)
+	sc.Step(`^the form shows "([^"]*)" as not set$`, w.formNotSet)
+	sc.Step(`^the form fields encode as:$`, w.formEncodes)
+	sc.Step(`^no encoding of the form fields holds "([^"]*)"$`, w.formLacks)
+}
+
+// thenChange binds the steps that check whether a change was accepted and why it was rejected.
+func thenChange(sc *godog.ScenarioContext, w *settingsWorld) {
+	sc.Step(`^the change is accepted$`, w.changeAccepted)
+	sc.Step(`^the change is rejected as "([^"]*)" for "([^"]*)"$`, w.changeRejected)
+	sc.Step(`^the change is rejected as "([^"]*)" for "([^"]*)" with the reason "([^"]*)"$`, w.changeRejectedWith)
+	sc.Step(`^the rejection names the variable "([^"]*)"$`, w.namesVariable)
+	sc.Step(`^the rejection gives only the (min|max) (-?\d+)$`, w.givesOnly)
+	sc.Step(`^the rejection gives the options "([^"]*)"$`, w.givesOptions)
+}
+
 // initializeSettings gives each scenario of the settings features a world of its own and its steps.
 func initializeSettings() func(*godog.ScenarioContext) {
 	return func(sc *godog.ScenarioContext) {
-		w := &settingsWorld{declared: map[string][]wire.Setting{}, found: map[string]string{}}
+		w := &settingsWorld{declared: map[string][]wire.Setting{}, found: map[string]string{}, saved: map[string]string{}}
 		givenSettings(sc, w)
 		whenSettings(sc, w)
 		thenSettings(sc, w)
+		thenSaved(sc, w)
+		thenForm(sc, w)
+		thenChange(sc, w)
 	}
 }
