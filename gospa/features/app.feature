@@ -12,7 +12,6 @@ Feature: Serving a built single-page app
   Background:
     Given a built app that holds "index.html", "favicon.svg", "images/logo.png" and "assets/index-DWLUpakq.js"
 
-  @wip
   Scenario Outline: Every path that names no file gets the page
     When a browser asks for "<path>"
     Then the answer is the page
@@ -25,13 +24,12 @@ Feature: Serving a built single-page app
       | /images             |
       | /images/            |
       | /images/missing.png |
+      | /assets-old/app.js  |
 
-  @wip
   Scenario: A file the build wrote is sent as itself
     When a browser asks for "/images/logo.png"
     Then the answer is the file "images/logo.png" with the type "image/png"
 
-  @wip
   Scenario Outline: A path under assets that names no file answers not found
     When a browser asks for "<path>"
     Then the answer is not found
@@ -43,7 +41,6 @@ Feature: Serving a built single-page app
       | /assets/                  |
       | /assets                   |
 
-  @wip
   Scenario: A page the build writes again is sent without a restart
     When a browser asks for "/posts/42"
     And the build writes "index.html" again as:
@@ -56,7 +53,6 @@ Feature: Serving a built single-page app
       <!doctype html><title>Rebuilt</title>
       """
 
-  @wip
   Scenario: The app is not set up when its build holds no page
     Given the build holds no "index.html"
     When the app is set up

@@ -20,7 +20,6 @@ Feature: Server values in the page of a built app
       </html>
       """
 
-  @wip
   Scenario: Each value is written as a meta element where the head opens
     Given the app carries the value "api-root" set to "/api/"
     And the app carries the value "write-timeout" set to "30"
@@ -36,7 +35,6 @@ Feature: Server values in the page of a built app
       </html>
       """
 
-  @wip
   Scenario: A value that holds markup is escaped
     Given the app carries the value "notice" set to:
       """
@@ -48,7 +46,6 @@ Feature: Server values in the page of a built app
       <meta name="notice" content="say &#34;hi&#34; &amp; &lt;b&gt;bye&lt;/b&gt;">
       """
 
-  @wip
   Scenario: A page with no head tag gets the values where its head would start
     Given the build writes "index.html" again as:
       """
@@ -61,7 +58,6 @@ Feature: Server values in the page of a built app
       <!doctype html><meta name="api-root" content="/api/"><title>App</title><div id="root"></div>
       """
 
-  @wip
   Scenario: Asking for index.html by name gets the page with its values
     Given the app carries the value "api-root" set to "/api/"
     When a browser asks for "/index.html"
@@ -71,7 +67,6 @@ Feature: Server values in the page of a built app
       <meta name="api-root" content="/api/">
       """
 
-  @wip
   Scenario: A browser that kept the page from before a change of values gets the new page
     Given the app carries the value "write-timeout" set to "30"
     When a browser asks for "/"
@@ -83,7 +78,6 @@ Feature: Server values in the page of a built app
       <meta name="write-timeout" content="60">
       """
 
-  @wip
   Scenario: Without values the page is sent as the build wrote it
     When a browser asks for "/"
     Then the answer reads:
@@ -97,7 +91,6 @@ Feature: Server values in the page of a built app
       </html>
       """
 
-  @wip
   Scenario: No other HTML file carries the values
     Given the build writes "help.html" as:
       """

@@ -18,7 +18,7 @@ func TestFeatures(t *testing.T) {
 		tags = ""
 	}
 	suite := godog.TestSuite{
-		ScenarioInitializer: func(*godog.ScenarioContext) {},
+		ScenarioInitializer: initializeScenario,
 		Options: &godog.Options{
 			Format:   "pretty",
 			Paths:    []string{"."},
