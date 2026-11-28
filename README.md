@@ -31,6 +31,8 @@ need and ignore the rest.
   commands and their records on a program's PostgreSQL database.
 - [`gonsole/auth/sqlite`](gonsole/auth/sqlite/) runs those account
   commands and their records on a program's one SQLite handle.
+- [GoSPA](gospa/) serves a built single-page app and the files of a
+  public folder.
 - [`gottext`](gottext/) reads, writes and syncs gettext catalogs for
   TypeScript applications, published to npm as `@gopherium/gottext`.
 - [`mailkit`](mailkit/) renders mail from template files and sends it
